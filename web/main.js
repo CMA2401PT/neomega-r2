@@ -2,7 +2,6 @@
 import { createRenderer } from "./render/renderer.js";
 import { ObjectRegistry } from "./objects/registry.js";
 import { enchantingBook } from "./effects/enchanting-book.js";
-import { attachGridObjects } from "./scene/grid-objects.js";
 const canvas = document.querySelector("#view"),
   renderer = await createRenderer(canvas, { assets: "/assets/" }),
   params = new URLSearchParams(location.search),
@@ -70,7 +69,7 @@ async function loadScene(name) {
     fetch("/api/cells?name=" + name).then((r) => r.arrayBuffer()),
   ]);
   scene = value;
-  let cells = new Uint32Array(buffer);
+  const cells = new Uint32Array(buffer);
   if (name === "special") {
     await renderer.objects.setRegion(
       "special",
@@ -80,13 +79,6 @@ async function loadScene(name) {
       ],
       registry,
     );
-    const attached = attachGridObjects(
-      scene.grid,
-      cells,
-      renderer.objects.references(),
-    );
-    scene.grid = attached.grid;
-    cells = attached.cells;
   }
   renderer.setGrid(scene, cells);
   setCamera(scene.camera, scene.target);
@@ -153,7 +145,7 @@ function render(now) {
   if (now - statusAt > 300) {
     const times = renderer.times.sort((a, b) => a - b),
       median = times[Math.floor(times.length / 2)];
-    status.textContent = `${width}×${height} 实际像素 · GPU ${median?.toFixed(2) || "…"} ms\n${scene.nonAir} 个非空气格 · ${scene.fragmentReferences} 个预裁片引用\nGPU 纹理 ${(renderer.textureBytes / 1024 ** 2).toFixed(1)} MiB\n位置 ${camera.position.map((v) => v.toFixed(1)).join(", ")}`;
+    status.textContent = `${width}×${height} 实际像素 · GPU ${median?.toFixed(2) || "…"} ms\n${scene.nonAir} 个非空气格 · ${scene.fragmentReferences} 个跨格片段引用\nGPU 纹理 ${(renderer.textureBytes / 1024 ** 2).toFixed(1)} MiB\n位置 ${camera.position.map((v) => v.toFixed(1)).join(", ")}`;
     statusAt = now;
   }
 }

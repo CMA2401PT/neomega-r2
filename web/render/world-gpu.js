@@ -1,6 +1,7 @@
 import { WordAllocator } from "./allocator.js";
 const MIXED = 0xffffffff,
-  SIZE = [128, 32, 128],
+  // 目录覆盖 256×32×256 个 section，即 4096×512×4096 方块，可容纳半径 96 区块的窗口与对齐余量。
+  SIZE = [256, 32, 256],
   mod = (v, n) => ((v % n) + n) % n;
 
 /** 世界目录使用循环坐标，移动窗口只更新边界区域，不搬动已有格子数据。 */
@@ -11,8 +12,10 @@ export class WorldGPU {
     this.origin = [0, -64, 0];
     this.size = [1536, 512, 1536];
     this.regions = new Map();
+    // 每次目录或窗口变化加一，宿主据此判断静止画面是否需要重画。
+    this.version = 0;
     this.allocator = new WordAllocator(capacityWords);
-    this.sections = new Uint32Array(128 * 32 * 128 * 4);
+    this.sections = new Uint32Array(SIZE[0] * SIZE[1] * SIZE[2] * 4);
     this.levels = [];
     let size = [...SIZE];
     while (true) {
@@ -60,6 +63,7 @@ export class WorldGPU {
   setWindow(origin, size) {
     this.origin = [...origin];
     this.size = [...size];
+    this.version++;
   }
   bind() {
     const { gl, uniforms: u } = this;
@@ -74,11 +78,10 @@ export class WorldGPU {
     }
     gl.uniform3fv(u.get("uSize"), this.size);
     gl.uniform3iv(u.get("uDirectoryOffset"), [
-      mod(this.origin[0], 2048),
+      mod(this.origin[0], SIZE[0] * 16),
       0,
-      mod(this.origin[2], 2048),
+      mod(this.origin[2], SIZE[2] * 16),
     ]);
-    gl.uniform1i(u.get("uTop"), 7);
   }
   /** 同一帧内先上传新地址，再发布目录，最后释放旧地址，避免看到一半的新区域。 */
   /** @param {import("../contracts.js").PreparedRegion} region */
@@ -125,6 +128,7 @@ export class WorldGPU {
       z: region.z,
     });
     if (old) this.allocator.release(old.block);
+    this.version++;
   }
   remove(key) {
     const region = this.regions.get(key);
@@ -134,37 +138,36 @@ export class WorldGPU {
         x: region.x,
         z: region.z,
         headers: new Uint32Array(),
-        coarse: new Uint32Array(),
       },
       0,
     );
     this.regions.delete(key);
     this.allocator.release(region.block);
+    this.version++;
   }
   writeRegion(region, base) {
-    const x = mod(region.x * 8, 128),
-      z = mod(region.z * 8, 128),
+    const x = mod(region.x * 8, SIZE[0]),
+      z = mod(region.z * 8, SIZE[2]),
       info = new Uint32Array(8 * 32 * 8 * 4),
       tags = new Uint32Array(8 * 32 * 8);
-    // headers 按 [区内 section 编号, 压缩字地址, 调色板地址, 位宽, 层次地址] 排列。
-    for (let i = 0; i < region.headers.length; i += 5) {
-      const index = region.headers[i];
+    // 目录项为 [附加块地址, 压缩字地址 | 位宽 << 27, 小块掩码低位, 高位]；均匀 section 为 [0, 编号, 0, 0]。
+    // 射线进入 section 时只读这一项，就能判断空小块并找到调色板。
+    for (let i = 0; i < region.headers.length; i += 7) {
+      const h = region.headers,
+        index = h[i];
       info.set(
-        [
-          region.headers[i + 1] + base,
-          region.headers[i + 2] + base,
-          region.headers[i + 3],
-          region.headers[i + 4] ? region.headers[i + 4] + base : 0,
-        ],
+        h[i + 1]
+          ? [h[i + 1] + base, ((h[i + 2] + base) | (h[i + 3] << 27)) >>> 0, h[i + 4], h[i + 5]]
+          : [0, h[i + 6], 0, 0],
         index * 4,
       );
-      tags[index] = region.coarse[i / 5];
+      tags[index] = h[i + 6];
     }
     for (let dz = 0; dz < 8; dz++)
       for (let y = 0; y < 32; y++)
         for (let dx = 0; dx < 8; dx++) {
           const source = dx + 8 * (y + 32 * dz),
-            target = x + dx + 128 * (y + 32 * (z + dz));
+            target = x + dx + SIZE[0] * (y + SIZE[1] * (z + dz));
           this.sections.set(
             info.subarray(source * 4, source * 4 + 4),
             target * 4,

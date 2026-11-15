@@ -1,5 +1,28 @@
 import { WorldGPU } from "./world-gpu.js";
 import { ObjectStore } from "../objects/store.js";
+import { prepareRegion } from "../scene/prepare.js";
+import { gridRegions } from "../scene/grid.js";
+
+// 垂直视场 65° 时，距离 1 处画面的高度。
+const SPAN = 2 * Math.tan((65 * Math.PI) / 360);
+/** 相机朝向的三条轴；绘制与可见性判断共用。
+ * @param {{yaw:number,pitch:number}} camera
+ */
+function basis({ yaw, pitch }) {
+  return {
+    forward: [
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      -Math.cos(yaw) * Math.cos(pitch),
+    ],
+    right: [Math.cos(yaw), 0, Math.sin(yaw)],
+    up: [
+      -Math.sin(yaw) * Math.sin(pitch),
+      Math.cos(pitch),
+      Math.cos(yaw) * Math.sin(pitch),
+    ],
+  };
+}
 
 /** 创建射线绘制器；宿主负责相机、帧循环和数据来源，绘制器不读取 UI。
  * @param {HTMLCanvasElement} canvas
@@ -40,15 +63,13 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   gl.bindVertexArray(vao);
   const uniforms = new Map();
   for (const name of [
-    "uCells",
     "uTree",
     "uModels",
-    "uParts",
-    "uTriangles",
-    "uTriangleIDs",
+    "uQuadRecords",
+    "uQuadReferences",
     "uFast",
     "uAtlas",
-    "uMips",
+    "uSurfaces",
     "uSize",
     "uCamera",
     "uRight",
@@ -56,11 +77,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uForward",
     "uViewport",
     "uSpan",
-    "uTop",
     "uDebug",
     "uHierarchy",
     "uFragments",
-    "uWorld",
     "uWorldData",
     "uSections",
     "uSamples",
@@ -70,13 +89,20 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uObjectsEnabled",
   ])
     uniforms.set(name, gl.getUniformLocation(program, name));
-  const [headerBuffer, fastBuffer, triangleBuffer, referenceBuffer, catalog] =
-    await Promise.all(
+  const [
+    headerBuffer,
+    fastBuffer,
+    recordBuffer,
+    referenceBuffer,
+    layerBuffer,
+    catalog,
+  ] = await Promise.all(
       [
         "headers.bin",
         "fast.bin",
-        "triangles.bin",
-        "triangle-ids.bin",
+        "quad-records.bin",
+        "quad-references.bin",
+        "surface-layers.bin",
         "catalog.json",
       ].map((name) =>
         fetch(assets + name).then((r) =>
@@ -132,12 +158,17 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     return { texture, bytes: data.byteLength };
   }
   textures.push(
-    tableTexture(8, "uTriangleIDs", new Uint32Array(referenceBuffer), 1, true)
-      .texture,
+    tableTexture(
+      8,
+      "uQuadReferences",
+      new Uint32Array(referenceBuffer),
+      4,
+      true,
+    ).texture,
   );
   textures.push(tableTexture(2, "uModels", headers, 4, true).texture);
   textures.push(
-    tableTexture(3, "uTriangles", new Float32Array(triangleBuffer), 4, false)
+    tableTexture(3, "uQuadRecords", new Float32Array(recordBuffer), 4, false)
       .texture,
   );
   textures.push(
@@ -170,148 +201,107 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform1i(uniforms.get(name), unit);
     allocated += image.width * image.height * 4;
   }
-  await Promise.all([
-    imageTexture(5, "uAtlas", assets + "atlas.png", false),
-    imageTexture(6, "uMips", assets + "surfaces.png", true),
-  ]);
-  /** 层次只合并空气及相同完整立方体；复杂模型和附加裁片必须下钻到格子。
-   * @param {number[]} size
-   * @param {Uint32Array} cells
+  /** 完整方块的面贴图：16×16 纹理数组，带预先生成的 mip，按线性预乘 alpha 存放。
+   * 着色器给出解析梯度，由硬件完成三线性与各向异性过滤。
+   * @param {number} unit @param {ArrayBuffer} buffer @param {number} layers
    */
-  function makeHierarchy(size, cells, occupied) {
-    const first = new Uint32Array(cells.length / 2);
-    for (let i = 0; i < first.length; i++) {
-      const id = cells[i * 2];
-      first[i] =
-        !occupied?.[i] &&
-        cells[i * 2 + 1] === 0 &&
-        (id === 0 || headers[id * 4] === 1)
-          ? id
-          : 0xffffffff;
+  function surfaceTexture(unit, buffer, layers) {
+    const data = new Uint8Array(buffer),
+      levels = 5,
+      texture = gl.createTexture();
+    textures.push(texture);
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.SRGB8_ALPHA8, 16, 16, layers);
+    let offset = 0;
+    for (let level = 0; level < levels; level++) {
+      const size = 16 >> level,
+        length = size * size * 4 * layers;
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        level,
+        0,
+        0,
+        0,
+        size,
+        size,
+        layers,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        data.subarray(offset, offset + length),
+      );
+      offset += length;
     }
-    const levels = [{ size: [...size], data: first }];
-    while (size.some((v) => v > 1)) {
-      const previous = levels.at(-1),
-        next = size.map((v) => Math.max(1, v / 2)),
-        data = new Uint32Array(next[0] * next[1] * next[2]);
-      for (let z = 0; z < next[2]; z++)
-        for (let y = 0; y < next[1]; y++)
-          for (let x = 0; x < next[0]; x++) {
-            let value =
-              previous.data[x * 2 + size[0] * (y * 2 + size[1] * z * 2)];
-            for (let dz = 0; dz < Math.min(2, size[2]); dz++)
-              for (let dy = 0; dy < Math.min(2, size[1]); dy++)
-                for (let dx = 0; dx < Math.min(2, size[0]); dx++) {
-                  if (
-                    previous.data[
-                      x * 2 +
-                        dx +
-                        size[0] * (y * 2 + dy + size[1] * (z * 2 + dz))
-                    ] !== value
-                  )
-                    value = 0xffffffff;
-                }
-            data[x + next[0] * (y + next[1] * z)] = value;
-          }
-      levels.push({ size: next, data });
-      size = next;
-    }
-    return levels;
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    // 放大时保持像素风格的硬边。
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    const anisotropic = gl.getExtension("EXT_texture_filter_anisotropic");
+    if (anisotropic)
+      gl.texParameterf(
+        gl.TEXTURE_2D_ARRAY,
+        anisotropic.TEXTURE_MAX_ANISOTROPY_EXT,
+        Math.min(8, gl.getParameter(anisotropic.MAX_TEXTURE_MAX_ANISOTROPY_EXT)),
+      );
+    gl.uniform1i(uniforms.get("uSurfaces"), unit);
+    allocated += data.byteLength;
   }
+  surfaceTexture(6, layerBuffer, catalog.statistics.surfaceLayers);
+  await imageTexture(5, "uAtlas", assets + "atlas.png", false);
   let objects = new ObjectStore(gl, uniforms),
     staticBytes = allocated;
   const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2"),
     queries = [],
     times = [];
   let world = null,
-    gridTextures = [],
-    origin = [0, 0, 0];
+    origin = [0, 0, 0],
+    // 世界或对象仓库被整体替换时加一，与它们各自的版本一起组成场景版本。
+    generation = 0;
   function resetTiming() {
     for (const q of queries) gl.deleteQuery(q);
     queries.length = 0;
     times.length = 0;
   }
-  // 所有采样器有独立纹理单元，即使当前模式没有访问它们。
-  for (const [name, unit] of [
-    ["uCells", 0],
-    ["uParts", 7],
-    ["uSections", 10],
-    ["uWorldData", 11],
-  ])
-    gl.uniform1i(uniforms.get(name), unit);
-  function setGrid(scene, cells, occupied) {
+  // 准备器需要知道片段最远伸出多少格，才能收集相邻来源。
+  const preparation = {
+    ...catalog,
+    fragmentReach: Math.max(
+      0,
+      ...catalog.models.flatMap((m) =>
+        (m.fragments || []).flatMap((p) => p.offset.map(Math.abs)),
+      ),
+    ),
+  };
+  /** 验证页的固定场景：转换为来源区域后与存档走同一路径，已登记的特殊对象一并准备。
+   * @param {{grid:{size:number[]}}} scene
+   * @param {Uint32Array} cells
+   */
+  function setGrid(scene, cells) {
     world?.dispose();
-    world = null;
-    for (const texture of gridTextures) gl.deleteTexture(texture);
-    gridTextures = [];
-    origin = [0, 0, 0];
     allocated = staticBytes;
     const size = scene.grid.size,
-      cellTexture = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_3D, cellTexture);
-    gl.texImage3D(
-      gl.TEXTURE_3D,
-      0,
-      gl.RG32UI,
-      ...size,
-      0,
-      gl.RG_INTEGER,
-      gl.UNSIGNED_INT,
-      cells,
-    );
-    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    allocated += cells.byteLength;
-    const levels = makeHierarchy(size, cells, occupied),
-      tree = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_3D, tree);
-    gl.texStorage3D(gl.TEXTURE_3D, levels.length, gl.R32UI, ...size);
-    for (let i = 0; i < levels.length; i++) {
-      const l = levels[i];
-      gl.texSubImage3D(
-        gl.TEXTURE_3D,
-        i,
-        0,
-        0,
-        0,
-        ...l.size,
-        gl.RED_INTEGER,
-        gl.UNSIGNED_INT,
-        l.data,
+      align = (v) => Math.ceil(v / 128) * 128;
+    world = new WorldGPU(gl, uniforms, { capacityWords: 4 * 1024 * 1024 });
+    generation++;
+    world.setWindow([0, -64, 0], [align(size[0]), 512, align(size[2])]);
+    const regions = gridRegions(size, cells),
+      references = objects.references();
+    for (const key of regions.keys()) {
+      const [x, z] = key.split("/").map(Number);
+      world.install(
+        prepareRegion({ x, z, regions, catalog: preparation, objects: references }),
       );
-      allocated += l.data.byteLength;
     }
-    gl.texParameteri(
-      gl.TEXTURE_3D,
-      gl.TEXTURE_MIN_FILTER,
-      gl.NEAREST_MIPMAP_NEAREST,
-    );
-    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.uniform1i(uniforms.get("uTree"), 1);
-    const parts = tableTexture(
-      7,
-      "uParts",
-      new Uint32Array(scene.grid.parts),
-      1,
-      true,
-    );
-    gridTextures = [cellTexture, tree, parts.texture];
-    gl.uniform3fv(uniforms.get("uSize"), size);
-    gl.uniform1i(uniforms.get("uTop"), levels.length - 1);
-    gl.uniform1i(uniforms.get("uWorld"), 0);
     resetTiming();
   }
   function createWorld(options = {}) {
     objects.dispose();
     objects = new ObjectStore(gl, uniforms);
     world?.dispose();
-    for (const texture of gridTextures) gl.deleteTexture(texture);
-    gridTextures = [];
     allocated = staticBytes;
     world = new WorldGPU(gl, uniforms, options);
-    gl.uniform1i(uniforms.get("uWorld"), 1);
+    generation++;
     resetTiming();
     return world;
   }
@@ -344,24 +334,16 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       origin = world.origin;
       world.bind();
     }
-    const { yaw, pitch } = camera;
+    const { forward, right, up } = basis(camera);
     gl.uniform2f(uniforms.get("uViewport"), width, height);
     gl.uniform3fv(
       uniforms.get("uCamera"),
       camera.position.map((v, i) => v - origin[i]),
     );
-    gl.uniform3fv(uniforms.get("uForward"), [
-      Math.sin(yaw) * Math.cos(pitch),
-      Math.sin(pitch),
-      -Math.cos(yaw) * Math.cos(pitch),
-    ]);
-    gl.uniform3fv(uniforms.get("uRight"), [Math.cos(yaw), 0, Math.sin(yaw)]);
-    gl.uniform3fv(uniforms.get("uUp"), [
-      -Math.sin(yaw) * Math.sin(pitch),
-      Math.cos(pitch),
-      Math.cos(yaw) * Math.sin(pitch),
-    ]);
-    gl.uniform1f(uniforms.get("uSpan"), 2 * Math.tan((65 * Math.PI) / 360));
+    gl.uniform3fv(uniforms.get("uForward"), forward);
+    gl.uniform3fv(uniforms.get("uRight"), right);
+    gl.uniform3fv(uniforms.get("uUp"), up);
+    gl.uniform1f(uniforms.get("uSpan"), SPAN);
     gl.uniform1i(uniforms.get("uSamples"), samples);
     gl.uniform1i(uniforms.get("uDebug"), debug);
     gl.uniform1i(uniforms.get("uHierarchy"), Number(hierarchy));
@@ -391,10 +373,40 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     if (synchronize)
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
   }
+  /** 视野里是否有足够大的动画对象；没有时静止画面不必逐帧重画。
+   * 对象只按包围球与视锥比较，投影不足一个像素的忽略。
+   * @param {{position:number[],yaw:number,pitch:number}} camera
+   * @param {{width:number,height:number}} size
+   */
+  function animating(camera, { width, height }) {
+    if (objects.enabled === false) return false;
+    const { forward, right, up } = basis(camera),
+      dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+      halfHeight = SPAN / 2,
+      halfWidth = (halfHeight * width) / height;
+    return objects.references().some(({ bounds: [low, high] }) => {
+      const center = low.map((v, i) => (v + high[i]) / 2 - camera.position[i]),
+        radius = Math.hypot(...high.map((v, i) => v - low[i])) / 2,
+        depth = dot(center, forward);
+      if (depth < -radius) return false;
+      if (depth > radius && (2 * radius * height) / (depth * SPAN) < 1)
+        return false;
+      const reach = Math.max(depth, 0);
+      return (
+        Math.abs(dot(center, right)) <= reach * halfWidth + 2 * radius &&
+        Math.abs(dot(center, up)) <= reach * halfHeight + 2 * radius
+      );
+    });
+  }
   return {
     gl,
     uniforms,
     catalog,
+    animating,
+    /** 已发布数据的版本；版本与相机都不变时，上一帧画面仍然有效。 */
+    get version() {
+      return `${generation}/${world?.version ?? 0}/${objects.version}`;
+    },
     get objects() {
       return objects;
     },
@@ -405,9 +417,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     clear() {
       world?.dispose();
       world = null;
-      for (const texture of gridTextures) gl.deleteTexture(texture);
-      gridTextures = [];
       objects.clear();
+      generation++;
       allocated = staticBytes;
       resetTiming();
     },
@@ -433,8 +444,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     dispose() {
       world?.dispose();
       objects.dispose();
-      for (const texture of [...textures, ...gridTextures])
-        gl.deleteTexture(texture);
+      for (const texture of textures) gl.deleteTexture(texture);
       resetTiming();
       gl.deleteVertexArray(vao);
       gl.deleteProgram(program);

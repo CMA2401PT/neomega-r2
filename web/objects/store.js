@@ -15,6 +15,8 @@ export class ObjectStore {
     this.generations = new Uint32Array(SLOTS);
     this.data = new Float32Array(SLOTS * STRIDE);
     this.high = 0;
+    // 对象增删时加一；动画本身不改变它。
+    this.version = 0;
     this.table = gl.createTexture();
     gl.activeTexture(gl.TEXTURE12);
     gl.bindTexture(gl.TEXTURE_2D, this.table);
@@ -130,6 +132,7 @@ export class ObjectStore {
         }
       }
       this.objects.set(descriptor.key, { descriptor, recipe, image, slots });
+      this.version++;
     }
     for (const name of previous) if (!next.has(name)) this.remove(name);
     this.regions.set(key, next);
@@ -153,6 +156,7 @@ export class ObjectStore {
       this.images.delete(image.name);
     }
     this.objects.delete(name);
+    this.version++;
   }
   removeRegion(key) {
     const changed = (this.regions.get(key)?.size || 0) > 0;

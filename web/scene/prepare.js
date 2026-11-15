@@ -79,7 +79,38 @@ function replaceCells(section, indices) {
       words[Math.floor(i / per)] |= lookup.get(cells[i]) << ((i % per) * bits);
   return { ...section, palette: new Uint32Array(palette), words, bits };
 }
-/** 准备单个目标区域，同时收集相邻来源的预裁片；片段归属跟随来源，输出归属目标格。 */
+/** 把 section 分成 64 个 4×4×4 小块，供着色器用位运算跳过空格。
+ * 占用指非空气或带有附加片段；小块内全是同一完整立方体时记下其编号，射线可以整块穿过同一介质。
+ * 小块和格子都按 XZY 顺序编号：小块 ((x>>2)*4+(z>>2))*4+(y>>2)，块内 ((x&3)*4+(z&3))*4+(y&3)。
+ * @param {Uint32Array} cells
+ * @param {Map<number, number[]> | undefined} parts
+ */
+export function describeBricks(cells, parts, catalog) {
+  const cellMasks = new Uint32Array(128),
+    tags = new Uint32Array(64),
+    brickMask = [0, 0];
+  for (let b = 0; b < 64; b++) {
+    const bx = (b >> 4) * 4,
+      bz = ((b >> 2) & 3) * 4,
+      by = (b & 3) * 4;
+    let tag = -1;
+    for (let c = 0; c < 64; c++) {
+      const i = ((bx + (c >> 4)) << 8) | ((bz + ((c >> 2) & 3)) << 4) | (by + (c & 3)),
+        id = cells[i],
+        attached = parts?.has(i);
+      if (id !== 0 || attached) cellMasks[b * 2 + (c >> 5)] |= 1 << (c & 31);
+      const value = !attached && catalog.models[id].kind <= 1 ? id : MIXED;
+      tag = tag === -1 || tag === value ? value : MIXED;
+    }
+    tags[b] = tag;
+    if (tag !== 0) brickMask[b >> 5] |= 1 << (b & 31);
+  }
+  brickMask[0] >>>= 0;
+  brickMask[1] >>>= 0;
+  const uniform = tags.every((v) => v === tags[0]) ? tags[0] : MIXED;
+  return { cellMasks, tags, brickMask, uniform };
+}
+/** 准备单个目标区域，同时收集相邻来源伸入的片段；片段归属跟随来源，输出归属目标格。 */
 export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
   const started = performance.now(),
     source = regions.get(regionKey(x, z)),
@@ -158,7 +189,6 @@ export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
   }
   const pool = new Words(),
     headers = [],
-    coarse = [],
     stats = {
       sections: 0,
       fragmentReferences: 0,
@@ -168,61 +198,24 @@ export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
     const section = replacements.has(key)
         ? replaceCells(original, replacements.get(key))
         : original,
-      parts = fragments.get(key),
-      uniform = section.palette[0];
+      parts = fragments.get(key);
     stats.sections++;
     const position = section.position,
       index =
         position[0] -
         x * 8 +
         8 * (position[1] + 4 + 32 * (position[2] - z * 8));
-    if (
-      !parts &&
-      catalog.models[uniform].kind <= 1 &&
-      section.palette.every((id) => id === uniform)
-    ) {
-      headers.push(
-        index,
-        pool.append(section.words),
-        pool.append(section.palette),
-        section.bits,
-        0,
-      );
-      coarse.push(uniform);
+    const cells = unpack(section),
+      bricks = describeBricks(cells, parts, catalog);
+    if (bricks.uniform !== MIXED) {
+      headers.push(index, 0, 0, 0, 0, 0, bricks.uniform);
       continue;
     }
-    const cells = unpack(section),
-      tags = new Uint32Array(4096);
-    for (let i = 0; i < 4096; i++)
-      tags[i] =
-        catalog.models[cells[i]].kind <= 1 && !parts?.has(i) ? cells[i] : MIXED;
-    const hierarchy = new Uint32Array(586);
-    let previous = tags,
-      side = 16,
-      offset = 0;
-    while (side > 1) {
-      const nextSide = side / 2,
-        next = new Uint32Array(nextSide ** 3);
-      for (let x = 0; x < nextSide; x++)
-        for (let z = 0; z < nextSide; z++)
-          for (let y = 0; y < nextSide; y++) {
-            let value = previous[(x * 2 * side + z * 2) * side + y * 2];
-            for (let dx = 0; dx < 2; dx++)
-              for (let dz = 0; dz < 2; dz++)
-                for (let dy = 0; dy < 2; dy++)
-                  if (
-                    previous[
-                      ((x * 2 + dx) * side + z * 2 + dz) * side + y * 2 + dy
-                    ] !== value
-                  )
-                    value = MIXED;
-            next[(x * nextSide + z) * nextSide + y] = value;
-          }
-      hierarchy.set(next, offset);
-      offset += next.length;
-      previous = next;
-      side = nextSide;
-    }
+    // 附加块按 [格子掩码 128 字, 小块标签 64 字, 片段表地址, 调色板] 排列，着色器由附加块地址推出调色板地址。
+    const aux = pool.append(bricks.cellMasks);
+    pool.append(bricks.tags);
+    const partsAt = pool.append([0]);
+    pool.append(section.palette);
     if (parts) {
       const offsets = new Uint32Array(4096);
       for (const [cell, ids] of parts) {
@@ -231,19 +224,18 @@ export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
       }
       const at = pool.append(offsets);
       for (const cell of parts.keys()) pool.relocations.push(at + cell);
-      hierarchy[585] = at;
+      pool.data[partsAt] = at;
+      pool.relocations.push(partsAt);
     }
-    const tree =
-      hierarchy[584] !== MIXED && !parts ? 0 : pool.append(hierarchy);
-    if (parts) pool.relocations.push(tree + 585);
     headers.push(
       index,
+      aux,
       pool.append(section.words),
-      pool.append(section.palette),
       section.bits,
-      tree,
+      bricks.brickMask[0],
+      bricks.brickMask[1],
+      MIXED,
     );
-    coarse.push(hierarchy[584]);
   }
   return {
     key: regionKey(x, z),
@@ -251,7 +243,6 @@ export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
     z,
     words: pool.data.slice(0, pool.length),
     headers: new Uint32Array(headers),
-    coarse: new Uint32Array(coarse),
     relocations: new Uint32Array(pool.relocations),
     stats: { ...stats, prepareMS: performance.now() - started },
   };

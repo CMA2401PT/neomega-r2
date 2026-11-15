@@ -10,7 +10,7 @@ import (
 //go:embed assets/* web/*
 var Files embed.FS
 
-// Fragment 指向已裁切并平移到目标格内的模型，运行时无需回查原来的格子。
+// Fragment 指向已平移到目标格局部坐标的模型，运行时无需回查原来的格子。
 type Fragment struct {
 	Offset [3]int `json:"offset"`
 	Model  uint32 `json:"model"`

@@ -19,20 +19,22 @@ const raw = (position, indices) => {
   for (const index of indices) words[index >> 5] |= 1 << (index & 31);
   return { position, bits: 1, palette: new Uint32Array([0, 2]), words };
 };
+// 按着色器的读取顺序解出一个格子：均匀 section 直接给出编号，否则经附加块找调色板和片段表。
 function cell(region, sectionIndex, index) {
   const h = region.headers,
-    at = Array.from(h).findIndex((v, i) => i % 5 === 0 && v === sectionIndex);
+    at = Array.from(h).findIndex((v, i) => i % 7 === 0 && v === sectionIndex);
   assert.notEqual(at, -1);
+  const aux = h[at + 1];
+  if (!aux) return { model: h[at + 6], parts: [] };
   const bits = h[at + 3],
     per = Math.floor(32 / bits),
     pi = bits
-      ? (region.words[h[at + 1] + Math.floor(index / per)] >>>
+      ? (region.words[h[at + 2] + Math.floor(index / per)] >>>
           ((index % per) * bits)) &
         ((1 << bits) - 1)
       : 0;
-  const model = region.words[h[at + 2] + pi],
-    tree = h[at + 4],
-    parts = tree ? region.words[tree + 585] : 0,
+  const model = region.words[aux + 193 + pi],
+    parts = region.words[aux + 192],
     start = parts ? region.words[parts + index] : 0;
   return {
     model,
@@ -176,7 +178,7 @@ test("循环目录移动不重新分配区域，释放后父层也清空", () =>
   const used = gpu.allocator.used;
   gpu.setWindow([-128, -64, 0], [512, 512, 512]);
   assert.equal(gpu.allocator.used, used);
-  assert.equal(gpu.levels[0].data[127 + 128 * 4], 1);
+  assert.equal(gpu.levels[0].data[255 + 256 * 4], 1);
   gpu.remove("-1/0");
   assert.equal(gpu.allocator.used, 0);
   assert(gpu.levels.every((l) => l.data.every((v) => v === 0)));

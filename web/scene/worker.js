@@ -34,7 +34,6 @@ self.onmessage = async ({ data }) => {
       postMessage({ type: "prepared", request: data.request, result }, [
         result.words.buffer,
         result.headers.buffer,
-        result.coarse.buffer,
         result.relocations.buffer,
       ]);
     }

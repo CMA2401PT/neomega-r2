@@ -58,6 +58,10 @@ func generate() error {
 	if err = gob.NewDecoder(reader).Decode(&records); err != nil {
 		return err
 	}
+	grid, err := openSurfaceGrid("sourceassets/surfaces.png")
+	if err != nil {
+		return err
+	}
 	cubes := map[string]cubeMaterial{}
 	for _, r := range records {
 		cubes[r.State] = r.Material
@@ -65,7 +69,11 @@ func generate() error {
 	catalog := r2.Catalog{States: map[string]uint32{}, Models: []r2.Model{{}}, Statistics: map[string]int{}}
 	fastIDs := map[cubeMaterial]uint32{}
 	shapeIDs := map[string]uint32{}
-	var fast, triangles []float32
+	var fast []float32
+	// 引用按模型连续存放，记录按内容去重；同一面在不同状态组合里只保存一份记录。
+	var references []quadReference
+	var surfaces []quadRecord
+	recordIDs := map[quadRecord]uint32{}
 	for _, state := range slices.Sorted(java.JavaFullStates()) {
 		name := string(state)
 		short := state.ShortName()
@@ -82,10 +90,8 @@ func generate() error {
 				fastIDs[m] = id
 				catalog.Models = append(catalog.Models, r2.Model{Kind: 1, Offset: uint32(len(fast) / 4), Count: 6, Group: m.Group})
 				for face, values := range m.Textures {
-					fast = append(fast, values[:]...)
-					for _, c := range m.Faces[face] {
-						fast = append(fast, float32(c)/255)
-					}
+					encoded := encodeCubeFace(grid, values, m.Faces[face])
+					fast = append(fast, encoded[:]...)
 				}
 			}
 			catalog.States[name] = id
@@ -128,28 +134,26 @@ func generate() error {
 		id := uint32(len(catalog.Models))
 		shapeIDs[key] = id
 		catalog.Models = append(catalog.Models, r2.Model{Kind: 2})
-		// 每个片段都裁到单位格子，并把顶点平移到该格子的局部坐标；只裁原表面，不添加封口面。
+		// 原表面登记到它伸进的每个格子，顶点平移到该格子的局部坐标；着色器只接受落在本格射线区间内的交点。
 		for z := minimum[2]; z <= maximum[2]; z++ {
 			for y := minimum[1]; y <= maximum[1]; y++ {
 				for x := minimum[0]; x <= maximum[0]; x++ {
 					offset := [3]int{x, y, z}
-					piece := r2.Model{Kind: 2, Offset: uint32(len(triangles) / 4)}
+					piece := r2.Model{Kind: 2, Offset: uint32(len(references))}
 					for _, q := range quads {
-						for _, corners := range [][3]int{{0, 1, 2}, {0, 2, 3}} {
-							polygon := []vertex{}
-							for _, corner := range corners {
-								polygon = append(polygon, vertex{Position: q.Positions[corner], UV: q.UV[corner]})
-							}
-							polygon = clipToCell(polygon, offset)
-							for i := 1; i+1 < len(polygon); i++ {
-								triangle := [3]vertex{polygon[0], polygon[i], polygon[i+1]}
-								if !hasArea(triangle) {
-									continue
-								}
-								triangles = append(triangles, encodeTriangle(q, triangle, offset)...)
-								piece.Count++
-							}
+						if !overlapsCell(q, offset) {
+							continue
 						}
+						reference, record := encodeQuad(q, offset)
+						recordID, exists := recordIDs[record]
+						if !exists {
+							recordID = uint32(len(surfaces))
+							recordIDs[record] = recordID
+							surfaces = append(surfaces, record)
+						}
+						reference[2] = recordID
+						references = append(references, reference)
+						piece.Count++
 					}
 					if offset == [3]int{} {
 						piece.Fragments = catalog.Models[id].Fragments
@@ -159,48 +163,27 @@ func generate() error {
 						catalog.Models = append(catalog.Models, piece)
 						catalog.Models[id].Fragments = append(catalog.Models[id].Fragments, r2.Fragment{Offset: offset, Model: pieceID})
 					}
-					catalog.Statistics["maxFragmentTriangles"] = max(catalog.Statistics["maxFragmentTriangles"], int(piece.Count))
+					catalog.Statistics["maxCellQuads"] = max(catalog.Statistics["maxCellQuads"], int(piece.Count))
 				}
 			}
 		}
 		if len(catalog.Models[id].Fragments) > 0 {
 			catalog.Statistics["splitModels"]++
 		}
-		catalog.Statistics["maxSourceTriangles"] = max(catalog.Statistics["maxSourceTriangles"], len(quads)*2)
+		catalog.Statistics["maxSourceQuads"] = max(catalog.Statistics["maxSourceQuads"], len(quads))
 		catalog.States[name] = id
 		catalog.Statistics["modelStates"]++
 	}
-	// 状态组合会复用同一批三角面；全局只保存一次顶点和材质，每个模型保存面索引。
-	references := make([]uint32, len(triangles)/32)
-	unique := []float32{}
-	ids := map[[32]float32]uint32{}
-	for i := range references {
-		key := [32]float32{}
-		copy(key[:], triangles[i*32:(i+1)*32])
-		id, exists := ids[key]
-		if !exists {
-			id = uint32(len(unique) / 32)
-			ids[key] = id
-			unique = append(unique, key[:]...)
-		}
-		references[i] = id
-	}
-	triangles = unique
-	for i := range catalog.Models {
-		if catalog.Models[i].Kind == 2 {
-			catalog.Models[i].Offset /= 8
-		}
-	}
-	catalog.Statistics["triangleReferences"] = len(references)
+	catalog.Statistics["quadReferences"] = len(references)
+	catalog.Statistics["quadRecords"] = len(surfaces)
 	catalog.Statistics["models"] = len(catalog.Models)
 	catalog.Statistics["cubeModels"] = len(fastIDs)
-	catalog.Statistics["triangles"] = len(triangles) / 32
 	catalog.Statistics["unsupportedStates"] = len(catalog.Unsupported)
 	var headers []uint32
 	for _, model := range catalog.Models {
 		headers = append(headers, model.Kind, model.Offset, model.Count, model.Group)
 	}
-	for name, data := range map[string]any{"headers.bin": headers, "fast.bin": fast, "triangles.bin": triangles, "triangle-ids.bin": references} {
+	for name, data := range map[string]any{"headers.bin": headers, "fast.bin": fast, "quad-references.bin": references, "quad-records.bin": surfaces} {
 		f, err := os.Create("assets/" + name)
 		if err != nil {
 			return err
@@ -213,6 +196,14 @@ func generate() error {
 		if closeErr != nil {
 			return closeErr
 		}
+	}
+	layers := 0
+	for i := 0; i < len(fast); i += 16 {
+		layers = max(layers, int(fast[i+6])+1)
+	}
+	catalog.Statistics["surfaceLayers"] = layers
+	if err = grid.writeLayers("assets/surface-layers.bin", layers); err != nil {
+		return err
 	}
 	encoded, err := json.Marshal(catalog)
 	if err != nil {

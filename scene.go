@@ -21,7 +21,7 @@ func NewGrid(size [3]int) *Grid {
 func (g *Grid) index(p [3]int) int         { return (p[0] + g.Size[0]*(p[1]+g.Size[1]*p[2])) * 2 }
 func (g *Grid) Set(p [3]int, model uint32) { g.Cells[g.index(p)] = model }
 
-// PlaceFragments 将预裁切片段的索引分发到各格，模型形状、UV 和裁切结果不在加载时计算。
+// PlaceFragments 将跨格片段的索引分发到各格，模型形状与 UV 不在加载时计算。
 func (g *Grid) PlaceFragments(catalog *Catalog) int {
 	lists := map[int][]uint32{}
 	refs := 0

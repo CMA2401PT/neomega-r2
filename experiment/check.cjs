@@ -1,4 +1,4 @@
-// 固定相机比较分层跳跃与逐格遍历，并检查裁片和透明介质厚度；不会操作已有 viewer。
+// 固定相机比较分层跳跃与逐格遍历，并检查跨格片段和透明介质厚度；不会操作已有 viewer。
 const { chromium } = require(
   process.env.PLAYWRIGHT_MODULE ||
     "/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/playwright",
@@ -86,7 +86,7 @@ const base = process.env.R2_URL || "http://127.0.0.1:2413";
             6
           )
             changedFragments++;
-        assert(changedFragments > 0, "预裁切片段没有出现在画面中");
+        assert(changedFragments > 0, "跨格片段没有出现在画面中");
       }
       const sorted = state.times.sort((a, b) => a - b);
       const result = {

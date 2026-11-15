@@ -11,5 +11,5 @@
 /** @typedef {{position:Vec3,bits:number,palette:Uint32Array,words:Uint32Array}} SourceSection 压缩 section；palette 保存唯一的静态模型编号，格子索引为 XZY。 */
 /** @typedef {{sections:SourceSection[],unknown:number,bytes:number}} SourceRegion 8×8 区块区域的输入数据。 */
 /** @typedef {{sections:number,prepareMS:number}} RegionStatistics 已准备区域的统计。 */
-/** @typedef {{key:string,x:number,z:number,words:Uint32Array,headers:Uint32Array,coarse:Uint32Array,relocations:Uint32Array,stats:RegionStatistics}} PreparedRegion 可增量上传的区域；relocations 指出 words 内需要加上显存基址的地址项。 */
+/** @typedef {{key:string,x:number,z:number,words:Uint32Array,headers:Uint32Array,relocations:Uint32Array,stats:RegionStatistics}} PreparedRegion 可增量上传的区域。headers 每 7 项描述一个 section：[区内编号, 附加块地址, 压缩字地址, 位宽, 小块掩码低 32 位, 高 32 位, 均匀编号]，附加块地址为 0 表示整个 section 是同一完整方块或空气；relocations 指出 words 内需要加上显存基址的地址项。 */
 export {};
