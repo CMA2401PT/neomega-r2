@@ -170,6 +170,30 @@ func generate() error {
 		catalog.States[name] = id
 		catalog.Statistics["modelStates"]++
 	}
+	// 远景仅查预生成的简化外观，完整立方体继续共用精细贴图。
+	catalog.FarStates = map[string]uint32{}
+	for _, state := range slices.Sorted(java.JavaFullStates()) {
+		name := string(state)
+		id := catalog.States[name]
+		if id == 0 || catalog.Models[id].Kind == 1 {
+			catalog.FarStates[name] = id
+			continue
+		}
+		m := cubes[name]
+		far, ok := fastIDs[m]
+		if !ok {
+			far = uint32(len(catalog.Models))
+			fastIDs[m] = far
+			catalog.Models = append(catalog.Models, r2.Model{Kind: 1, Offset: uint32(len(fast) / 4), Count: 6, Group: m.Group})
+			for face := range 6 {
+				fast = append(fast, make([]float32, 12)...)
+				for _, c := range m.Faces[face] {
+					fast = append(fast, float32(c)/255)
+				}
+			}
+		}
+		catalog.FarStates[name] = far
+	}
 	// 状态组合会复用同一批三角面；全局只保存一次顶点和材质，每个模型保存面索引。
 	references := make([]uint32, len(triangles)/32)
 	unique := []float32{}

@@ -116,6 +116,16 @@ func BuildScene(catalog *Catalog, name string) (*Scene, error) {
 		}
 	}
 	switch name {
+	case "special":
+		g.Set([3]int{32, 2, 26}, find("enchanting_table"))
+		for y := 2; y < 5; y++ {
+			g.Set([3]int{34, y, 26}, fence)
+		}
+		g.Set([3]int{32, 2, 29}, glass)
+		g.Set([3]int{33, 2, 28}, quartz)
+		scene.Camera = [3]float64{33.5, 4, 31.5}
+		scene.Target = [3]float64{33.5, 3, 26.5}
+
 	case "showcase":
 		models := []uint32{quartz, fence, flower, fire, stairs, glass, water, leaves}
 		for i, id := range models {

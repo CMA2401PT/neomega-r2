@@ -28,6 +28,7 @@ type Model struct {
 // Catalog 在进程启动时读取一次，区域构建只查询 States 和 Fragments。
 type Catalog struct {
 	States      map[string]uint32 `json:"states"`
+	FarStates   map[string]uint32 `json:"farStates"`
 	Models      []Model           `json:"models"`
 	Statistics  map[string]int    `json:"statistics"`
 	Unsupported []string          `json:"unsupported"`

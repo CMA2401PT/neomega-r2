@@ -3,7 +3,10 @@ precision highp float;
 precision highp int;
 precision highp usampler3D;
 precision highp usampler2D;
-uniform usampler3D uCells,uTree;
+uniform usampler3D uCells,uTree,uSections;
+uniform usampler2D uWorldData;
+uniform bool uWorld;
+uniform int uSamples;
 uniform usampler2D uModels,uParts,uTriangleIDs;
 uniform sampler2D uTriangles,uFast,uAtlas,uMips;
 uniform vec3 uSize,uCamera,uRight,uUp,uForward;
@@ -39,7 +42,9 @@ vec4 mipSample(vec2 origin,vec2 uv,float side,float level){
 void cubeSurface(uint id,int side,float t){
  int offset=int(model(id).y)+side*4;
  vec4 a=table(uFast,offset),b=table(uFast,offset+1),c=table(uFast,offset+2),representative=table(uFast,offset+3);
- int axis=side/2;vec3 p=fract(uCamera+ray*t);
+ int axis=side/2;
+ if(c.y==0.0){vec3 normal=vec3(0);normal[axis]=side%2==0?-1.0:1.0;contribute(linearColor(representative.rgb),representative.a,t,normal,false);return;}
+ vec3 p=fract(uCamera+ray*t);
  vec2 uv=vec2(p[(axis+1)%3],p[(axis+2)%3]);
  vec2 origin=a.xy+min(a.zw,vec2(0))+min(b.xy,vec2(0));
  vec2 extent=abs(a.zw)+abs(b.xy),local=(a.xy+a.zw*uv.x+b.xy*uv.y-origin)/extent;
@@ -99,8 +104,16 @@ float leaveNode(vec3 lower,float width,out int side,out ivec3 nextCell){
  }
  return nextTime;
 }
-void main(){
- vec2 screen=(gl_FragCoord.xy/uViewport-.5)*vec2(uViewport.x/uViewport.y,1)*uSpan;
+uint worldWord(uint offset){return texelFetch(uWorldData,ivec2(int(offset)%4096,int(offset)/4096),0).r;}
+uint localIndex(ivec3 p){return uint((p.x*16+p.z)*16+p.y);}
+uvec2 worldCell(ivec3 cell,uvec4 section){
+ uint index=localIndex(cell&15),bits=section.z,palette=0u;
+ if(bits!=0u){uint per=32u/bits;palette=(worldWord(section.x+index/per)>>((index%per)*bits))&((1u<<bits)-1u);}
+ uint parts=section.w==0u?0u:worldWord(section.w+585u);
+ return uvec2(worldWord(section.y+palette),parts==0u?0u:worldWord(parts+index));
+}
+vec3 trace(vec2 pixel){
+ vec2 screen=(pixel/uViewport-.5)*vec2(uViewport.x/uViewport.y,1)*uSpan;
  ray=normalize(uForward+screen.x*uRight+screen.y*uUp);
  invRay=vec3(1)/ray;
  vec3 nearSide=(vec3(0)-uCamera)*invRay,farSide=(uSize-uCamera)*invRay;
@@ -116,9 +129,17 @@ void main(){
   if(finished)break;
   steps++;
   if(any(lessThan(cell,ivec3(0)))||any(greaterThanEqual(cell,ivec3(uSize)))){finished=true;break;}
-  uvec2 contents=texelFetch(uCells,cell,0).rg;
-  int level=0;uint node=MIXED;
-  if(uHierarchy)for(int l=6;l>=0;l--){if(l>uTop)continue;uint value=texelFetch(uTree,cell>>l,l).r;if(value!=MIXED){node=value;level=l;break;}}
+  uvec2 contents=uvec2(0);int level=0;uint node=MIXED;
+  if(uWorld){
+   if(uHierarchy)for(int l=7;l>=0;l--){uint value=texelFetch(uTree,cell>>(l+4),l).r;if(value!=MIXED){node=value;level=l+4;break;}}
+   if(node==MIXED){uvec4 section=texelFetch(uSections,cell>>4,0);
+    if(uHierarchy)for(int l=3;l>=1;l--){ivec3 p=(cell&15)>>l;int side=16>>l;uint offset=l==3?576u:l==2?512u:0u;uint value=worldWord(section.w+offset+uint((p.x*side+p.z)*side+p.y));if(value!=MIXED){node=value;level=l;break;}}
+    if(node==MIXED)contents=worldCell(cell,section);
+   }
+  }else{
+   contents=texelFetch(uCells,cell,0).rg;
+   if(uHierarchy)for(int l=6;l>=0;l--){if(l>uTop)continue;uint value=texelFetch(uTree,cell>>l,l).r;if(value!=MIXED){node=value;level=l;break;}}
+  }
   float width=exp2(float(level));vec3 lower=floor(vec3(cell)/width)*width;
   uint current=node!=MIXED?node:contents.r;
   uvec4 description=model(current);uint medium=description.x==1u?current:0u;
@@ -135,8 +156,8 @@ void main(){
   if(node==MIXED){
    intersectModel(current,cell,max(t,afterHit),end,hit);
    if(uFragments&&contents.g!=0u){
-    int start=int(contents.g);uint count=texelFetch(uParts,ivec2(start%2048,start/2048),0).r;
-    for(uint j=0u;j<count;j++){int index=start+1+int(j);uint piece=texelFetch(uParts,ivec2(index%2048,index/2048),0).r;intersectModel(piece,cell,max(t,afterHit),end,hit);}
+    int start=int(contents.g);uint count=uWorld?worldWord(uint(start)):texelFetch(uParts,ivec2(start%2048,start/2048),0).r;
+    for(uint j=0u;j<count;j++){int index=start+1+int(j);uint piece=uWorld?worldWord(uint(index)):texelFetch(uParts,ivec2(index%2048,index/2048),0).r;intersectModel(piece,cell,max(t,afterHit),end,hit);}
    }
   }
   if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.normal,hit.unlit);if(transmission<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
@@ -148,5 +169,11 @@ void main(){
  if(!finished)color=vec3(1,0,1);
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
  if(uDebug==2)color=vec3(float(faceTests>0),float(faceTests==0&&touched),0);
- outColor=vec4(color,1);
+ return color;
+}
+void main(){
+ if(uSamples==1){outColor=vec4(trace(gl_FragCoord.xy),1);return;}
+ vec3 sum=vec3(0);
+ for(int i=0;i<4;i++){if(i>=uSamples)break;vec2 offset=uSamples==2?vec2(i==0?-.25:.25):vec2(float(i%2)-.5,float(i/2)-.5)*.5;sum+=linearColor(trace(gl_FragCoord.xy+offset));}
+ outColor=vec4(srgbColor(sum/float(uSamples)),1);
 }

@@ -14,6 +14,7 @@ import (
 func main() {
 	listen := flag.String("listen", "127.0.0.1:2413", "研究页面监听地址")
 	webPath := flag.String("web", "", "开发时直接读取网页目录")
+	worldPath := flag.String("world", "", "只读 Java 存档路径")
 	flag.Parse()
 	catalog, err := r2.OpenCatalog()
 	if err != nil {
@@ -21,7 +22,7 @@ func main() {
 	}
 	scenes := map[string]*r2.Scene{}
 	data := map[string][]byte{}
-	for _, name := range []string{"showcase", "fences", "cutouts", "cubes", "glass8", "glass16", "spill"} {
+	for _, name := range []string{"special", "showcase", "fences", "cutouts", "cubes", "glass8", "glass16", "spill"} {
 		scene, err := r2.BuildScene(catalog, name)
 		if err != nil {
 			panic(err)
@@ -30,6 +31,15 @@ func main() {
 		data[name] = scene.Grid.Bytes()
 	}
 	mux := http.NewServeMux()
+	if *worldPath != "" {
+		world, err := r2.OpenWorld(*worldPath, catalog)
+		if err != nil {
+			panic(err)
+		}
+		defer world.Close()
+		mux.HandleFunc("GET /api/world/region", world.ServeRegion)
+	}
+
 	mux.HandleFunc("GET /api/scene", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		scene, ok := scenes[name]
@@ -65,7 +75,14 @@ func main() {
 	if *webPath != "" {
 		web = os.DirFS(*webPath)
 	}
-	mux.Handle("/", http.FileServerFS(web))
+	files := http.FileServerFS(web)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if *worldPath != "" && r.URL.Path == "/" && r.URL.RawQuery == "" {
+			http.Redirect(w, r, "/?scene=world", http.StatusTemporaryRedirect)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
 	fmt.Println("R2 格子内模型射线研究：http://" + *listen)
 	if err := http.ListenAndServe(*listen, mux); err != nil {
 		panic(err)
