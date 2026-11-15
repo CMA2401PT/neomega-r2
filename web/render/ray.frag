@@ -6,6 +6,7 @@ precision highp usampler2D;
 uniform usampler3D uCells,uTree,uSections;
 uniform usampler2D uWorldData;
 uniform bool uWorld;
+uniform ivec3 uDirectoryOffset;
 uniform int uSamples;
 uniform usampler2D uModels,uParts,uTriangleIDs;
 uniform sampler2D uTriangles,uFast,uAtlas,uMips;
@@ -64,7 +65,9 @@ void cubeSurface(uint id,int side,float t){
 }
 struct Hit{float t;vec3 color;float alpha;vec3 normal;bool unlit;};
 // 仅在候选格子中遍历共享模型；alpha 裁切失败的面不阻挡后方更远的命中。
+#include <objects>
 void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
+ if((id&0x80000000u)!=0u){intersectObject(id&0x7fffffffu,begin,end,hit);return;}
  uvec4 description=model(id);if(description.x!=2u)return;
  vec3 origin=uCamera-vec3(cell);
  for(uint i=0u;i<description.z;i++){
@@ -91,6 +94,7 @@ void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
 }
 float leaveNode(vec3 lower,float width,out int side,out ivec3 nextCell){
  vec3 upper=min(lower+vec3(width),uSize);
+ lower=max(lower,vec3(0));
  vec3 edge=mix(lower,upper,greaterThan(ray,vec3(0)));
  vec3 distance=(edge-uCamera)*invRay;
  for(int a=0;a<3;a++)if(abs(ray[a])<1e-8)distance[a]=1e30;
@@ -131,8 +135,8 @@ vec3 trace(vec2 pixel){
   if(any(lessThan(cell,ivec3(0)))||any(greaterThanEqual(cell,ivec3(uSize)))){finished=true;break;}
   uvec2 contents=uvec2(0);int level=0;uint node=MIXED;
   if(uWorld){
-   if(uHierarchy)for(int l=7;l>=0;l--){uint value=texelFetch(uTree,cell>>(l+4),l).r;if(value!=MIXED){node=value;level=l+4;break;}}
-   if(node==MIXED){uvec4 section=texelFetch(uSections,cell>>4,0);
+   if(uHierarchy)for(int l=7;l>=0;l--){uint value=texelFetch(uTree,(((cell+uDirectoryOffset)>>4)&ivec3(127,31,127))>>l,l).r;if(value!=MIXED){node=value;level=l+4;break;}}
+   if(node==MIXED){uvec4 section=texelFetch(uSections,((cell+uDirectoryOffset)>>4)&ivec3(127,31,127),0);
     if(uHierarchy)for(int l=3;l>=1;l--){ivec3 p=(cell&15)>>l;int side=16>>l;uint offset=l==3?576u:l==2?512u:0u;uint value=worldWord(section.w+offset+uint((p.x*side+p.z)*side+p.y));if(value!=MIXED){node=value;level=l;break;}}
     if(node==MIXED)contents=worldCell(cell,section);
    }
@@ -140,7 +144,7 @@ vec3 trace(vec2 pixel){
    contents=texelFetch(uCells,cell,0).rg;
    if(uHierarchy)for(int l=6;l>=0;l--){if(l>uTop)continue;uint value=texelFetch(uTree,cell>>l,l).r;if(value!=MIXED){node=value;level=l;break;}}
   }
-  float width=exp2(float(level));vec3 lower=floor(vec3(cell)/width)*width;
+  float width=exp2(float(level));vec3 shift=uWorld?vec3(uDirectoryOffset):vec3(0);vec3 lower=floor((vec3(cell)+shift)/width)*width-shift;
   uint current=node!=MIXED?node:contents.r;
   uvec4 description=model(current);uint medium=description.x==1u?current:0u;
   int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
