@@ -16,13 +16,19 @@ uniform vec3 uSize,uCamera,uRight,uUp,uForward;
 uniform vec2 uViewport;
 uniform float uSpan;
 uniform int uSamples,uDebug;
-uniform bool uHierarchy,uFragments;
+uniform bool uHierarchy,uFragments,uShadows;
+// 指向太阳的单位向量。
+uniform vec3 uSun;
 out vec4 outColor;
 const uint MIXED=0xffffffffu;
 const float EPS=0.00002;
 // 附加块布局：128 字格子掩码、64 字小块标签、1 字片段表地址，随后是调色板。
 const uint AUX_TAGS=128u,AUX_PARTS=192u,AUX_PALETTE=193u;
-vec3 ray,invRay,accumulated;
+// eye 是当前射线的起点：主射线为相机，阴影射线为命中点；遍历与求交都只读它。
+vec3 eye,ray,invRay,ambientSum,directSum;
+// 权重最大的受光表面，主射线结束后从这里向太阳发一条阴影射线。
+vec3 shadePoint,shadeNormal;
+float shadeWeight;
 // rayLength 是未归一化方向的长度，用于把屏幕上一个像素换算成表面上的足迹。
 float transmission,firstDepth,rayLength;
 // 树冠遮光：射线每穿过一格树叶的空隙就变暗一些，近似游戏里树叶逐格削弱天光；离开树冠后恢复。
@@ -43,8 +49,13 @@ bool sameMedium(uint a,uint groupA,uint b,uint groupB){return a==b||(a!=0u&&b!=0
 void contribute(vec3 rgb,float alpha,float t,vec3 normal,bool unlit){
  if(alpha<=0.0)return;
  if(!touched){touched=true;firstDepth=t;}
- float light=unlit?1.0:0.48+0.52*max(dot(normal,normalize(vec3(0.35,0.85,0.5))),0.0);
- accumulated+=transmission*alpha*rgb*light*foliage;
+ float weight=transmission*alpha*foliage;
+ if(unlit){ambientSum+=weight*rgb;transmission*=1.0-alpha;return;}
+ // 环境光与太阳直射分开累计，直射部分最后乘阴影射线的可见度。
+ float direct=max(dot(normal,uSun),0.0);
+ ambientSum+=weight*rgb*0.3;
+ directSum+=weight*rgb*0.75*direct;
+ if(direct>0.0&&weight>shadeWeight){shadeWeight=weight;shadePoint=eye+ray*t;shadeNormal=dot(normal,ray)<0.0?normal:-normal;}
  transmission*=1.0-alpha;
 }
 // 方块面贴图：每级 mip 内取最近纹素，保持与游戏一致的像素硬边，级间线性混合避免闪烁。
@@ -71,7 +82,7 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
  vec3 normal=axisNormal(side);
  if(f1.z<0.0){vec4 color=table(uFast,offset+3);contribute(linearColor(color.rgb),color.a,t,normal,false);return true;}
  int axis=side/2;
- vec2 uv=across(fract(uCamera+ray*t),axis);
+ vec2 uv=across(fract(eye+ray*t),axis);
  vec2 tile=f0.xy+f0.zw*uv.x+f1.xy*uv.y;
  // 射线微分：相邻像素的射线在这个面上相距多远，决定 mip 级与长轴方向。
  float pixel=uSpan/uViewport.y,scale=t/rayLength,facing=pick(ray,axis);
@@ -95,7 +106,7 @@ vec3 octahedralNormal(uint packed){
 void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
  if((id&0x80000000u)!=0u){intersectObject(id&0x7fffffffu,begin,end,hit);return;}
  uvec4 description=model(id);if(description.x!=2u)return;
- vec3 origin=uCamera-vec3(cell);
+ vec3 origin=eye-vec3(cell);
  for(uint i=0u;i<description.z;i++){
   faceTests++;
   int index=int(description.y+i);
@@ -123,13 +134,13 @@ void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
 // 求射线离开轴对齐节点的时间；落在边界上的轴按整数跳到下一格，避免掠射时反复停在同一格。
 float leaveNode(ivec3 lowerCell,int width,out int side,out ivec3 nextCell){
  vec3 lower=max(vec3(lowerCell),vec3(0)),upper=min(vec3(lowerCell+width),uSize);
- vec3 distance=(mix(lower,upper,greaterThan(ray,vec3(0)))-uCamera)*invRay;
+ vec3 distance=(mix(lower,upper,greaterThan(ray,vec3(0)))-eye)*invRay;
  distance=mix(distance,vec3(1e30),lessThan(abs(ray),vec3(1e-8)));
  int axis=distance.x<=distance.y&&distance.x<=distance.z?0:distance.y<=distance.z?1:2;
  float next=min(distance.x,min(distance.y,distance.z));
  side=axis*2+(pick(ray,axis)>0.0?1:0);
  ivec3 lo=ivec3(lower),hi=ivec3(upper);
- ivec3 inside=clamp(ivec3(floor(uCamera+ray*next)),lo,hi-1);
+ ivec3 inside=clamp(ivec3(floor(eye+ray*next)),lo,hi-1);
  ivec3 stepped=ivec3(ray.x>0.0?hi.x:lo.x-1,ray.y>0.0?hi.y:lo.y-1,ray.z>0.0?hi.z:lo.z-1);
  bvec3 crossing=equal(distance,vec3(next));
  nextCell=ivec3(crossing.x?stepped.x:inside.x,crossing.y?stepped.y:inside.y,crossing.z?stepped.z:inside.z);
@@ -178,25 +189,71 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  if(partsBase!=0u)parts=worldWord(partsBase+index);
  return worldWord(section.x+AUX_PALETTE+palette);
 }
+// 阴影射线：从命中点走向太阳，只关心沿途挡住了多少光，不着色。
+// 不透明立方体与镂空面的实心处完全遮挡；玻璃、水按代表色不透明度削弱；复杂模型按命中的面削弱。
+// 射线离开观察窗口即视为照到太阳，窗口外的地形不投影。
+float alphaAt(uint fastOffset,int side,float t){
+ int offset=int(fastOffset)+side*4;
+ vec4 f0=table(uFast,offset),f1=table(uFast,offset+1);
+ vec2 uv=across(fract(eye+ray*t),side/2);
+ return textureLod(uSurfaces,vec3(f0.xy+f0.zw*uv.x+f1.xy*uv.y,f1.z),0.0).a;
+}
+float sunVisibility(vec3 origin){
+ eye=origin;ray=uSun;invRay=vec3(1)/ray;
+ cachedSection=ivec3(-1);cachedBrick=-1;
+ vec3 far=(mix(vec3(0),uSize,greaterThan(ray,vec3(0)))-eye)*invRay;
+ far=mix(far,vec3(1e30),lessThan(abs(ray),vec3(1e-8)));
+ float last=min(far.x,min(far.y,far.z)),t=0.0,light=1.0;
+ ivec3 cell=ivec3(floor(eye));int side=0;uint previous=0u;
+ for(int iteration=0;iteration<1024;iteration++){
+  if(t>=last-EPS||any(lessThan(cell,ivec3(0)))||any(greaterThanEqual(cell,ivec3(uSize))))break;
+  int level;bool cellLevel;uint parts;
+  uint current=locate(cell,level,cellLevel,parts);
+  int width=1<<level;
+  ivec3 lower=((cell+uDirectoryOffset)&ivec3(~(width-1)))-uDirectoryOffset;
+  int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
+  if(current!=0u){
+   uvec4 description=model(current);
+   if(description.x==1u&&current!=previous){
+    vec4 flags=table(uFast,int(description.y)+side*4+1);
+    if(mod(flags.w,2.0)!=1.0)return 0.0;
+    light*=1.0-table(uFast,int(description.y)+side*4+3).a;
+   }
+   if(description.x==3u&&t>0.0&&alphaAt(description.y,side,t)>=0.5)return 0.0;
+   if(cellLevel){
+    Hit hit;hit.t=end+1.0;hit.alpha=0.0;
+    intersectModel(current,cell,max(t,1e-3),end,hit);
+    if(parts!=0u){
+     uint count=worldWord(parts);
+     for(uint j=0u;j<count;j++)intersectModel(worldWord(parts+1u+j),cell,max(t,1e-3),end,hit);
+    }
+    light*=1.0-hit.alpha;
+   }
+   if(light<0.02)return 0.0;
+  }
+  previous=current;t=end;cell=nextCell;side=exitSide^1;
+ }
+ return light;
+}
 // 返回线性颜色；调试计数留在全局变量里。
 vec3 trace(vec2 pixel){
  vec2 screen=(pixel/uViewport-.5)*vec2(uViewport.x/uViewport.y,1)*uSpan;
  vec3 direction=uForward+screen.x*uRight+screen.y*uUp;
- rayLength=length(direction);ray=direction/rayLength;
+ rayLength=length(direction);ray=direction/rayLength;eye=uCamera;
  invRay=vec3(1)/ray;
  bvec3 parallel=lessThan(abs(ray),vec3(1e-8));
- vec3 nearSide=(vec3(0)-uCamera)*invRay,farSide=(uSize-uCamera)*invRay;
+ vec3 nearSide=(vec3(0)-eye)*invRay,farSide=(uSize-eye)*invRay;
  vec3 entry=min(nearSide,farSide),leave=max(nearSide,farSide);
- bvec3 within=bvec3(vec3(greaterThanEqual(uCamera,vec3(0)))*vec3(lessThan(uCamera,uSize)));
+ bvec3 within=bvec3(vec3(greaterThanEqual(eye,vec3(0)))*vec3(lessThan(eye,uSize)));
  entry=mix(entry,mix(vec3(1e30),vec3(-1e30),within),parallel);
  leave=mix(leave,vec3(1e30),parallel);
  float first=max(entry.x,max(entry.y,entry.z)),last=min(leave.x,min(leave.y,leave.z));
  float t=max(.01,first);int axis=entry.x>=entry.y&&entry.x>=entry.z?0:entry.y>=entry.z?1:2;
  int side=axis*2+(pick(ray,axis)<0.0?1:0);
- accumulated=vec3(0);transmission=1.0;foliage=1.0;touched=false;steps=0;faceTests=0;firstDepth=0.0;
+ ambientSum=vec3(0);directSum=vec3(0);shadeWeight=0.0;transmission=1.0;foliage=1.0;touched=false;steps=0;faceTests=0;firstDepth=0.0;
  cachedSection=ivec3(-1);cachedBrick=-1;
  float afterHit=.01;uint previous=0u;uvec4 previousModel=uvec4(0);bool entering=true,inside=first<.01;bool finished=t>=last;
- ivec3 cell=clamp(ivec3(floor(uCamera+ray*(t+EPS))),ivec3(0),ivec3(uSize)-1);
+ ivec3 cell=clamp(ivec3(floor(eye+ray*(t+EPS))),ivec3(0),ivec3(uSize)-1);
  for(int iteration=0;iteration<2048;iteration++){
   if(finished)break;
   steps++;
@@ -235,7 +292,9 @@ vec3 trace(vec2 pixel){
  }
  vec3 sky=mix(vec3(.32,.44,.60),vec3(.68,.78,.88),clamp(1.0-ray.y,0.0,1.0));
  if(!finished)return vec3(1,0,1);
- return accumulated+transmission*linearColor(sky);
+ vec3 background=transmission*linearColor(sky);
+ float visible=uShadows&&shadeWeight>0.0?sunVisibility(shadePoint+shadeNormal*1e-3):1.0;
+ return ambientSum+directSum*visible+background;
 }
 void main(){
  vec3 sum=vec3(0);

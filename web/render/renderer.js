@@ -80,6 +80,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uDebug",
     "uHierarchy",
     "uFragments",
+    "uShadows",
+    "uSun",
     "uWorldData",
     "uSections",
     "uSamples",
@@ -300,7 +302,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   }
   /** 只绘制当前已发布的数据；每帧上传的实例变换也计入 GPU 时间。
    * @param {{position:number[],yaw:number,pitch:number}} camera
-   * @param {{width:number,height:number,samples?:number,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,synchronize?:boolean}} options
+   * @param {{width:number,height:number,samples?:number,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],synchronize?:boolean}} options
    */
   function draw(
     camera,
@@ -312,6 +314,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug = 0,
       hierarchy = true,
       fragments = true,
+      shadows = true,
+      sun = [0.45, 0.62, 0.3],
       synchronize = false,
     },
   ) {
@@ -341,6 +345,12 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform1i(uniforms.get("uDebug"), debug);
     gl.uniform1i(uniforms.get("uHierarchy"), Number(hierarchy));
     gl.uniform1i(uniforms.get("uFragments"), Number(fragments));
+    gl.uniform1i(uniforms.get("uShadows"), Number(shadows));
+    const length = Math.hypot(...sun);
+    gl.uniform3fv(
+      uniforms.get("uSun"),
+      sun.map((v) => v / length),
+    );
     if (timer && gl.getParameter(timer.GPU_DISJOINT_EXT)) resetTiming();
     while (
       queries.length &&

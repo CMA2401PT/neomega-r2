@@ -7,7 +7,7 @@ void intersectObject(uint handle,float begin,float end,inout Hit hit){
  int at=int(handle&4095u)*12;uint generation=handle>>12;
  vec4 minimum=objectWord(at+4),maximum=objectWord(at+5);if(uint(minimum.w)!=generation)return;
  mat4 inverseModel=mat4(objectWord(at),objectWord(at+1),objectWord(at+2),objectWord(at+3));
- vec3 o=(inverseModel*vec4(uCamera,1)).xyz,d=(inverseModel*vec4(ray,0)).xyz;
+ vec3 o=(inverseModel*vec4(eye,1)).xyz,d=(inverseModel*vec4(ray,0)).xyz;
  vec3 a=(minimum.xyz-o)/d,b=(maximum.xyz-o)/d,entry=min(a,b),exit=max(a,b);
  float first=max(entry.x,max(entry.y,entry.z)),last=min(exit.x,min(exit.y,exit.z));bool entering=first>=begin-EPS;float t=entering?first:last;
  if(first>last||t<begin-EPS||t>end+EPS||t>=hit.t)return;
