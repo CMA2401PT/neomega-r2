@@ -1,7 +1,7 @@
 package main
 
 import (
-		"image"
+	"image"
 	"image/png"
 	"math"
 	"os"
@@ -61,6 +61,20 @@ func (g surfaceGrid) writeLayers(path string, layers int) error {
 		}
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+// hasHoles 判断某层第 0 级贴图是否有接近全透明的像素。
+func (g surfaceGrid) hasHoles(layer int) bool {
+	columns := int(g.Width) / surfaceCell
+	x0, y0 := layer%columns*surfaceCell, layer/columns*surfaceSide
+	for y := range surfaceSide {
+		for x := range surfaceSide {
+			if g.image.NRGBAAt(x0+x, y0+y).A < 128 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func srgbByte(v float64) uint8 {

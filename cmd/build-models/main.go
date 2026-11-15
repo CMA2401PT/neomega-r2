@@ -88,11 +88,16 @@ func generate() error {
 			if !ok {
 				id = uint32(len(catalog.Models))
 				fastIDs[m] = id
-				catalog.Models = append(catalog.Models, r2.Model{Kind: 1, Offset: uint32(len(fast) / 4), Count: 6, Group: m.Group})
+				model := r2.Model{Kind: 1, Offset: uint32(len(fast) / 4), Count: 6, Group: m.Group}
 				for face, values := range m.Textures {
 					encoded := encodeCubeFace(grid, values, m.Faces[face])
 					fast = append(fast, encoded[:]...)
+					// 源资源把树叶标为不透明，洞里是黑色；贴图本身有透明像素的不透明面按镂空处理。
+					if values[11] == 0 && encoded[6] >= 0 && grid.hasHoles(int(encoded[6])) {
+						model.Kind = 3
+					}
 				}
+				catalog.Models = append(catalog.Models, model)
 			}
 			catalog.States[name] = id
 			catalog.Statistics["cubeStates"]++

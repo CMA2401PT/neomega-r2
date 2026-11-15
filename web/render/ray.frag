@@ -25,6 +25,8 @@ const uint AUX_TAGS=128u,AUX_PARTS=192u,AUX_PALETTE=193u;
 vec3 ray,invRay,accumulated;
 // rayLength 是未归一化方向的长度，用于把屏幕上一个像素换算成表面上的足迹。
 float transmission,firstDepth,rayLength;
+// 树冠遮光：射线每穿过一格树叶的空隙就变暗一些，近似游戏里树叶逐格削弱天光；离开树冠后恢复。
+float foliage;
 int steps,faceTests;
 bool touched;
 vec3 linearColor(vec3 c){return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),greaterThan(c,vec3(0.04045)));}
@@ -42,27 +44,45 @@ void contribute(vec3 rgb,float alpha,float t,vec3 normal,bool unlit){
  if(alpha<=0.0)return;
  if(!touched){touched=true;firstDepth=t;}
  float light=unlit?1.0:0.48+0.52*max(dot(normal,normalize(vec3(0.35,0.85,0.5))),0.0);
- accumulated+=transmission*alpha*rgb*light;
+ accumulated+=transmission*alpha*rgb*light*foliage;
  transmission*=1.0-alpha;
+}
+// 方块面贴图：每级 mip 内取最近纹素，保持与游戏一致的像素硬边，级间线性混合避免闪烁。
+// 斜看时沿足迹长轴取至多 4 个点平均，代替硬件各向异性过滤（后者在 D3D 上总带双线性模糊）。
+vec4 surfaceTexel(vec2 tile,float layer,vec2 gx,vec2 gy){
+ bool alongX=dot(gx,gx)>=dot(gy,gy);
+ vec2 major=alongX?gx:gy,minor=alongX?gy:gx;
+ float majorTexels=length(major)*16.0,minorTexels=length(minor)*16.0;
+ int taps=int(clamp(ceil(majorTexels/max(minorTexels,1e-6)),1.0,4.0));
+ float lod=log2(max(max(minorTexels,majorTexels/float(taps)),1e-6));
+ vec4 sum=vec4(0);
+ for(int i=0;i<4;i++){
+  if(i>=taps)break;
+  sum+=textureLod(uSurfaces,vec3(tile+major*((float(i)+.5)/float(taps)-.5),layer),lod);
+ }
+ return sum/float(taps);
 }
 // 完整方块只需面方向与命中位置，不访问模型表面。透明度仍只在介质边界累计。
 // 面表每面 4 项：贴图空间原点与 u 方向、v 方向与层号（负数为纯色）与标志、线性色调与不透明度系数、代表色。
-void cubeSurface(uint fastOffset,int side,float t){
+// cutout 为真时按 alpha 裁切：透明处不留下任何颜色，射线继续前进。
+bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
  int offset=int(fastOffset)+side*4;
  vec4 f0=table(uFast,offset),f1=table(uFast,offset+1),f2=table(uFast,offset+2);
  vec3 normal=axisNormal(side);
- if(f1.z<0.0){vec4 color=table(uFast,offset+3);contribute(linearColor(color.rgb),color.a,t,normal,false);return;}
+ if(f1.z<0.0){vec4 color=table(uFast,offset+3);contribute(linearColor(color.rgb),color.a,t,normal,false);return true;}
  int axis=side/2;
  vec2 uv=across(fract(uCamera+ray*t),axis);
  vec2 tile=f0.xy+f0.zw*uv.x+f1.xy*uv.y;
- // 射线微分：相邻像素的射线在这个面上相距多远，决定 mip 级与各向异性方向。
+ // 射线微分：相邻像素的射线在这个面上相距多远，决定 mip 级与长轴方向。
  float pixel=uSpan/uViewport.y,scale=t/rayLength,facing=pick(ray,axis);
  vec3 dx=scale*pixel*(uRight-ray*pick(uRight,axis)/facing),dy=scale*pixel*(uUp-ray*pick(uUp,axis)/facing);
  vec2 sx=across(dx,axis),sy=across(dy,axis);
- vec4 texel=textureGrad(uSurfaces,vec3(tile,f1.z),f0.zw*sx.x+f1.xy*sx.y,f0.zw*sy.x+f1.xy*sy.y);
+ vec4 texel=surfaceTexel(tile,f1.z,f0.zw*sx.x+f1.xy*sx.y,f0.zw*sy.x+f1.xy*sy.y);
+ if(cutout&&texel.a<0.5)return false;
  vec3 color=texel.rgb/max(texel.a,1e-4)*f2.rgb;
- float alpha=mod(f1.w,2.0)==1.0?texel.a*f2.w:table(uFast,offset+3).a;
+ float alpha=cutout?1.0:mod(f1.w,2.0)==1.0?texel.a*f2.w:table(uFast,offset+3).a;
  contribute(color,alpha,t,normal,f1.w>=2.0);
+ return true;
 }
 struct Hit{float t;vec3 color;float alpha;vec3 normal;bool unlit;};
 #include <objects>
@@ -173,7 +193,7 @@ vec3 trace(vec2 pixel){
  float first=max(entry.x,max(entry.y,entry.z)),last=min(leave.x,min(leave.y,leave.z));
  float t=max(.01,first);int axis=entry.x>=entry.y&&entry.x>=entry.z?0:entry.y>=entry.z?1:2;
  int side=axis*2+(pick(ray,axis)<0.0?1:0);
- accumulated=vec3(0);transmission=1.0;touched=false;steps=0;faceTests=0;firstDepth=0.0;
+ accumulated=vec3(0);transmission=1.0;foliage=1.0;touched=false;steps=0;faceTests=0;firstDepth=0.0;
  cachedSection=ivec3(-1);cachedBrick=-1;
  float afterHit=.01;uint previous=0u;uvec4 previousModel=uvec4(0);bool entering=true,inside=first<.01;bool finished=t>=last;
  ivec3 cell=clamp(ivec3(floor(uCamera+ray*(t+EPS))),ivec3(0),ivec3(uSize)-1);
@@ -183,16 +203,21 @@ vec3 trace(vec2 pixel){
   if(any(lessThan(cell,ivec3(0)))||any(greaterThanEqual(cell,ivec3(uSize)))){finished=true;break;}
   int level;bool cellLevel;uint parts;
   uint current=locate(cell,level,cellLevel,parts);
+  // 跨过整块空域说明已经离开树冠。
+  if(current==0u&&level>=2)foliage=1.0;
   int width=1<<level;
   ivec3 lower=((cell+uDirectoryOffset)&ivec3(~(width-1)))-uDirectoryOffset;
   uvec4 description=current==0u?uvec4(0):model(current);
+  // 镂空立方体（树叶、格栅）对介质规则而言等同空气，只在进入时测本格的入射面，相邻同类之间的面也可见。
+  bool cutout=description.x==3u;uint cutoutFaces=description.y;
   uint medium=description.x==1u?current:0u;if(medium==0u)description=uvec4(0);
   int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
   if(entering){
    if(!inside&&!sameMedium(previous,previousModel.w,medium,description.w)){
-    if(previous!=0u)cubeSurface(previousModel.y,side^1,t);
-    if(transmission>0.001&&medium!=0u)cubeSurface(description.y,side,t);
+    if(previous!=0u)cubeSurface(previousModel.y,side^1,t,false);
+    if(transmission>0.001&&medium!=0u)cubeSurface(description.y,side,t,false);
    }
+   if(cutout&&!inside&&transmission>0.001&&!cubeSurface(cutoutFaces,side,t,true))foliage*=0.6;
    inside=false;previous=medium;previousModel=description;entering=false;
   }
   if(transmission<=.001){finished=true;break;}
@@ -206,7 +231,7 @@ vec3 trace(vec2 pixel){
   }
   if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.normal,hit.unlit);if(transmission<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
   t=end;cell=nextCell;side=exitSide^1;entering=true;
-  if(t>=last-EPS){if(previous!=0u&&transmission>.001)cubeSurface(previousModel.y,exitSide,t);finished=true;break;}
+  if(t>=last-EPS){if(previous!=0u&&transmission>.001)cubeSurface(previousModel.y,exitSide,t,false);finished=true;break;}
  }
  vec3 sky=mix(vec3(.32,.44,.60),vec3(.68,.78,.88),clamp(1.0-ray.y,0.0,1.0));
  if(!finished)return vec3(1,0,1);

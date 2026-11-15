@@ -202,7 +202,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     allocated += image.width * image.height * 4;
   }
   /** 完整方块的面贴图：16×16 纹理数组，带预先生成的 mip，按线性预乘 alpha 存放。
-   * 着色器给出解析梯度，由硬件完成三线性与各向异性过滤。
+   * 着色器由射线微分算出 mip 级，并沿斜看方向多点采样。
    * @param {number} unit @param {ArrayBuffer} buffer @param {number} layers
    */
   function surfaceTexture(unit, buffer, layers) {
@@ -232,18 +232,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       );
       offset += length;
     }
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    // 放大时保持像素风格的硬边。
+    // 级内最近点保持像素硬边，级间线性混合；斜看方向的多点采样由着色器完成。
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    const anisotropic = gl.getExtension("EXT_texture_filter_anisotropic");
-    if (anisotropic)
-      gl.texParameterf(
-        gl.TEXTURE_2D_ARRAY,
-        anisotropic.TEXTURE_MAX_ANISOTROPY_EXT,
-        Math.min(8, gl.getParameter(anisotropic.MAX_TEXTURE_MAX_ANISOTROPY_EXT)),
-      );
     gl.uniform1i(uniforms.get("uSurfaces"), unit);
     allocated += data.byteLength;
   }
