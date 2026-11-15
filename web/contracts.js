@@ -8,8 +8,8 @@
 /** @typedef {{texture:ObjectTexture,bounds:[Vec3,Vec3],parts:ObjectPart[],pose:(time:number,partIndex:number)=>ObjectPose}} ObjectRecipe 对象工厂产物；bounds 必须覆盖整个动画，相对 descriptor.position。 */
 /** @typedef {(descriptor:ObjectDescriptor)=>ObjectRecipe|Promise<ObjectRecipe>} ObjectFactory 外观实现无需接触 WebGL 或存档读取。 */
 /** @typedef {{key:string,owner:Vec3,replace:boolean,bounds:[Vec3,Vec3],ids:number[]}} ObjectReference 格子准备器使用的活动部件候选。 */
-/** @typedef {{position:Vec3,bits:number,palette:Uint32Array,words:Uint32Array}} SourceSection 压缩 section；palette 按近景、远景交替保存模型编号，格子索引为 XZY。 */
+/** @typedef {{position:Vec3,bits:number,palette:Uint32Array,words:Uint32Array}} SourceSection 压缩 section；palette 保存唯一的静态模型编号，格子索引为 XZY。 */
 /** @typedef {{sections:SourceSection[],unknown:number,bytes:number}} SourceRegion 8×8 区块区域的输入数据。 */
-/** @typedef {{nearSections:number,farSections:number,prepareMS:number}} RegionStatistics 已准备区域的统计。 */
+/** @typedef {{sections:number,prepareMS:number}} RegionStatistics 已准备区域的统计。 */
 /** @typedef {{key:string,x:number,z:number,words:Uint32Array,headers:Uint32Array,coarse:Uint32Array,relocations:Uint32Array,stats:RegionStatistics}} PreparedRegion 可增量上传的区域；relocations 指出 words 内需要加上显存基址的地址项。 */
 export {};

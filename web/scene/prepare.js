@@ -1,9 +1,5 @@
 const MIXED = 0xffffffff;
 export const regionKey = (x, z) => `${x}/${z}`;
-export const nearSection = (position, center, radius) =>
-  (position[0] - center[0]) ** 2 + (position[2] - center[2]) ** 2 <=
-    radius ** 2 &&
-  Math.abs(position[1] - center[1]) <= Math.min(radius + 1, 12);
 const sectionKey = (p) => p.join("/"),
   cellIndex = (x, y, z) => (x << 8) | (z << 4) | y;
 class Words {
@@ -30,14 +26,14 @@ export function decodeRegion(buffer) {
   const data = new Uint32Array(buffer),
     sections = [];
   let p = 3;
-  if (data[0] !== 0x32504c54) throw Error("无法识别区块数据格式");
+  if (data[0] !== 0x33504c54) throw Error("无法识别区块数据格式");
   for (let n = 0; n < data[1]; n++) {
     const position = [data[p++] | 0, data[p++] | 0, data[p++] | 0],
       bits = data[p++],
       count = data[p++],
       length = data[p++],
-      palette = data.subarray(p, p + count * 2);
-    p += count * 2;
+      palette = data.subarray(p, p + count);
+    p += count;
     const words = data.subarray(p, p + length);
     p += length;
     sections.push({ position, bits, palette, words });
@@ -56,20 +52,12 @@ export function unpack(section) {
       ];
   return cells;
 }
-function select(section, center, radius) {
-  const near = nearSection(section.position, center, radius),
-    palette = new Uint32Array(section.palette.length / 2);
-  for (let i = 0; i < palette.length; i++)
-    palette[i] = section.palette[i * 2 + (near ? 0 : 1)];
-  return { ...section, near, palette };
-}
 function empty(position) {
   return {
     position,
     bits: 0,
     palette: new Uint32Array([0]),
     words: new Uint32Array(),
-    near: true,
   };
 }
 /** 只替换已准备好实例的本体；同 section 的其他方块保留原值。 */
@@ -92,22 +80,14 @@ function replaceCells(section, indices) {
   return { ...section, palette: new Uint32Array(palette), words, bits };
 }
 /** 准备单个目标区域，同时收集相邻来源的预裁片；片段归属跟随来源，输出归属目标格。 */
-export function prepareRegion({
-  x,
-  z,
-  regions,
-  catalog,
-  center,
-  radius,
-  objects = [],
-}) {
+export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
   const started = performance.now(),
     source = regions.get(regionKey(x, z)),
     sections = new Map(),
     fragments = new Map(),
     replacements = new Map();
   for (const section of source.sections)
-    sections.set(sectionKey(section.position), select(section, center, radius));
+    sections.set(sectionKey(section.position), section);
   const ensure = (position) => {
     const key = sectionKey(position);
     if (!sections.has(key)) sections.set(key, empty(position));
@@ -133,8 +113,7 @@ export function prepareRegion({
     for (let dx = -halo; dx <= halo; dx++)
       for (const raw of regions.get(regionKey(x + dx, z + dz))?.sections ||
         []) {
-        if (!nearSection(raw.position, center, radius)) continue;
-        const section = select(raw, center, radius);
+        const section = raw;
         if (!section.palette.some((id) => catalog.models[id].fragments?.length))
           continue;
         const cells = unpack(section);
@@ -181,8 +160,7 @@ export function prepareRegion({
     headers = [],
     coarse = [],
     stats = {
-      nearSections: 0,
-      farSections: 0,
+      sections: 0,
       fragmentReferences: 0,
       unknown: source.unknown,
     };
@@ -192,7 +170,7 @@ export function prepareRegion({
         : original,
       parts = fragments.get(key),
       uniform = section.palette[0];
-    stats[section.near ? "nearSections" : "farSections"]++;
+    stats.sections++;
     const position = section.position,
       index =
         position[0] -

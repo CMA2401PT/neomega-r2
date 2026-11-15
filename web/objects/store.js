@@ -92,7 +92,7 @@ export class ObjectStore {
     this.images.set(name, cached);
     return cached;
   }
-  /** 每个拥有者区域独立增删实例，跨格候选交给场景准备器分发。 */
+  /** 更新拥有者区域的实例，返回候选是否改变；无变化时宿主不必重建静态区域。 */
   /** @param {string} key @param {import("../contracts.js").ObjectDescriptor[]} descriptors @param {import("./registry.js").ObjectRegistry} registry */
   async setRegion(key, descriptors, registry) {
     const previous = this.regions.get(key) || new Set(),
@@ -133,7 +133,10 @@ export class ObjectStore {
     }
     for (const name of previous) if (!next.has(name)) this.remove(name);
     this.regions.set(key, next);
-    return this.references();
+    return (
+      previous.size !== next.size ||
+      [...previous].some((name) => !next.has(name))
+    );
   }
   remove(name) {
     const object = this.objects.get(name);
@@ -152,8 +155,10 @@ export class ObjectStore {
     this.objects.delete(name);
   }
   removeRegion(key) {
+    const changed = (this.regions.get(key)?.size || 0) > 0;
     for (const name of this.regions.get(key) || []) this.remove(name);
     this.regions.delete(key);
+    return changed;
   }
   /** @returns {import("../contracts.js").ObjectReference[]} */
   references() {

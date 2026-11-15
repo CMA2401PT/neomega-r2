@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareRegion, unpack } from "../web/scene/prepare.js";
+import { prepareRegion, unpack, decodeRegion } from "../web/scene/prepare.js";
 import { WordAllocator } from "../web/render/allocator.js";
 import { ObjectStore } from "../web/objects/store.js";
 import { ObjectRegistry } from "../web/objects/registry.js";
@@ -17,7 +17,7 @@ const catalog = {
 const raw = (position, indices) => {
   const words = new Uint32Array(128);
   for (const index of indices) words[index >> 5] |= 1 << (index & 31);
-  return { position, bits: 1, palette: new Uint32Array([0, 0, 2, 1]), words };
+  return { position, bits: 1, palette: new Uint32Array([0, 2]), words };
 };
 function cell(region, sectionIndex, index) {
   const h = region.headers,
@@ -43,7 +43,7 @@ function cell(region, sectionIndex, index) {
       : [],
   };
 }
-test("预裁片进入相邻区域，与目标格本体共存，来源卸载后不残留", () => {
+test("静态预裁片不受近景范围影响，跨区域共存，来源卸载后不残留", () => {
   const owner = {
     sections: [raw([7, 0, 0], [(15 << 8) | (3 << 4) | 2])],
     unknown: 0,
@@ -53,7 +53,7 @@ test("预裁片进入相邻区域，与目标格本体共存，来源卸载后�
       {
         position: [8, 0, 0],
         bits: 0,
-        palette: new Uint32Array([1, 1]),
+        palette: new Uint32Array([1]),
         words: new Uint32Array(),
       },
     ],
@@ -63,13 +63,15 @@ test("预裁片进入相邻区域，与目标格本体共存，来源卸载后�
       ["0/0", owner],
       ["1/0", target],
     ]),
-    options = { x: 1, z: 0, regions, catalog, center: [8, 0, 0], radius: 8 };
+    options = { x: 1, z: 0, regions, catalog };
   const near = prepareRegion(options),
     actual = cell(near, 8 * 4, (3 << 4) | 2);
   assert.equal(actual.model, 1);
   assert.deepEqual(actual.parts, [3]);
   const far = prepareRegion({ ...options, center: [40, 0, 0], radius: 1 });
-  assert.deepEqual(cell(far, 8 * 4, (3 << 4) | 2).parts, []);
+  assert.deepEqual(far.words, near.words);
+  assert.deepEqual(far.headers, near.headers);
+  assert.deepEqual(cell(far, 8 * 4, (3 << 4) | 2).parts, [3]);
   regions.delete("0/0");
   assert.deepEqual(cell(prepareRegion(options), 8 * 4, (3 << 4) | 2).parts, []);
 });
@@ -82,7 +84,7 @@ test("实例跨负坐标边界，替换只影响准备好的本体格", () => {
           {
             position: [-1, 0, 0],
             bits: 0,
-            palette: new Uint32Array([1, 1]),
+            palette: new Uint32Array([1]),
             words: new Uint32Array(),
           },
         ],
@@ -95,8 +97,6 @@ test("实例跨负坐标边界，替换只影响准备好的本体格", () => {
     z: 0,
     regions,
     catalog,
-    center: [0, 0, 0],
-    radius: 8,
     objects: [
       {
         owner: [-1, 2, 0],
@@ -162,7 +162,7 @@ test("循环目录移动不重新分配区域，释放后父层也清空", () =>
             {
               position: [-1, 0, 0],
               bits: 0,
-              palette: new Uint32Array([1, 1]),
+              palette: new Uint32Array([1]),
               words: new Uint32Array(),
             },
           ],
@@ -171,8 +171,6 @@ test("循环目录移动不重新分配区域，释放后父层也清空", () =>
       ],
     ]),
     catalog,
-    center: [0, 0, 0],
-    radius: 8,
   });
   gpu.install(prepared);
   const used = gpu.allocator.used;
@@ -230,4 +228,19 @@ test("不同类型共用实例层，旧候选句柄不指向回收后新部件",
   store.clear();
   assert.equal(store.images.size, 0);
   assert(store.tiles.every((v) => v === 0));
+});
+
+// 传输表只保留一个模型编号；压缩索引不在浏览器解码阶段展开。
+test("单份静态调色板传输保留复杂模型编号", () => {
+  const buffer = new Uint32Array([0x33504c54, 1, 0, 7, 0, 0, 0, 1, 0, 2])
+    .buffer;
+  const region = decodeRegion(buffer);
+  assert.deepEqual([...region.sections[0].palette], [2]);
+  const prepared = prepareRegion({
+    x: 0,
+    z: 0,
+    regions: new Map([["0/0", region]]),
+    catalog,
+  });
+  assert.equal(cell(prepared, 7 + 8 * 4, 0).model, 2);
 });
