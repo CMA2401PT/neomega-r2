@@ -277,19 +277,21 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       gl.deleteQuery(q);
     }
     const q = timer && queries.length < 8 ? gl.createQuery() : null;
+    // GPU 时间包括射线绘制与显示合成（泛光、色调映射）。
     if (q) gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    accumulator.present({ exposure, raw: debug !== 0 });
     if (q) {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
       queries.push(q);
     }
-    accumulator.present({ exposure, raw: debug !== 0 });
     if (synchronize)
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
   }
   /** 离屏渲染一张高质量照片：每个像素累积 samples 个样本，光线最多反弹 bounces 次。
    * 一个样本要跑很久，整张画面一次画完可能触发 Windows 的显卡超时重置，
-   * 所以画面切成小块，每次 step() 只提交一批，并按上一批是否已在一帧内完成调整批量。
+   * 所以画面切成小块分批提交。GPU 上始终排着两批，一批画完时下一批已经在等，不必空等下一帧；
+   * 批量按完成速度调整：每帧都把队列画空就加倍，一批拖过两帧就减半。
    * 宿主在每个动画帧调用 step()，期间暂停交互绘制；完成后用 png() 取图，再 dispose()。
    * @param {{position:number[],yaw:number,pitch:number}} camera
    * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number}} options
@@ -317,50 +319,57 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       view = { ...camera, position: [...camera.position] };
     let done = 0,
       batch = 1,
-      fence = null,
-      // 上一批提交后经过的 step 次数；下一帧就完成说明批量还能加大。
-      waited = 0,
       exposure = 1;
+    // 已提交、尚未完成的批次；age 是提交后经过的 step 次数。
+    /** @type {{sync:WebGLSync,age:number}[]} */
+    const pending = [];
+    /** 把接下来的 batch 个小块提交给 GPU，末尾插一个栅栏。 */
+    function submit() {
+      gl.enable(gl.SCISSOR_TEST);
+      for (const end = Math.min(total, done + batch); done < end; done++) {
+        const tile = done % tiles.length;
+        // 每轮样本开始时换一次随机种子，同一轮的各个小块共用相机和光照。
+        if (tile === 0)
+          exposure = prepare(view, {
+            width,
+            height,
+            pass: film.begin(true),
+            bounces,
+            time,
+            debug: 0,
+            hierarchy: true,
+            fragments: true,
+            shadows,
+            sun,
+            fog,
+          });
+        gl.scissor(...tiles[tile], PHOTO_TILE, PHOTO_TILE);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      gl.disable(gl.SCISSOR_TEST);
+      pending.push({
+        sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
+        age: 0,
+      });
+      gl.flush();
+    }
     return {
-      /** 提交下一批小块；上一批还没画完时什么都不做。返回是否已全部完成。 */
+      /** 收回已完成的批次，把队列补到两批。返回是否已全部画完。 */
       step() {
-        if (fence) {
-          waited++;
-          if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED)
-            return false;
-          gl.deleteSync(fence);
-          fence = null;
-          batch =
-            waited === 1
-              ? Math.min(batch * 2, tiles.length)
-              : Math.max(1, batch >> 1);
+        for (const item of pending) item.age++;
+        if (pending[0]?.age > 2) {
+          batch = Math.max(1, batch >> 1);
+          pending[0].age = -Infinity;
         }
-        if (done === total) return true;
-        gl.enable(gl.SCISSOR_TEST);
-        for (const end = Math.min(total, done + batch); done < end; done++) {
-          const tile = done % tiles.length;
-          // 每轮样本开始时换一次随机种子，同一轮的各个小块共用相机和光照。
-          if (tile === 0)
-            exposure = prepare(view, {
-              width,
-              height,
-              pass: film.begin(true),
-              bounces,
-              time,
-              debug: 0,
-              hierarchy: true,
-              fragments: true,
-              shadows,
-              sun,
-              fog,
-            });
-          gl.scissor(...tiles[tile], PHOTO_TILE, PHOTO_TILE);
-          gl.drawArrays(gl.TRIANGLES, 0, 3);
-        }
-        gl.disable(gl.SCISSOR_TEST);
-        fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-        waited = 0;
-        gl.flush();
+        while (
+          pending.length &&
+          gl.getSyncParameter(pending[0].sync, gl.SYNC_STATUS) === gl.SIGNALED
+        )
+          gl.deleteSync(pending.shift().sync);
+        if (done === total) return pending.length === 0;
+        if (!pending.length && done > 0)
+          batch = Math.min(batch * 2, tiles.length);
+        while (pending.length < 2 && done < total) submit();
         return false;
       },
       /** 已完成的比例，0 到 1。 */
@@ -383,7 +392,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         return target.convertToBlob({ type: "image/png" });
       },
       dispose() {
-        if (fence) gl.deleteSync(fence);
+        for (const item of pending) gl.deleteSync(item.sync);
         film.dispose();
       },
     };

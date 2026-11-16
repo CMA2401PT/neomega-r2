@@ -40,7 +40,8 @@ vec3 eye,ray,invRay;
 vec3 radiance,directSum,throughput;
 // 两个代表表面：权重最大的受光面向光源发阴影射线；累积时，权重最大的任意面做一次漫反射反弹。
 // 反弹面另记镜面部分的权重（透过率×菲涅耳）、着色法线与入射方向，累积时按两者的大小选择漫反射或镜面方向。
-vec3 shadePoint,shadeNormal,bouncePoint,bounceNormal,bounceAlbedo,bounceSpecular,bounceShading,bounceView;
+// bounceAmbient 是反弹面已经计入的常量环境光，反弹时用实际看到的亮度把它换掉。
+vec3 shadePoint,shadeNormal,bouncePoint,bounceNormal,bounceAlbedo,bounceAmbient,bounceSpecular,bounceShading,bounceView;
 float bounceRoughness;
 float shadeWeight,bounceWeight;
 // 本像素的光照：光源方向与亮度（白天为太阳，夜间为月亮），以及来自天空的常量环境光。
@@ -87,9 +88,9 @@ vec3 skyRadiance(vec3 d){
 vec3 waveNormal(vec2 p){
  vec2 slope=vec2(0);
  for(int i=0;i<4;i++){
-  float fi=float(i),angle=fi*2.4+.6,frequency=1.1+fi*.85;
+  float fi=float(i),angle=fi*2.4+.6,frequency=.55+fi*.45;
   vec2 d=vec2(cos(angle),sin(angle));
-  slope+=d*frequency*cos(dot(d,p)*frequency+uTime*(1.2+fi*.4))*.035/(1.0+fi*.5);
+  slope+=d*frequency*cos(dot(d,p)*frequency+uTime*(.9+fi*.35))*.11/(1.0+fi*.5);
  }
  return normalize(vec3(-slope.x,1,-slope.y));
 }
@@ -171,12 +172,15 @@ void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit){
  float lit=dot(m.geometric,lightDir)>0.0?1.0:0.0;
  float direct=max(dot(m.normal,lightDir),0.0)*lit;
  vec3 specular=weight*fresnel3(dot(m.normal,-ray),m.f0,m.roughness)*m.occlusion;
- radiance+=diffuse*ambient+weight*rgb*m.emission*EMISSION;
+ // 常量环境光按朝向打折：朝上的面看到整片天空，侧面和朝下的面有一半以上被地面与周围遮住。
+ // 累积反弹会把它换成实际看到的亮度，这里只让预览的明暗接近收敛后的画面。
+ vec3 sky=diffuse*ambient*(.7+.3*m.normal.y);
+ radiance+=sky+weight*rgb*m.emission*EMISSION;
  directSum+=(diffuse*direct+weight*specularLight(m,ray,lightDir)*lit)*lightColor;
  float w=brightest(weight);
  if(lit>0.0&&w>shadeWeight){shadeWeight=w;shadePoint=eye+ray*t;shadeNormal=m.geometric;}
  if(w>bounceWeight){
-  bounceWeight=w;bouncePoint=eye+ray*t;bounceNormal=m.geometric;bounceAlbedo=diffuse;
+  bounceWeight=w;bouncePoint=eye+ray*t;bounceNormal=m.geometric;bounceAlbedo=diffuse;bounceAmbient=sky;
   bounceSpecular=specular;bounceShading=m.normal;bounceView=ray;bounceRoughness=m.roughness;
  }
  throughput*=1.0-alpha;
@@ -474,12 +478,13 @@ vec3 tracePixel(vec2 pixel){
  // 迭代用尽时输出极亮的品红，色调映射后仍是纯品红，实验脚本据此统计。
  if(!march())return vec3(1e4,0,1e4);
  bool soft=uPass==1;
- float fog=touched?1.0-exp(-3.0*pow(firstDepth/uFog,4.0)):0.0;
+ // 八次方让近处几乎没有雾，接近雾距离时才迅速变浓。
+ float fog=touched?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
  // 后面的射线会覆盖合成结果与代表表面，先把主射线需要的部分留下。
  vec3 front=radiance,frontDirect=directSum,behind=throughput*background(view);
  bool water=mirrored,bounce=uPass==1&&bounceWeight>0.0;
  vec3 waterPoint=mirrorPoint,waterWeight=mirrorWeight,above=mirrorRadiance,aboveDirect=mirrorDirect;
- vec3 weight=bounceAlbedo,specular=bounceSpecular,point=bouncePoint,normal=bounceNormal,shading=bounceShading,incoming=bounceView;
+ vec3 weight=bounceAlbedo,constant=bounceAmbient,specular=bounceSpecular,point=bouncePoint,normal=bounceNormal,shading=bounceShading,incoming=bounceView;
  float roughness=bounceRoughness;
  vec3 visible=uShadows&&shadeWeight>0.0?sunVisibility(shadePoint+shadeNormal*1e-3,soft?coneDirection(lightDir,.012):lightDir):vec3(1);
  vec3 color=front+frontDirect*visible+behind;
@@ -494,7 +499,7 @@ vec3 tracePixel(vec2 pixel){
   color=kept+(1.0-f)*(color-kept)+f*waterWeight*seen;
  }
  if(bounce){
-  color-=weight*ambient;
+  color-=constant;
   for(int b=0;b<4;b++){
    if(b>=uBounces)break;
    // 按漫反射与镜面两部分的大小随机选一个方向，再除以选中的概率，期望仍是两部分之和。
@@ -510,10 +515,10 @@ vec3 tracePixel(vec2 pixel){
    vec3 toward=ray;
    march();
    bool more=bounceWeight>0.0&&b+1<uBounces;
-   vec3 hitAlbedo=bounceAlbedo,hitSpecular=bounceSpecular,hitPoint=bouncePoint,hitNormal=bounceNormal;
+   vec3 hitAlbedo=bounceAlbedo,hitAmbient=bounceAmbient,hitSpecular=bounceSpecular,hitPoint=bouncePoint,hitNormal=bounceNormal;
    color+=carried*(radiance+throughput*skyRadiance(toward)+directLight(true));
    if(!more)break;
-   color-=carried*hitAlbedo*ambient;
+   color-=carried*hitAmbient;
    weight=carried*hitAlbedo;specular=carried*hitSpecular;point=hitPoint;normal=hitNormal;
    shading=bounceShading;incoming=bounceView;roughness=bounceRoughness;
   }
