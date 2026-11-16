@@ -46,18 +46,13 @@ const quantile = (a, q) =>
       }, view);
       for (const [width, height, samples] of [
         [1920, 1080, 1],
-        [1920, 1080, 2],
-        [1920, 1080, 4],
         [2560, 1440, 1],
         [1600, 900, 1],
-        [1280, 720, 2],
-        [960, 540, 2],
-        [960, 540, 4],
-        [800, 450, 4],
-        [640, 360, 4],
+        [1280, 720, 1],
+        [960, 540, 1],
+        [640, 360, 1],
       ]) {
         await page.setViewportSize({ width, height });
-        await page.selectOption("#samples", String(samples));
         await page.evaluate(() => r2.resetTiming());
         await page.waitForFunction(() => r2.state.times.length >= 100, null, {
           timeout: 120000,
@@ -106,7 +101,6 @@ const quantile = (a, q) =>
       }
     }
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.selectOption("#samples", "1");
     await page.evaluate(() => {
       r2.synchronize = false;
       const start = performance.now();

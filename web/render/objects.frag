@@ -15,5 +15,5 @@ void intersectObject(uint handle,float begin,float end,inout Hit hit){
  bool plus=entering?d[axis]<0.0:d[axis]>0.0;vec3 p=(o+d*t-minimum.xyz)/(maximum.xyz-minimum.xyz);
  vec2 uv=axis==0?vec2(p.z,1.0-p.y):axis==1?p.xz:vec2(p.x,1.0-p.y);vec4 region=objectWord(at+6+axis*2+int(plus));
  vec4 texel=texture(uObjectAtlas,region.xy+clamp(uv,vec2(.00001),vec2(.99999))*region.zw);if(texel.a<.1)return;
- faceTests++;vec3 normal=vec3(0);normal[axis]=plus?1.0:-1.0;hit.t=t;hit.color=linearColor(texel.rgb);hit.alpha=1.0;hit.normal=normalize(transpose(mat3(inverseModel))*normal);hit.unlit=false;
+ faceTests++;vec3 normal=vec3(0);normal[axis]=plus?1.0:-1.0;hit.t=t;hit.color=linearColor(texel.rgb);hit.alpha=1.0;vec3 n=normalize(transpose(mat3(inverseModel))*normal);hit.material=plainMaterial(dot(n,ray)>0.0?-n:n);hit.unlit=false;
 }

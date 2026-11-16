@@ -135,7 +135,6 @@ function render(now) {
   renderer.draw(camera, {
     width,
     height,
-    samples: Number(document.querySelector("#samples").value),
     time: globalThis.r2.fixedTime ?? now / 1000,
     debug: Number(document.querySelector("#debug").value),
     hierarchy: document.querySelector("#hierarchy").checked,

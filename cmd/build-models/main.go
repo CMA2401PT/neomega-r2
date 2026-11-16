@@ -16,6 +16,7 @@ import (
 	java "neomega-blocks/presets/java/v1"
 	r2 "neomega-r2"
 	geometry "neomega-r2/internal/sourcegeometry"
+	"neomega-r2/internal/texturepack"
 )
 
 type cubeMaterial struct {
@@ -58,16 +59,24 @@ func generate() error {
 	if err = gob.NewDecoder(reader).Decode(&records); err != nil {
 		return err
 	}
-	grid, err := openSurfaceGrid("sourceassets/surfaces.png")
-	if err != nil {
-		return err
-	}
 	cubes := map[string]cubeMaterial{}
 	for _, r := range records {
 		cubes[r.State] = r.Material
 	}
-	catalog := r2.Catalog{States: map[string]uint32{}, Models: []r2.Model{{}}, Statistics: map[string]int{}}
-	fastIDs := map[cubeMaterial]uint32{}
+	catalog := r2.Catalog{
+		States:     map[string]uint32{},
+		Models:     []r2.Model{{}},
+		Statistics: map[string]int{},
+	}
+	type cubeKey struct {
+		Faces [6][16]float32
+		Group uint32
+	}
+	fastIDs := map[cubeKey]uint32{}
+	recipes := &textureRecipes{
+		manifest: texturepack.Manifest{Textures: map[string][4]float32{}},
+		ids:      map[string]int{},
+	}
 	shapeIDs := map[string]uint32{}
 	var fast []float32
 	// 引用按模型连续存放，记录按内容去重；同一面在不同状态组合里只保存一份记录。
@@ -84,18 +93,27 @@ func generate() error {
 		}
 		m := cubes[name]
 		if m.Textures[0][9] > 0 {
-			id, ok := fastIDs[m]
+			var cubeQuads []geometry.Quad
+			for _, sourceID := range tables.Index[state.Hash()] {
+				if full, ok := tables.FullHeight[sourceID]; ok {
+					sourceID = full
+				}
+				cubeQuads = append(cubeQuads, tables.Shapes[sourceID].Quads...)
+			}
+			encodedFaces := recipes.cube(m, cubeQuads)
+			key := cubeKey{Faces: encodedFaces, Group: m.Group}
+			id, ok := fastIDs[key]
 			if !ok {
 				id = uint32(len(catalog.Models))
-				fastIDs[m] = id
-				model := r2.Model{Kind: 1, Offset: uint32(len(fast) / 4), Count: 6, Group: m.Group}
-				for face, values := range m.Textures {
-					encoded := encodeCubeFace(grid, values, m.Faces[face])
+				fastIDs[key] = id
+				model := r2.Model{
+					Kind:   1,
+					Offset: uint32(len(fast) / 4),
+					Count:  6,
+					Group:  m.Group,
+				}
+				for _, encoded := range encodedFaces {
 					fast = append(fast, encoded[:]...)
-					// 源资源把树叶标为不透明，洞里是黑色；贴图本身有透明像素的不透明面按镂空处理。
-					if values[11] == 0 && encoded[6] >= 0 && grid.hasHoles(int(encoded[6])) {
-						model.Kind = 3
-					}
 				}
 				catalog.Models = append(catalog.Models, model)
 			}
@@ -122,7 +140,8 @@ func generate() error {
 			catalog.Unsupported = append(catalog.Unsupported, name)
 			continue
 		}
-		lo, hi := [3]float64{math.Inf(1), math.Inf(1), math.Inf(1)}, [3]float64{math.Inf(-1), math.Inf(-1), math.Inf(-1)}
+		lo := [3]float64{math.Inf(1), math.Inf(1), math.Inf(1)}
+		hi := [3]float64{math.Inf(-1), math.Inf(-1), math.Inf(-1)}
 		for _, q := range quads {
 			for _, p := range q.Positions {
 				for a := range 3 {
@@ -155,6 +174,8 @@ func generate() error {
 							recordID = uint32(len(surfaces))
 							recordIDs[record] = recordID
 							surfaces = append(surfaces, record)
+							recipes.registerTexture(q)
+							recipes.manifest.Quads = append(recipes.manifest.Quads, q.Surface.Texture)
 						}
 						reference[2] = recordID
 						references = append(references, reference)
@@ -188,7 +209,12 @@ func generate() error {
 	for _, model := range catalog.Models {
 		headers = append(headers, model.Kind, model.Offset, model.Count, model.Group)
 	}
-	for name, data := range map[string]any{"headers.bin": headers, "fast.bin": fast, "quad-references.bin": references, "quad-records.bin": surfaces} {
+	for name, data := range map[string]any{
+		"headers.bin":         headers,
+		"fast.bin":            fast,
+		"quad-references.bin": references,
+		"quad-records.bin":    surfaces,
+	} {
 		f, err := os.Create("assets/" + name)
 		if err != nil {
 			return err
@@ -207,9 +233,7 @@ func generate() error {
 		layers = max(layers, int(fast[i+6])+1)
 	}
 	catalog.Statistics["surfaceLayers"] = layers
-	if err = grid.writeLayers("assets/surface-layers.bin", layers); err != nil {
-		return err
-	}
+
 	encoded, err := json.Marshal(catalog)
 	if err != nil {
 		return err
@@ -217,6 +241,40 @@ func generate() error {
 	if err = os.WriteFile("assets/catalog.json", encoded, 0644); err != nil {
 		return err
 	}
+	manifest, err := json.Marshal(recipes.manifest)
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile("assets/textures.json", manifest, 0644); err != nil {
+		return err
+	}
+	baseAtlas, err := os.ReadFile("sourceassets/atlas.png")
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile("assets/base-atlas.png", baseAtlas, 0644); err != nil {
+		return err
+	}
+	// 原始表供每次换包重新推导，避免继承上一包的透明分类和图集区域。
+	for _, name := range []string{"catalog.json", "fast.bin", "quad-records.bin"} {
+		data, err := os.ReadFile("assets/" + name)
+		if err != nil {
+			return err
+		}
+		if err = os.WriteFile("assets/base-"+name, data, 0644); err != nil {
+			return err
+		}
+	}
+	set, err := texturepack.Build(os.DirFS("assets"), nil, 128)
+	if err != nil {
+		return err
+	}
+	for name, data := range set.Files {
+		if err = os.WriteFile("assets/"+name, data, 0644); err != nil {
+			return err
+		}
+	}
+
 	summary, err := json.MarshalIndent(catalog.Statistics, "", "  ")
 	if err != nil {
 		return err

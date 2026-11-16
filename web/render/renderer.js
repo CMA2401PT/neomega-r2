@@ -1,8 +1,14 @@
+import { createTextures } from "./textures.js";
+import { createAccumulator } from "./accumulator.js";
 import { WorldGPU } from "./world-gpu.js";
 import { ObjectStore } from "../objects/store.js";
 import { prepareRegion } from "../scene/prepare.js";
 import { gridRegions } from "../scene/grid.js";
 
+// 水体按距离吸收光线，着色器需要知道哪个介质组是水。
+const WATER = 'minecraft:water ["level"="0"]';
+// 拍照时每次绘制覆盖的方块边长（像素）。
+const PHOTO_TILE = 256;
 // 垂直视场 65° 时，距离 1 处画面的高度。
 const SPAN = 2 * Math.tan((65 * Math.PI) / 360);
 /** 相机朝向的三条轴；绘制与可见性判断共用。
@@ -84,168 +90,24 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uSun",
     "uWorldData",
     "uSections",
-    "uSamples",
+    "uPass",
+    "uFrame",
+    "uWaterGroup",
+    "uFog",
+    "uTime",
+    "uBounces",
     "uDirectoryOffset",
     "uObjectData",
     "uObjectAtlas",
     "uObjectsEnabled",
   ])
     uniforms.set(name, gl.getUniformLocation(program, name));
-  const [
-    headerBuffer,
-    fastBuffer,
-    recordBuffer,
-    referenceBuffer,
-    layerBuffer,
-    catalog,
-  ] = await Promise.all(
-      [
-        "headers.bin",
-        "fast.bin",
-        "quad-records.bin",
-        "quad-references.bin",
-        "surface-layers.bin",
-        "catalog.json",
-      ].map((name) =>
-        fetch(assets + name).then((r) =>
-          name.endsWith(".json") ? r.json() : r.arrayBuffer(),
-        ),
-      ),
-    );
-  const headers = new Uint32Array(headerBuffer);
-  let allocated = 0;
-  const textures = [];
-  /** 上传共享表或片段编号表；表内索引均以纹素为单位。
-   * @param {number} unit
-   * @param {string} name
-   * @param {Uint32Array | Float32Array} input
-   * @param {number} components
-   * @param {boolean} integer
-   */
-  function tableTexture(unit, name, input, components, integer, width = 2048) {
-    const height = Math.max(1, Math.ceil(input.length / components / width));
-    const data = integer
-      ? new Uint32Array(width * height * components)
-      : new Float32Array(width * height * components);
-    data.set(input);
-    const texture = gl.createTexture();
-
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    const format = integer
-      ? components === 1
-        ? gl.RED_INTEGER
-        : gl.RGBA_INTEGER
-      : gl.RGBA;
-    const internal = integer
-      ? components === 1
-        ? gl.R32UI
-        : gl.RGBA32UI
-      : gl.RGBA32F;
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      internal,
-      width,
-      height,
-      0,
-      format,
-      integer ? gl.UNSIGNED_INT : gl.FLOAT,
-      data,
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.uniform1i(uniforms.get(name), unit);
-    allocated += data.byteLength;
-    return { texture, bytes: data.byteLength };
-  }
-  textures.push(
-    tableTexture(
-      8,
-      "uQuadReferences",
-      new Uint32Array(referenceBuffer),
-      4,
-      true,
-    ).texture,
-  );
-  textures.push(tableTexture(2, "uModels", headers, 4, true).texture);
-  textures.push(
-    tableTexture(3, "uQuadRecords", new Float32Array(recordBuffer), 4, false)
-      .texture,
-  );
-  textures.push(
-    tableTexture(4, "uFast", new Float32Array(fastBuffer), 4, false).texture,
-  );
-  /** @param {number} unit @param {string} name @param {string} url @param {boolean} linear */
-  async function imageTexture(unit, name, url, linear) {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    const texture = gl.createTexture();
-    textures.push(texture);
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MIN_FILTER,
-      linear ? gl.LINEAR : gl.NEAREST,
-    );
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MAG_FILTER,
-      linear ? gl.LINEAR : gl.NEAREST,
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.uniform1i(uniforms.get(name), unit);
-    allocated += image.width * image.height * 4;
-  }
-  /** 完整方块的面贴图：16×16 纹理数组，带预先生成的 mip，按线性预乘 alpha 存放。
-   * 着色器由射线微分算出 mip 级，并沿斜看方向多点采样。
-   * @param {number} unit @param {ArrayBuffer} buffer @param {number} layers
-   */
-  function surfaceTexture(unit, buffer, layers) {
-    const data = new Uint8Array(buffer),
-      levels = 5,
-      texture = gl.createTexture();
-    textures.push(texture);
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
-    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.SRGB8_ALPHA8, 16, 16, layers);
-    let offset = 0;
-    for (let level = 0; level < levels; level++) {
-      const size = 16 >> level,
-        length = size * size * 4 * layers;
-      gl.texSubImage3D(
-        gl.TEXTURE_2D_ARRAY,
-        level,
-        0,
-        0,
-        0,
-        size,
-        size,
-        layers,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        data.subarray(offset, offset + length),
-      );
-      offset += length;
-    }
-    // 级内最近点保持像素硬边，级间线性混合；斜看方向的多点采样由着色器完成。
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    gl.uniform1i(uniforms.get("uSurfaces"), unit);
-    allocated += data.byteLength;
-  }
-  surfaceTexture(6, layerBuffer, catalog.statistics.surfaceLayers);
-  await imageTexture(5, "uAtlas", assets + "atlas.png", false);
-  let objects = new ObjectStore(gl, uniforms),
-    staticBytes = allocated;
+  const textures = await createTextures(gl, uniforms, assets),
+    catalog = textures.catalog;
+  let objects = new ObjectStore(gl, uniforms);
+  const accumulator = createAccumulator(gl, vertex);
+  // 累积样本的随机种子；每帧不同，样本之间才互不相关。
+  let frame = 0;
   const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2"),
     queries = [],
     times = [];
@@ -274,7 +136,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    */
   function setGrid(scene, cells) {
     world?.dispose();
-    allocated = staticBytes;
     const size = scene.grid.size,
       align = (v) => Math.ceil(v / 128) * 128;
     world = new WorldGPU(gl, uniforms, { capacityWords: 4 * 1024 * 1024 });
@@ -294,36 +155,32 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     objects.dispose();
     objects = new ObjectStore(gl, uniforms);
     world?.dispose();
-    allocated = staticBytes;
     world = new WorldGPU(gl, uniforms, options);
     generation++;
     resetTiming();
     return world;
   }
-  /** 只绘制当前已发布的数据；每帧上传的实例变换也计入 GPU 时间。
+  /** 绑定射线程序并写入一帧的全部输入，预览、累积和拍照共用；返回这一帧的曝光。
+   * 夜里只有月光，曝光随太阳落下逐渐提高，画面不至于全黑。
    * @param {{position:number[],yaw:number,pitch:number}} camera
-   * @param {{width:number,height:number,samples?:number,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],synchronize?:boolean}} options
+   * @param {{width:number,height:number,pass:number,bounces:number,time:number,debug:number,hierarchy:boolean,fragments:boolean,shadows:boolean,sun:number[],fog:number}} options
    */
-  function draw(
+  function prepare(
     camera,
     {
       width,
       height,
-      samples = 1,
-      time = 0,
-      debug = 0,
-      hierarchy = true,
-      fragments = true,
-      shadows = true,
-      sun = [0.45, 0.62, 0.3],
-      synchronize = false,
+      pass,
+      bounces,
+      time,
+      debug,
+      hierarchy,
+      fragments,
+      shadows,
+      sun,
+      fog,
     },
   ) {
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-      resetTiming();
-    }
     gl.useProgram(program);
     gl.bindVertexArray(vao);
     gl.viewport(0, 0, width, height);
@@ -341,7 +198,15 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform3fv(uniforms.get("uRight"), right);
     gl.uniform3fv(uniforms.get("uUp"), up);
     gl.uniform1f(uniforms.get("uSpan"), SPAN);
-    gl.uniform1i(uniforms.get("uSamples"), samples);
+    gl.uniform1i(uniforms.get("uPass"), pass);
+    gl.uniform1ui(uniforms.get("uFrame"), frame++);
+    gl.uniform1ui(
+      uniforms.get("uWaterGroup"),
+      catalog.models[catalog.states[WATER]].group,
+    );
+    gl.uniform1f(uniforms.get("uFog"), fog);
+    gl.uniform1f(uniforms.get("uTime"), time);
+    gl.uniform1i(uniforms.get("uBounces"), bounces);
     gl.uniform1i(uniforms.get("uDebug"), debug);
     gl.uniform1i(uniforms.get("uHierarchy"), Number(hierarchy));
     gl.uniform1i(uniforms.get("uFragments"), Number(fragments));
@@ -351,6 +216,56 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       uniforms.get("uSun"),
       sun.map((v) => v / length),
     );
+    gl.uniform1i(
+      uniforms.get("uObjectsEnabled"),
+      objects.enabled === false ? 0 : 1,
+    );
+    objects.update(time, origin);
+    const night = 1 - Math.min(1, Math.max(0, (sun[1] / length + 0.1) / 0.3));
+    return 0.9 * (1 + 4 * night);
+  }
+  /** 只绘制当前已发布的数据；每帧上传的实例变换也计入 GPU 时间。
+   * accumulate 为真表示相机、设置与场景都和上一帧相同：这一帧作为累积样本加到画面上，
+   * 带抗锯齿、软阴影和一次漫反射反弹；为假时重新出一帧干净的预览。
+   * sun 是指向太阳的方向，太阳在地平线下时由月亮照明；fog 是远景雾接近不透明的距离，默认为观察窗口半径。
+   * @param {{position:number[],yaw:number,pitch:number}} camera
+   * @param {{width:number,height:number,accumulate?:boolean,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],fog?:number,synchronize?:boolean}} options
+   */
+  function draw(
+    camera,
+    {
+      width,
+      height,
+      accumulate = false,
+      time = 0,
+      debug = 0,
+      hierarchy = true,
+      fragments = true,
+      shadows = true,
+      sun = [0.45, 0.62, 0.3],
+      fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
+      synchronize = false,
+    },
+  ) {
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      resetTiming();
+    }
+    accumulator.resize(width, height);
+    const exposure = prepare(camera, {
+      width,
+      height,
+      pass: accumulator.begin(accumulate),
+      bounces: 1,
+      time,
+      debug,
+      hierarchy,
+      fragments,
+      shadows,
+      sun,
+      fog,
+    });
     if (timer && gl.getParameter(timer.GPU_DISJOINT_EXT)) resetTiming();
     while (
       queries.length &&
@@ -363,18 +278,115 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     const q = timer && queries.length < 8 ? gl.createQuery() : null;
     if (q) gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
-    gl.uniform1i(
-      uniforms.get("uObjectsEnabled"),
-      objects.enabled === false ? 0 : 1,
-    );
-    objects.update(time, origin);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (q) {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
       queries.push(q);
     }
+    accumulator.present({ exposure, raw: debug !== 0 });
     if (synchronize)
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+  }
+  /** 离屏渲染一张高质量照片：每个像素累积 samples 个样本，光线最多反弹 bounces 次。
+   * 一个样本要跑很久，整张画面一次画完可能触发 Windows 的显卡超时重置，
+   * 所以画面切成小块，每次 step() 只提交一批，并按上一批是否已在一帧内完成调整批量。
+   * 宿主在每个动画帧调用 step()，期间暂停交互绘制；完成后用 png() 取图，再 dispose()。
+   * @param {{position:number[],yaw:number,pitch:number}} camera
+   * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number}} options
+   */
+  function photograph(
+    camera,
+    {
+      width,
+      height,
+      samples,
+      bounces = 4,
+      time = 0,
+      shadows = true,
+      sun = [0.45, 0.62, 0.3],
+      fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
+    },
+  ) {
+    const film = createAccumulator(gl, vertex),
+      tiles = [];
+    film.resize(width, height);
+    film.clear();
+    for (let y = 0; y < height; y += PHOTO_TILE)
+      for (let x = 0; x < width; x += PHOTO_TILE) tiles.push([x, y]);
+    const total = samples * tiles.length,
+      view = { ...camera, position: [...camera.position] };
+    let done = 0,
+      batch = 1,
+      fence = null,
+      // 上一批提交后经过的 step 次数；下一帧就完成说明批量还能加大。
+      waited = 0,
+      exposure = 1;
+    return {
+      /** 提交下一批小块；上一批还没画完时什么都不做。返回是否已全部完成。 */
+      step() {
+        if (fence) {
+          waited++;
+          if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED)
+            return false;
+          gl.deleteSync(fence);
+          fence = null;
+          batch =
+            waited === 1
+              ? Math.min(batch * 2, tiles.length)
+              : Math.max(1, batch >> 1);
+        }
+        if (done === total) return true;
+        gl.enable(gl.SCISSOR_TEST);
+        for (const end = Math.min(total, done + batch); done < end; done++) {
+          const tile = done % tiles.length;
+          // 每轮样本开始时换一次随机种子，同一轮的各个小块共用相机和光照。
+          if (tile === 0)
+            exposure = prepare(view, {
+              width,
+              height,
+              pass: film.begin(true),
+              bounces,
+              time,
+              debug: 0,
+              hierarchy: true,
+              fragments: true,
+              shadows,
+              sun,
+              fog,
+            });
+          gl.scissor(...tiles[tile], PHOTO_TILE, PHOTO_TILE);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+        gl.disable(gl.SCISSOR_TEST);
+        fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        waited = 0;
+        gl.flush();
+        return false;
+      },
+      /** 已完成的比例，0 到 1。 */
+      get progress() {
+        return done / total;
+      },
+      /** 把累积结果做色调映射后读回，编码成 PNG。 */
+      png() {
+        const pixels = film.read({ exposure });
+        const image = new ImageData(width, height),
+          row = width * 4;
+        // 帧缓冲的第一行在画面底部，PNG 的第一行在顶部。
+        for (let y = 0; y < height; y++)
+          image.data.set(
+            pixels.subarray((height - 1 - y) * row, (height - y) * row),
+            y * row,
+          );
+        const target = new OffscreenCanvas(width, height);
+        target.getContext("2d").putImageData(image, 0, 0);
+        return target.convertToBlob({ type: "image/png" });
+      },
+      dispose() {
+        if (fence) gl.deleteSync(fence);
+        film.dispose();
+      },
+    };
   }
   /** 视野里是否有足够大的动画对象；没有时静止画面不必逐帧重画。
    * 对象只按包围球与视锥比较，投影不足一个像素的忽略。
@@ -405,6 +417,16 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl,
     uniforms,
     catalog,
+    /** 贴图与派生表在同一帧替换；宿主同时发布按新分类准备的区域。
+     * @param {import("./textures.js").TextureSet} set
+     */
+    setTextures(set) {
+      gl.useProgram(program);
+      textures.install(set);
+      preparation.models = catalog.models;
+      generation++;
+      resetTiming();
+    },
     animating,
     /** 已发布数据的版本；版本与相机都不变时，上一帧画面仍然有效。 */
     get version() {
@@ -416,20 +438,29 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     createWorld,
     setGrid,
     draw,
+    photograph,
     resetTiming,
     clear() {
       world?.dispose();
       world = null;
       objects.clear();
       generation++;
-      allocated = staticBytes;
       resetTiming();
+    },
+    /** 当前画面已累积的样本数；画面变化后归零。 */
+    get accumulated() {
+      return accumulator.samples;
     },
     get times() {
       return [...times];
     },
     get textureBytes() {
-      return allocated + (world?.textureBytes || 0) + objects.textureBytes;
+      return (
+        textures.bytes +
+        accumulator.bytes +
+        (world?.textureBytes || 0) +
+        objects.textureBytes
+      );
     },
     pixels() {
       const data = new Uint8Array(canvas.width * canvas.height * 4);
@@ -447,7 +478,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     dispose() {
       world?.dispose();
       objects.dispose();
-      for (const texture of textures) gl.deleteTexture(texture);
+      textures.dispose();
+      accumulator.dispose();
       resetTiming();
       gl.deleteVertexArray(vao);
       gl.deleteProgram(program);

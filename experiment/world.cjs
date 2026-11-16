@@ -64,10 +64,9 @@ const percentile = (a, q) =>
           gpuBytes: r2.state.allocated,
         }))),
       });
-      for (const samples of process.env.R2_SURVEY ? [1] : [1, 2, 4])
+      for (const samples of [1])
         for (const [width, height] of sizes) {
           await page.setViewportSize({ width, height });
-          await page.selectOption("#samples", String(samples));
           await page.evaluate(() => r2.resetTiming());
           await page.waitForFunction(() => r2.state.times.length >= 100, null, {
             timeout: 120000,

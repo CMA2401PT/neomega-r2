@@ -4,8 +4,7 @@ const regions = new Map();
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
-      catalogPromise = fetch(data.catalogURL)
-        .then((r) => r.json())
+      catalogPromise = (data.catalog ? Promise.resolve(data.catalog) : fetch(data.catalogURL).then((r) => r.json()))
         .then((catalog) => {
           catalog.fragmentReach = Math.max(
             0,
@@ -17,6 +16,18 @@ self.onmessage = async ({ data }) => {
         });
       await catalogPromise;
       postMessage({ type: "initialized" });
+      return;
+    }
+    if (data.type === "textures") {
+      const previous = await catalogPromise;
+      const catalog = { ...data.catalog, fragmentReach: previous.fragmentReach };
+      catalogPromise = Promise.resolve(catalog);
+      const results = data.regions.map(({ x, z }) =>
+        prepareRegion({ x, z, regions, catalog, objects: data.objects }),
+      );
+      postMessage({ type: "textures", results }, results.flatMap((r) =>
+        [r.words.buffer, r.headers.buffer, r.relocations.buffer],
+      ));
       return;
     }
     if (data.type === "put") {
