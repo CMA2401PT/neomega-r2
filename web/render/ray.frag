@@ -345,6 +345,7 @@ uvec2 cellMask;
 uint brickTag;
 // 找出包含 cell 的最大均匀节点；返回节点内容，level 为节点边长的 log2。
 // 有方块的格子返回 cellLevel=true，并给出片段列表地址。
+// 保留统一返回：多个提前返回与 out 参数的组合会触发 D3D 编译校验错误及重试。
 uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  level=0;cellLevel=false;parts=0u;
  ivec3 directory=(cell+uDirectoryOffset)>>4;
@@ -353,29 +354,35 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
   section=texelFetch(uSections,directory&ivec3(255,31,255),0);
   partsBase=section.x!=0u&&uFragments?worldWord(section.x+AUX_PARTS):0u;
  }
+ uint result=0u;
  if(section.x==0u){
-  if(!uHierarchy)return section.y;
-  // 均匀 section 向上查目录层次，直到父节点不再均匀。
-  level=4;
-  for(int l=1;l<=8;l++){if(texelFetch(uTree,(directory&ivec3(255,31,255))>>l,l).r!=section.y)break;level=l+4;}
-  return section.y;
+  result=section.y;
+  if(uHierarchy){
+   // 均匀 section 向上查目录层次，直到父节点不再均匀。
+   level=4;
+   for(int l=1;l<=8;l++){if(texelFetch(uTree,(directory&ivec3(255,31,255))>>l,l).r!=section.y)break;level=l+4;}
+  }
+ }else{
+  ivec3 local=cell&15;
+  int brick=((local.x>>2)*4+(local.z>>2))*4+(local.y>>2);
+  if(maskBit(section.zw,brick)){
+   if(brick!=cachedBrick){
+    cachedBrick=brick;
+    uint at=section.x+uint(brick*2);
+    cellMask=uvec2(worldWord(at),worldWord(at+1u));
+    brickTag=worldWord(section.x+AUX_TAGS+uint(brick));
+   }
+   if(brickTag!=MIXED){level=uHierarchy?2:0;result=brickTag;}
+   else if(maskBit(cellMask,((local.x&3)*4+(local.z&3))*4+(local.y&3))){
+    cellLevel=true;
+    uint index=localIndex(local),bits=section.y>>27,palette=0u;
+    if(bits!=0u){uint per=32u/bits;palette=(worldWord((section.y&0x7ffffffu)+index/per)>>((index%per)*bits))&((1u<<bits)-1u);}
+    if(partsBase!=0u)parts=worldWord(partsBase+index);
+    result=worldWord(section.x+AUX_PALETTE+palette);
+   }
+  }else{level=uHierarchy?2:0;}
  }
- ivec3 local=cell&15;
- int brick=((local.x>>2)*4+(local.z>>2))*4+(local.y>>2);
- if(!maskBit(section.zw,brick)){level=uHierarchy?2:0;return 0u;}
- if(brick!=cachedBrick){
-  cachedBrick=brick;
-  uint at=section.x+uint(brick*2);
-  cellMask=uvec2(worldWord(at),worldWord(at+1u));
-  brickTag=worldWord(section.x+AUX_TAGS+uint(brick));
- }
- if(brickTag!=MIXED){level=uHierarchy?2:0;return brickTag;}
- if(!maskBit(cellMask,((local.x&3)*4+(local.z&3))*4+(local.y&3)))return 0u;
- cellLevel=true;
- uint index=localIndex(local),bits=section.y>>27,palette=0u;
- if(bits!=0u){uint per=32u/bits;palette=(worldWord((section.y&0x7ffffffu)+index/per)>>((index%per)*bits))&((1u<<bits)-1u);}
- if(partsBase!=0u)parts=worldWord(partsBase+index);
- return worldWord(section.x+AUX_PALETTE+palette);
+ return result;
 }
 // 阴影射线：从命中点走向光源，只关心沿途透过了多少光，不着色。
 // 不透明立方体与镂空面的实心处完全遮挡；玻璃按代表色过滤，染色玻璃因此投下彩色影子；水按走过的距离吸收。
