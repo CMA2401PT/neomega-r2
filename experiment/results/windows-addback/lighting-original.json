@@ -1,0 +1,13 @@
+[
+  {
+    "stage": 5,
+    "name": "lighting",
+    "pass": 0,
+    "singleLocate": false,
+    "timeout": 10000,
+    "sourceSHA256": "cfb5fbc4160865e3454ac321e9bf47a0fd68a085422edd7314a0249359364cc6",
+    "gpu": "ANGLE (AMD, AMD Radeon 780M Graphics (0x000015BF) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "ms": 10015.599999999627,
+    "status": "timeout"
+  }
+]

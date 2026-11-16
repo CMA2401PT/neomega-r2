@@ -1,0 +1,18 @@
+[
+  {
+    "stage": 5,
+    "name": "lighting",
+    "pass": 0,
+    "singleLocate": true,
+    "timeout": 10000,
+    "sourceSHA256": "904c936d76637cea5ea960316f0dd411c19cfe0c7fe69573bd3a363da42242e3",
+    "gpu": "ANGLE (AMD, AMD Radeon 780M Graphics (0x000015BF) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "ms": 5746.799999998882,
+    "status": "linked",
+    "log": "(1022,6-34): warning X3203: signed/unsigned mismatch, unsigned assumed\n(777,1): warning X4000: use of potentially uninitialized variable (f_cubeSurface_uint_int)\n\n\n",
+    "shaders": [
+      "",
+      ""
+    ]
+  }
+]
