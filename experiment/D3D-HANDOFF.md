@@ -17,7 +17,7 @@
 | 原版与改写版逐像素比较 | 8 组 SHA256 完全一致 | [locate-pixels.json](results/windows-addback/locate-pixels.json) |
 | 工作区 Node 测试 | 17 项通过 | `node --test neomega-r2/tests/*.test.mjs` |
 
-像素比较是在本机 OpenGL 后端进行的功能等价检查，不是 D3D 验收。覆盖 Möbius 和本地测试存档、hierarchy/ fragments 开关的四种组合，使用固定相机、光照、时间和 320×180 预览帧。未证明所有存档或累积采样逐像素等价。17 项测试中有 5 项来自尚未提交的启动错误诊断测试，见后面的工作区说明。
+像素比较是在本机 OpenGL 后端进行的功能等价检查，不是 D3D 验收。覆盖 Möbius 和本地测试存档、hierarchy/ fragments 开关的四种组合，使用固定相机、光照、时间和 320×180 预览帧。未证明所有存档或累积采样逐像素等价。17 项测试中有 5 项是启动错误诊断测试，已随独立的启动诊断修复提交。
 
 原始校验信息包括：
 
@@ -180,9 +180,9 @@ CProgram::PropagateFlags_AddInstLinks / MatchAndAppend
 
 ## 其他工作区改动和交接边界
 
-本次 `locate` 提交不包含以下之前遗留的工作。继续操作前分别执行两个仓库的 `git status`，不要把这些文件无意加入修复提交，也不要覆盖用户的新修改。
+`locate` 提交不包含以下工作。其中启动诊断已另行提交，应用启动器仍未提交。继续操作前分别执行两个仓库的 `git status`，不要把未提交文件无意加入修复提交，也不要覆盖用户的新修改。
 
-- 核心的 `web/render/renderer.js` 和 `tests/renderer-startup.test.mjs`：改进上下文丢失与 `null` 编译错误诊断；未提交。
+- 核心的 `web/render/renderer.js` 和 `tests/renderer-startup.test.mjs`：改进上下文丢失与 `null` 编译错误诊断；已独立提交。这只改善报错，不解决 D3D 编译超时。
 - 应用的 `start-windows.ps1`、`start-vulkan.cmd`、`build-windows.ps1`：可选 Vulkan 启动入口及打包支持；未提交。下载目录也曾加入该入口。用户已明确这不满足最终目标，不要继续以更换后端替代 D3D 调查。
 - 原生采样脚本、PDB、试验着色器、测试存档和 Playwright 安装位于根目录 `.r2-debug`，不属于任一 Git 仓库。不要假定新机器有它们。
 

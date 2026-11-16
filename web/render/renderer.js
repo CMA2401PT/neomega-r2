@@ -57,17 +57,24 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     gl.linkProgram(program);
     // Windows 的驱动编译可能很慢；完成前查询 LINK_STATUS 会同步阻塞整个页面。
-    while (parallel && !gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) {
+    function checkContext() {
       if (gl.isContextLost()) throw Error("着色器编译期间 WebGL 上下文丢失，请刷新页面重试");
+    }
+    while (parallel) {
+      checkContext();
+      if (gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) break;
       await new Promise((resolve) => setTimeout(resolve, 16));
     }
+    // 上下文丢失后完成状态也可能为真，且状态查询本身可能发现 GPU 进程已退出。
+    checkContext();
     const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
+    checkContext();
     const errors = linked ? "" : shaders
       .map((shader) => gl.getShaderInfoLog(shader)).filter(Boolean).join("\n") || gl.getProgramInfoLog(program);
     for (const shader of shaders) gl.deleteShader(shader);
     if (!linked) {
       gl.deleteProgram(program);
-      throw Error(`射线程序 ${pass} 编译失败：${errors}`);
+      throw Error(`射线程序 ${pass} 编译失败：${errors || "浏览器未提供编译日志"}`);
     }
     return program;
   }
