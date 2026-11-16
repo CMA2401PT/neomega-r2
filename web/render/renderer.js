@@ -35,8 +35,10 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   /** 预览与累积各自编译，让预览去掉累积反弹路径；两者共享纹理和世界数据。
    * @param {0|1} pass
    */
-  function createRayProgram(pass) {
+  async function createRayProgram(pass) {
     const program = gl.createProgram();
+    const shaders = [];
+    const parallel = gl.getExtension("KHR_parallel_shader_compile");
     for (const [type, source] of [
       [gl.VERTEX_SHADER, vertex],
       [
@@ -50,17 +52,26 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       const shader = gl.createShader(type);
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-        throw Error(gl.getShaderInfoLog(shader));
+      shaders.push(shader);
       gl.attachShader(program, shader);
-      gl.deleteShader(shader);
     }
     gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-      throw Error(gl.getProgramInfoLog(program));
+    // Windows 的驱动编译可能很慢；完成前查询 LINK_STATUS 会同步阻塞整个页面。
+    while (parallel && !gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) {
+      if (gl.isContextLost()) throw Error("着色器编译期间 WebGL 上下文丢失，请刷新页面重试");
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
+    const errors = linked ? "" : shaders
+      .map((shader) => gl.getShaderInfoLog(shader)).filter(Boolean).join("\n") || gl.getProgramInfoLog(program);
+    for (const shader of shaders) gl.deleteShader(shader);
+    if (!linked) {
+      gl.deleteProgram(program);
+      throw Error(`射线程序 ${pass} 编译失败：${errors}`);
+    }
     return program;
   }
-  const programs = [createRayProgram(0), createRayProgram(1)];
+  const programs = await Promise.all([createRayProgram(0), createRayProgram(1)]);
   let program = programs[1];
   gl.useProgram(program);
   const vao = gl.createVertexArray();
