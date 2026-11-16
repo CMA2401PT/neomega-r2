@@ -16,6 +16,9 @@ uniform sampler2DArray uSurfaces,uSurfaceNormals,uSurfaceSpecular;
 uniform vec3 uSize,uCamera,uRight,uUp,uForward;
 uniform vec2 uViewport;
 uniform float uSpan;
+uniform bool uOrtho,uHasWorld,uPicking;
+uniform vec2 uPickPixel;
+vec3 firstNormal;
 uniform int uDebug;
 uniform bool uHierarchy,uFragments,uShadows;
 // 指向太阳的单位向量；太阳落到地平线下以后由反方向的月亮照明。
@@ -47,7 +50,7 @@ float shadeWeight,bounceWeight;
 // 本像素的光照：光源方向与亮度（白天为太阳，夜间为月亮），以及来自天空的常量环境光。
 vec3 lightDir,lightColor,ambient;
 // rayLength 是未归一化方向的长度，用于把屏幕上一个像素换算成表面上的足迹；反弹射线没有像素足迹。
-float firstDepth,rayLength;
+float firstDepth,rayLength,primaryTravel;
 bool primaryRay;
 // 射线进入水体的位置，负数表示不在水中。
 float waterFrom;
@@ -164,7 +167,8 @@ bool sameMedium(uint a,uint groupA,uint b,uint groupB){return a==b||(a!=0u&&b!=0
 void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit){
  if(alpha<=0.0)return;
  absorbWater(t);
- if(!touched){touched=true;firstDepth=t;}
+ if(!touched){touched=true;firstDepth=t+primaryTravel;firstNormal=m.geometric;}
+ if(uPicking){throughput=vec3(0);return;}
  vec3 weight=throughput*(alpha*foliage);
  if(unlit){radiance+=weight*rgb;throughput*=1.0-alpha;return;}
  // 环境光直接计入；光源直射单独累计，最后乘阴影射线的可见度。几何上背光的面不受直射，法线贴图不能让它发亮。
@@ -217,7 +221,7 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
  // 射线微分：相邻像素的射线在这个面上相距多远，决定 mip 级与长轴方向。
  vec4 texel;float lod;
  if(primaryRay){
-  float pixel=uSpan/uViewport.y,scale=t/rayLength,facing=pick(ray,axis);
+  float pixel=uSpan/uViewport.y,scale=uOrtho?1.0:(t+primaryTravel)/rayLength,facing=pick(ray,axis);
   vec3 dx=scale*pixel*(uRight-ray*pick(uRight,axis)/facing),dy=scale*pixel*(uUp-ray*pick(uUp,axis)/facing);
   vec2 sx=across(dx,axis),sy=across(dy,axis);
   texel=surfaceTexel(tile,f1.z,f0.zw*sx.x+f1.xy*sx.y,f0.zw*sy.x+f1.xy*sy.y,lod);
@@ -391,17 +395,27 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
  }
  return light;
 }
-// 沿当前射线（eye、ray）走完观察窗口，按命中顺序合成；结果留在 radiance、directSum、throughput 与两个代表表面里。
-// 返回 false 表示迭代次数用尽。
-bool march(){
- invRay=vec3(1)/ray;
+// 平行于窗口边界的射线单独处理，避免 0×无穷产生 NaN。
+void windowInterval(out vec3 entry,out vec3 leave){
  bvec3 parallel=lessThan(abs(ray),vec3(1e-8));
  vec3 nearSide=(vec3(0)-eye)*invRay,farSide=(uSize-eye)*invRay;
- vec3 entry=min(nearSide,farSide),leave=max(nearSide,farSide);
+ entry=min(nearSide,farSide);leave=max(nearSide,farSide);
  bvec3 within=bvec3(vec3(greaterThanEqual(eye,vec3(0)))*vec3(lessThan(eye,uSize)));
  entry=mix(entry,mix(vec3(1e30),vec3(-1e30),within),parallel);
  leave=mix(leave,vec3(1e30),parallel);
+}
+// 沿当前射线走完窗口；高空起点先靠近入口，避免大距离浮点误差使格子边界漏面。
+// 主射线保留靠近前的距离，拾取、雾与透视纹理足迹仍相对原来的像平面。
+bool march(){
+ invRay=vec3(1)/ray;
+ vec3 entry,leave;windowInterval(entry,leave);
  float first=max(entry.x,max(entry.y,entry.z)),last=min(leave.x,min(leave.y,leave.z));
+ if(first>1.0&&first<last){
+  float travel=first-1.0;eye+=ray*travel;
+  if(primaryRay)primaryTravel+=travel;
+  windowInterval(entry,leave);
+  first=max(entry.x,max(entry.y,entry.z));last=min(leave.x,min(leave.y,leave.z));
+ }
  float t=max(.01,first);int axis=entry.x>=entry.y&&entry.x>=entry.z?0:entry.y>=entry.z?1:2;
  int side=axis*2+(pick(ray,axis)<0.0?1:0);
  radiance=vec3(0);directSum=vec3(0);throughput=vec3(1);shadeWeight=0.0;bounceWeight=0.0;
@@ -472,11 +486,15 @@ vec3 directLight(bool soft){
 // 多次反弹时，每一跳的表面再把自己的常量环境光换成下一跳看到的亮度。
 vec3 tracePixel(vec2 pixel){
  vec2 screen=(pixel/uViewport-.5)*vec2(uViewport.x/uViewport.y,1)*uSpan;
- vec3 direction=uForward+screen.x*uRight+screen.y*uUp;
- rayLength=length(direction);ray=direction/rayLength;eye=uCamera;primaryRay=true;
+ vec3 offset=screen.x*uRight+screen.y*uUp;
+ vec3 direction=uOrtho?uForward:uForward+offset;
+ rayLength=length(direction);ray=direction/rayLength;eye=uCamera+(uOrtho?offset:vec3(0));primaryRay=true;primaryTravel=0.0;
+ touched=false;firstDepth=-1.0;firstNormal=vec3(0);
+ if(!uHasWorld)return background(ray);
  vec3 view=ray;
  // 迭代用尽时输出极亮的品红，色调映射后仍是纯品红，实验脚本据此统计。
  if(!march())return vec3(1e4,0,1e4);
+ if(uPicking)return vec3(0);
  bool soft=uPass==1;
  // 八次方让近处几乎没有雾，接近雾距离时才迅速变浓。
  float fog=touched?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
@@ -530,7 +548,8 @@ void main(){
  seed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u+uFrame*26699u);
  setupLight();steps=0;faceTests=0;
  vec2 jitter=uPass==1?vec2(random(),random())-.5:vec2(0);
- vec3 color=tracePixel(gl_FragCoord.xy+jitter);
+ vec3 color=tracePixel(uPicking?uPickPixel:gl_FragCoord.xy+jitter);
+ if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
  if(uDebug==2)color=vec3(float(faceTests>0),float(faceTests==0&&touched),0);
  float weight=uPass==1?1.0:4.0;

@@ -9,27 +9,11 @@ import { gridRegions } from "../scene/grid.js";
 const WATER = 'minecraft:water ["level"="0"]';
 // 拍照时每次绘制覆盖的方块边长（像素）。
 const PHOTO_TILE = 256;
-// 垂直视场 65° 时，距离 1 处画面的高度。
-const SPAN = 2 * Math.tan((65 * Math.PI) / 360);
-/** 相机朝向的三条轴；绘制与可见性判断共用。
- * @param {{yaw:number,pitch:number}} camera
- */
-function basis({ yaw, pitch }) {
-  return {
-    forward: [
-      Math.sin(yaw) * Math.cos(pitch),
-      Math.sin(pitch),
-      -Math.cos(yaw) * Math.cos(pitch),
-    ],
-    right: [Math.cos(yaw), 0, Math.sin(yaw)],
-    up: [
-      -Math.sin(yaw) * Math.sin(pitch),
-      Math.cos(pitch),
-      Math.cos(yaw) * Math.sin(pitch),
-    ],
-  };
-}
-
+import {
+  cameraBasis as basis,
+  cameraRay,
+  PERSPECTIVE_SPAN as SPAN,
+} from "./camera.js";
 /** 创建射线绘制器；宿主负责相机、帧循环和数据来源，绘制器不读取 UI。
  * @param {HTMLCanvasElement} canvas
  * @param {{assets?:string}} options
@@ -83,6 +67,10 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uForward",
     "uViewport",
     "uSpan",
+    "uOrtho",
+    "uHasWorld",
+    "uPicking",
+    "uPickPixel",
     "uDebug",
     "uHierarchy",
     "uFragments",
@@ -104,6 +92,21 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     uniforms.set(name, gl.getUniformLocation(program, name));
   const textures = await createTextures(gl, uniforms, assets),
     catalog = textures.catalog;
+  // 即使只画天空，WebGL 仍验证所有采样器；用最小的空纹理满足整数采样器绑定。
+  const empty = [
+    [1, gl.TEXTURE_3D, "uTree"],
+    [10, gl.TEXTURE_3D, "uSections"],
+    [11, gl.TEXTURE_2D, "uWorldData"],
+  ].map(([unit, target, name]) => {
+    const texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(target, texture);
+    if (target === gl.TEXTURE_3D) gl.texStorage3D(target, 1, gl.R32UI, 1, 1, 1);
+    else gl.texStorage2D(target, 1, gl.R32UI, 1, 1);
+    gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return { unit, target, name, texture };
+  });
   let objects = new ObjectStore(gl, uniforms);
   const accumulator = createAccumulator(gl, vertex);
   // 累积样本的随机种子；每帧不同，样本之间才互不相关。
@@ -135,6 +138,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    * @param {Uint32Array} cells
    */
   function setGrid(scene, cells) {
+    gl.useProgram(program);
     world?.dispose();
     const size = scene.grid.size,
       align = (v) => Math.ceil(v / 128) * 128;
@@ -146,12 +150,19 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     for (const key of regions.keys()) {
       const [x, z] = key.split("/").map(Number);
       world.install(
-        prepareRegion({ x, z, regions, catalog: preparation, objects: references }),
+        prepareRegion({
+          x,
+          z,
+          regions,
+          catalog: preparation,
+          objects: references,
+        }),
       );
     }
     resetTiming();
   }
   function createWorld(options = {}) {
+    gl.useProgram(program);
     objects.dispose();
     objects = new ObjectStore(gl, uniforms);
     world?.dispose();
@@ -162,8 +173,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   }
   /** 绑定射线程序并写入一帧的全部输入，预览、累积和拍照共用；返回这一帧的曝光。
    * 夜里只有月光，曝光随太阳落下逐渐提高，画面不至于全黑。
-   * @param {{position:number[],yaw:number,pitch:number}} camera
-   * @param {{width:number,height:number,pass:number,bounces:number,time:number,debug:number,hierarchy:boolean,fragments:boolean,shadows:boolean,sun:number[],fog:number}} options
+   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
+   * @param {{width:number,height:number,pass:number,bounces:number,time:number,debug:number,hierarchy:boolean,fragments:boolean,shadows:boolean,sun:number[],fog:number,objects?:boolean}} options
    */
   function prepare(
     camera,
@@ -179,6 +190,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       shadows,
       sun,
       fog,
+      objects: drawObjects = true,
     },
   ) {
     gl.useProgram(program);
@@ -187,7 +199,17 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     if (world) {
       origin = world.origin;
       world.bind();
+    } else {
+      origin = [0, 0, 0];
+      for (const { unit, target, name, texture } of empty) {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(target, texture);
+        gl.uniform1i(uniforms.get(name), unit);
+      }
     }
+    gl.uniform1i(uniforms.get("uHasWorld"), Number(world !== null));
+    gl.uniform1i(uniforms.get("uPicking"), 0);
+    gl.uniform1i(uniforms.get("uOrtho"), Number(camera.ortho !== undefined));
     const { forward, right, up } = basis(camera);
     gl.uniform2f(uniforms.get("uViewport"), width, height);
     gl.uniform3fv(
@@ -197,7 +219,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform3fv(uniforms.get("uForward"), forward);
     gl.uniform3fv(uniforms.get("uRight"), right);
     gl.uniform3fv(uniforms.get("uUp"), up);
-    gl.uniform1f(uniforms.get("uSpan"), SPAN);
+    gl.uniform1f(uniforms.get("uSpan"), camera.ortho ?? SPAN);
     gl.uniform1i(uniforms.get("uPass"), pass);
     gl.uniform1ui(uniforms.get("uFrame"), frame++);
     gl.uniform1ui(
@@ -218,7 +240,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     );
     gl.uniform1i(
       uniforms.get("uObjectsEnabled"),
-      objects.enabled === false ? 0 : 1,
+      !drawObjects || objects.enabled === false ? 0 : 1,
     );
     objects.update(time, origin);
     const night = 1 - Math.min(1, Math.max(0, (sun[1] / length + 0.1) / 0.3));
@@ -228,8 +250,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    * accumulate 为真表示相机、设置与场景都和上一帧相同：这一帧作为累积样本加到画面上，
    * 带抗锯齿、软阴影和一次漫反射反弹；为假时重新出一帧干净的预览。
    * sun 是指向太阳的方向，太阳在地平线下时由月亮照明；fog 是远景雾接近不透明的距离，默认为观察窗口半径。
-   * @param {{position:number[],yaw:number,pitch:number}} camera
-   * @param {{width:number,height:number,accumulate?:boolean,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],fog?:number,synchronize?:boolean}} options
+   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
+   * @param {{width:number,height:number,accumulate?:boolean,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],fog?:number,objects?:boolean,synchronize?:boolean}} options
    */
   function draw(
     camera,
@@ -244,6 +266,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       shadows = true,
       sun = [0.45, 0.62, 0.3],
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
+      objects = true,
       synchronize = false,
     },
   ) {
@@ -256,6 +279,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     const exposure = prepare(camera, {
       width,
       height,
+      objects,
       pass: accumulator.begin(accumulate),
       bounces: 1,
       time,
@@ -293,8 +317,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    * 所以画面切成小块分批提交。GPU 上始终排着两批，一批画完时下一批已经在等，不必空等下一帧；
    * 批量按完成速度调整：每帧都把队列画空就加倍，一批拖过两帧就减半。
    * 宿主在每个动画帧调用 step()，期间暂停交互绘制；完成后用 png() 取图，再 dispose()。
-   * @param {{position:number[],yaw:number,pitch:number}} camera
-   * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number}} options
+   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
+   * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number,objects?:boolean}} options
    */
   function photograph(
     camera,
@@ -302,6 +326,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       width,
       height,
       samples,
+      objects = true,
       bounces = 4,
       time = 0,
       shadows = true,
@@ -335,6 +360,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
             height,
             pass: film.begin(true),
             bounces,
+            objects,
             time,
             debug: 0,
             hierarchy: true,
@@ -397,25 +423,97 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       },
     };
   }
+  // 拾取只需一个浮点像素，读回距离和几何法线；不占用或清空实时累积缓冲。
+  const pickTexture = gl.createTexture(),
+    pickFramebuffer = gl.createFramebuffer();
+  gl.activeTexture(gl.TEXTURE17);
+  gl.bindTexture(gl.TEXTURE_2D, pickTexture);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, 1, 1);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pickFramebuffer);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    pickTexture,
+    0,
+  );
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  /** 拾取该像素主射线最先遇到的可见表面，坐标从画面左上角计数。
+   * 返回整数方块坐标和几何法线；透明孔洞继续穿透，活动对象不参与地图选点。
+   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
+   * @param {{width:number,height:number,x:number,y:number}} pixel
+   * @returns {{position:number[],normal:number[]}|null}
+   */
+  function pick(camera, pixel) {
+    const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const viewport = gl.getParameter(gl.VIEWPORT);
+    const blend = gl.isEnabled(gl.BLEND);
+    prepare(camera, {
+      ...pixel,
+      pass: 0,
+      bounces: 0,
+      time: 0,
+      debug: 0,
+      hierarchy: true,
+      fragments: true,
+      shadows: false,
+      sun: [0, 1, 0],
+      fog: Infinity,
+      objects: false,
+    });
+    gl.uniform1i(uniforms.get("uPicking"), 1);
+    gl.uniform2f(
+      uniforms.get("uPickPixel"),
+      Math.floor(pixel.x) + 0.5,
+      pixel.height - Math.floor(pixel.y) - 0.5,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pickFramebuffer);
+    gl.viewport(0, 0, 1, 1);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const result = new Float32Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, result);
+    gl.uniform1i(uniforms.get("uPicking"), 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.viewport(...viewport);
+    if (blend) gl.enable(gl.BLEND);
+    if (result[0] < 0) return null;
+    const normal = [...result.slice(1)],
+      { origin: eye, direction } = cameraRay(camera, {
+        ...pixel,
+        x: Math.floor(pixel.x),
+        y: Math.floor(pixel.y),
+      });
+    return {
+      position: eye.map((v, i) =>
+        Math.floor(v + direction[i] * result[0] - normal[i] * 0.002),
+      ),
+      normal,
+    };
+  }
   /** 视野里是否有足够大的动画对象；没有时静止画面不必逐帧重画。
    * 对象只按包围球与视锥比较，投影不足一个像素的忽略。
-   * @param {{position:number[],yaw:number,pitch:number}} camera
+   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
    * @param {{width:number,height:number}} size
    */
   function animating(camera, { width, height }) {
     if (objects.enabled === false) return false;
     const { forward, right, up } = basis(camera),
       dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
-      halfHeight = SPAN / 2,
+      halfHeight = (camera.ortho ?? SPAN) / 2,
       halfWidth = (halfHeight * width) / height;
     return objects.references().some(({ bounds: [low, high] }) => {
       const center = low.map((v, i) => (v + high[i]) / 2 - camera.position[i]),
         radius = Math.hypot(...high.map((v, i) => v - low[i])) / 2,
         depth = dot(center, forward);
       if (depth < -radius) return false;
-      if (depth > radius && (2 * radius * height) / (depth * SPAN) < 1)
+      const reach = camera.ortho !== undefined ? 1 : Math.max(depth, 0);
+      if (
+        (2 * radius * height) /
+          (camera.ortho ?? Math.max(depth, radius) * SPAN) <
+        1
+      )
         return false;
-      const reach = Math.max(depth, 0);
       return (
         Math.abs(dot(center, right)) <= reach * halfWidth + 2 * radius &&
         Math.abs(dot(center, up)) <= reach * halfHeight + 2 * radius
@@ -447,6 +545,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     createWorld,
     setGrid,
     draw,
+    pick,
     photograph,
     resetTiming,
     clear() {
@@ -490,6 +589,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       textures.dispose();
       accumulator.dispose();
       resetTiming();
+      for (const { texture } of empty) gl.deleteTexture(texture);
+      gl.deleteTexture(pickTexture);
+      gl.deleteFramebuffer(pickFramebuffer);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(program);
     },
