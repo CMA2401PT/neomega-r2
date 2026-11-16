@@ -124,13 +124,12 @@ function summarize(values) {
       // 环最底部约 y=41；越过 y=64 仍能选到它，说明解析海面未挡住拾取。
       const pickedThroughOcean = pick && pick.position[1] < 64;
       const preserved = r.accumulated === before;
-      const rayProgram = r.gl.getParameter(r.gl.CURRENT_PROGRAM);
       draw(camera, options);
-      const time0 = r.gl.getUniform(rayProgram, r.uniforms.get("uTime"));
+      const time0 = r.gl.getUniform(r.program, r.uniforms.get("uTime"));
       draw(camera, { ...options, accumulate: true, time: 99 });
-      const time1 = r.gl.getUniform(rayProgram, r.uniforms.get("uTime"));
+      const time1 = r.gl.getUniform(r.program, r.uniforms.get("uTime"));
       draw(camera, { ...options, time: 99 });
-      const time2 = r.gl.getUniform(rayProgram, r.uniforms.get("uTime"));
+      const time2 = r.gl.getUniform(r.program, r.uniforms.get("uTime"));
       return { pickedThroughOcean, preserved, pick, times: [time0, time1, time2], error: r.gl.getError() };
     });
     assert(result.checks.pickedThroughOcean);

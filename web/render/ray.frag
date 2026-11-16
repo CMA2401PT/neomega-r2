@@ -24,7 +24,12 @@ uniform bool uHierarchy,uFragments,uShadows;
 // 指向太阳的单位向量；太阳落到地平线下以后由反方向的月亮照明。
 uniform vec3 uSun;
 // 0 是单帧预览：像素中心、硬阴影、常量天空光。1 是静止时的累积样本：像素内抖动、软阴影、一次漫反射反弹。
+// 预览移除累积反弹的路径，避免它的中间状态增加每个预览像素的负担。
+#ifdef RENDER_PASS
+const int uPass=RENDER_PASS;
+#else
 uniform int uPass;
+#endif
 uniform uint uFrame,uWaterGroup;
 // 远景雾在这个距离上接近不透明，遮住观察窗口的边界。
 uniform float uFog;

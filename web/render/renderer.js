@@ -32,22 +32,36 @@ export async function createRenderer(canvas, { assets = "/r2/assets/" } = {}) {
   const fragment = fragmentSource.replace("#include <objects>", objectSource);
   const vertex = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}`;
-  const program = gl.createProgram();
-  for (const [type, source] of [
-    [gl.VERTEX_SHADER, vertex],
-    [gl.FRAGMENT_SHADER, fragment],
-  ]) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-      throw Error(gl.getShaderInfoLog(shader));
-    gl.attachShader(program, shader);
-    gl.deleteShader(shader);
+  /** 预览与累积各自编译，让预览去掉累积反弹路径；两者共享纹理和世界数据。
+   * @param {0|1} pass
+   */
+  function createRayProgram(pass) {
+    const program = gl.createProgram();
+    for (const [type, source] of [
+      [gl.VERTEX_SHADER, vertex],
+      [
+        gl.FRAGMENT_SHADER,
+        fragment.replace(
+          "#version 300 es",
+          `#version 300 es\n#define RENDER_PASS ${pass}`,
+        ),
+      ],
+    ]) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+        throw Error(gl.getShaderInfoLog(shader));
+      gl.attachShader(program, shader);
+      gl.deleteShader(shader);
+    }
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+      throw Error(gl.getProgramInfoLog(program));
+    return program;
   }
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-    throw Error(gl.getProgramInfoLog(program));
+  const programs = [createRayProgram(0), createRayProgram(1)];
+  let program = programs[1];
   gl.useProgram(program);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -78,7 +92,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uSun",
     "uWorldData",
     "uSections",
-    "uPass",
     "uFrame",
     "uWaterGroup",
     "uFog",
@@ -111,6 +124,37 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     return { unit, target, name, texture };
   });
   let objects = new ObjectStore(gl, uniforms);
+  const locations = programs.map(
+    (program) =>
+      new Map(
+        [...uniforms.keys()].map((name) => [
+          name,
+          gl.getUniformLocation(program, name),
+        ]),
+      ),
+  );
+  // 累积程序使用完整材质；预览沿用资源仓库分配的纹理单元，不另维护一份编号表。
+  const samplerTypes = [
+    gl.SAMPLER_2D,
+    gl.SAMPLER_2D_ARRAY,
+    gl.UNSIGNED_INT_SAMPLER_2D,
+    gl.UNSIGNED_INT_SAMPLER_3D,
+  ];
+  gl.useProgram(programs[0]);
+  for (
+    let i = 0;
+    i < gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+    i++
+  ) {
+    const { name, type } = gl.getActiveUniform(program, i);
+    if (samplerTypes.includes(type)) {
+      gl.uniform1i(
+        locations[0].get(name),
+        gl.getUniform(program, uniforms.get(name)),
+      );
+    }
+  }
+  gl.useProgram(program);
   const accumulator = createAccumulator(gl, vertex);
   // 累积样本的随机种子；每帧不同，样本之间才互不相关。
   let frame = 0;
@@ -200,6 +244,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       objects: drawObjects = true,
     },
   ) {
+    if (program !== programs[pass]) {
+      program = programs[pass];
+      for (const [name, location] of locations[pass])
+        uniforms.set(name, location);
+    }
     gl.useProgram(program);
     gl.bindVertexArray(vao);
     gl.viewport(0, 0, width, height);
@@ -227,7 +276,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform3fv(uniforms.get("uRight"), right);
     gl.uniform3fv(uniforms.get("uUp"), up);
     gl.uniform1f(uniforms.get("uSpan"), camera.ortho ?? SPAN);
-    gl.uniform1i(uniforms.get("uPass"), pass);
     gl.uniform1ui(uniforms.get("uFrame"), frame++);
     gl.uniform1ui(
       uniforms.get("uWaterGroup"),
@@ -540,6 +588,10 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   return {
     gl,
     uniforms,
+    /** 调试 uniform 时必须与当前射线程序配对，显示合成使用的是另一个程序。 */
+    get program() {
+      return program;
+    },
     catalog,
     /** 贴图与派生表在同一帧替换；宿主同时发布按新分类准备的区域。
      * @param {import("./textures.js").TextureSet} set
@@ -610,7 +662,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       gl.deleteTexture(pickTexture);
       gl.deleteFramebuffer(pickFramebuffer);
       gl.deleteVertexArray(vao);
-      gl.deleteProgram(program);
+      for (const program of programs) gl.deleteProgram(program);
     },
   };
 }

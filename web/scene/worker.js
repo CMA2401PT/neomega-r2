@@ -32,7 +32,7 @@ self.onmessage = async ({ data }) => {
     }
     if (data.type === "put") {
       regions.set(data.key, decodeRegion(data.buffer));
-      postMessage({ type: "stored", key: data.key });
+      postMessage({ type: "stored", key: data.key, request: data.request });
       return;
     }
     if (data.type === "drop") {
