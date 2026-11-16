@@ -50,6 +50,8 @@ func TestTexturePack(t *testing.T) {
 		return color.NRGBA{0, 255, 0, 0}
 	})
 	writePNG("stone_n", 64, 64, func(x, y int) color.NRGBA { return color.NRGBA{32, 192, 77, 19} })
+	// 材质包可以主动关闭原版灯块的自发光，255 是 labPBR 的不发光哨兵。
+	writePNG("sea_lantern_s", 16, 16, func(x, y int) color.NRGBA { return color.NRGBA{A: 255} })
 	writePNG("stone_s", 32, 32, func(x, y int) color.NRGBA { return color.NRGBA{203, 230, 11, 0} })
 	writePNG("oak_leaves", 32, 32, func(x, y int) color.NRGBA { return color.NRGBA{255, 0, 255, 255} })
 	writePNG("grass_block_side", 32, 32, func(x, y int) color.NRGBA { return color.NRGBA{0, 255, 255, 255} })
@@ -110,6 +112,24 @@ func TestTexturePack(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Fatalf("像素 %v，期望 %v", got, want)
 		}
+	}
+	// 发光在生成资源与运行时换包两条路径中一致，并且缩小后仍保留。
+	for _, name := range []string{"sea_lantern", "glowstone", "shroomlight", "ochre_froglight_side", "verdant_froglight_top", "pearlescent_froglight_side"} {
+		for level := range vanilla.Info.Levels {
+			assertPixel(readPixel(vanilla, "surface-specular.bin", layer(name), 0, 0, level), []byte{0, 0, 0, 190})
+		}
+	}
+	assertPixel(readPixel(vanilla, "surface-specular.bin", layer("redstone_lamp"), 0, 0, 0), []byte{0, 0, 0, 0})
+	assertPixel(readPixel(vanilla, "surface-specular.bin", layer("redstone_lamp_on"), 0, 0, 0), []byte{0, 0, 0, 170})
+	for level := range pack.Info.Levels {
+		assertPixel(readPixel(pack, "surface-specular.bin", layer("sea_lantern"), 0, 0, level), []byte{0, 0, 0, 255})
+	}
+	generated, err := Files.ReadFile("assets/surface-specular.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated, vanilla.Files["surface-specular.bin"]) {
+		t.Fatal("预生成自发光资源与运行时合成不一致，请执行 go generate")
 	}
 	stone := layer("stone")
 	assertPixel(readPixel(pack, "surface-layers.bin", stone, 0, 0, 0), []byte{255, 0, 0, 255})

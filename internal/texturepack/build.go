@@ -59,6 +59,21 @@ func Build(source fs.FS, pack fs.FS, limit int) (*Set, error) {
 	return set, nil
 }
 
+// 原版整面灯块用 labPBR 的 A 表示自发光，颜色仍来自原贴图；材质包的 _s 优先。
+// 仅列整面发光的纹理，避免把灯笼框架、矿石和未点亮的灯一并照亮。
+var vanillaEmission = map[string]uint8{
+	"minecraft:block/sea_lantern":                190,
+	"minecraft:block/glowstone":                  190,
+	"minecraft:block/shroomlight":                190,
+	"minecraft:block/ochre_froglight_side":       190,
+	"minecraft:block/ochre_froglight_top":        190,
+	"minecraft:block/pearlescent_froglight_side": 190,
+	"minecraft:block/pearlescent_froglight_top":  190,
+	"minecraft:block/verdant_froglight_side":     190,
+	"minecraft:block/verdant_froglight_top":      190,
+	"minecraft:block/redstone_lamp_on":           170,
+}
+
 // readTextures 按名字覆盖原版首帧，并确定三张表面数组共用的层边长。
 func readTextures(source fs.FS, pack fs.FS, limit int) (textureInputs, error) {
 	var manifest Manifest
@@ -93,7 +108,7 @@ func readTextures(source fs.FS, pack fs.FS, limit int) (textureInputs, error) {
 		t := tile{
 			color:    original,
 			normal:   solid(color.NRGBA{128, 128, 255, 255}),
-			specular: solid(color.NRGBA{}),
+			specular: solid(color.NRGBA{A: vanillaEmission[name]}),
 		}
 		for channel, suffix := range []string{"", "_n", "_s"} {
 			if replacement := readTile(pack, name, suffix); replacement != nil {

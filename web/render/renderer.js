@@ -83,6 +83,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uWaterGroup",
     "uFog",
     "uTime",
+    "uOcean",
+    "uOceanHeight",
+    "uWorldOrigin",
     "uBounces",
     "uDirectoryOffset",
     "uObjectData",
@@ -111,6 +114,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   const accumulator = createAccumulator(gl, vertex);
   // 累积样本的随机种子；每帧不同，样本之间才互不相关。
   let frame = 0;
+  // 一个累积序列固定水面时刻，否则样本会把移动波纹平均成模糊镜面。
+  let waterTime = 0;
   const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2"),
     queries = [],
     times = [];
@@ -172,9 +177,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     return world;
   }
   /** 绑定射线程序并写入一帧的全部输入，预览、累积和拍照共用；返回这一帧的曝光。
-   * 夜里只有月光，曝光随太阳落下逐渐提高，画面不至于全黑。
+   * 夜间提高曝光，让微弱月光仍可见，同时给灯块保留高光余量。
    * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,pass:number,bounces:number,time:number,debug:number,hierarchy:boolean,fragments:boolean,shadows:boolean,sun:number[],fog:number,objects?:boolean}} options
+   * @param {{width:number,height:number,pass:number,bounces:number,time:number,waterTime?:number,debug:number,hierarchy:boolean,fragments:boolean,shadows:boolean,sun:number[],fog:number,ocean?:number,objects?:boolean}} options
    */
   function prepare(
     camera,
@@ -184,12 +189,14 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       pass,
       bounces,
       time,
+      waterTime = time,
       debug,
       hierarchy,
       fragments,
       shadows,
       sun,
       fog,
+      ocean,
       objects: drawObjects = true,
     },
   ) {
@@ -227,7 +234,10 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       catalog.models[catalog.states[WATER]].group,
     );
     gl.uniform1f(uniforms.get("uFog"), fog);
-    gl.uniform1f(uniforms.get("uTime"), time);
+    gl.uniform1f(uniforms.get("uTime"), waterTime);
+    gl.uniform1i(uniforms.get("uOcean"), Number(ocean !== undefined));
+    gl.uniform1f(uniforms.get("uOceanHeight"), (ocean ?? 0) - origin[1]);
+    gl.uniform3fv(uniforms.get("uWorldOrigin"), origin);
     gl.uniform1i(uniforms.get("uBounces"), bounces);
     gl.uniform1i(uniforms.get("uDebug"), debug);
     gl.uniform1i(uniforms.get("uHierarchy"), Number(hierarchy));
@@ -244,14 +254,15 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     );
     objects.update(time, origin);
     const night = 1 - Math.min(1, Math.max(0, (sun[1] / length + 0.1) / 0.3));
-    return 0.9 * (1 + 4 * night);
+    return 0.9 * (1 + 2.3 * night);
   }
   /** 只绘制当前已发布的数据；每帧上传的实例变换也计入 GPU 时间。
    * accumulate 为真表示相机、设置与场景都和上一帧相同：这一帧作为累积样本加到画面上，
    * 带抗锯齿、软阴影和一次漫反射反弹；为假时重新出一帧干净的预览。
+   * ocean 指定无限海面的世界高度；省略时只绘制场景里的体素水。
    * sun 是指向太阳的方向，太阳在地平线下时由月亮照明；fog 是远景雾接近不透明的距离，默认为观察窗口半径。
    * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,accumulate?:boolean,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],fog?:number,objects?:boolean,synchronize?:boolean}} options
+   * @param {{width:number,height:number,accumulate?:boolean,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],fog?:number,ocean?:number,objects?:boolean,synchronize?:boolean}} options
    */
   function draw(
     camera,
@@ -266,6 +277,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       shadows = true,
       sun = [0.45, 0.62, 0.3],
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
+      ocean,
       objects = true,
       synchronize = false,
     },
@@ -276,6 +288,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       resetTiming();
     }
     accumulator.resize(width, height);
+    if (!accumulate) waterTime = time;
     const exposure = prepare(camera, {
       width,
       height,
@@ -283,12 +296,14 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       pass: accumulator.begin(accumulate),
       bounces: 1,
       time,
+      waterTime,
       debug,
       hierarchy,
       fragments,
       shadows,
       sun,
       fog,
+      ocean,
     });
     if (timer && gl.getParameter(timer.GPU_DISJOINT_EXT)) resetTiming();
     while (
@@ -318,7 +333,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    * 批量按完成速度调整：每帧都把队列画空就加倍，一批拖过两帧就减半。
    * 宿主在每个动画帧调用 step()，期间暂停交互绘制；完成后用 png() 取图，再 dispose()。
    * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number,objects?:boolean}} options
+   * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number,ocean?:number,objects?:boolean}} options
    */
   function photograph(
     camera,
@@ -332,6 +347,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       shadows = true,
       sun = [0.45, 0.62, 0.3],
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
+      ocean,
     },
   ) {
     const film = createAccumulator(gl, vertex),
@@ -368,6 +384,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
             shadows,
             sun,
             fog,
+            ocean,
           });
         gl.scissor(...tiles[tile], PHOTO_TILE, PHOTO_TILE);
         gl.drawArrays(gl.TRIANGLES, 0, 3);

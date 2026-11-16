@@ -31,6 +31,8 @@ const base = process.env.R2_URL || "http://127.0.0.1:2413";
     );
     for (const name of ["showcase", "fences", "cutouts", "cubes", "spill"]) {
       await page.evaluate(async (name) => {
+        // 遍历方式只改变求交策略，比较时保持同一个波面时刻。
+        r2.fixedTime = 12;
         document.querySelector("#hierarchy").checked = true;
         document.querySelector("#fragments").checked = true;
         await r2.loadScene(name);

@@ -11,7 +11,7 @@ uniform ivec3 uDirectoryOffset;
 // 共享模型：模型头、四边形引用与记录、完整方块面表与面贴图数组、复杂模型图集。
 uniform usampler2D uModels,uQuadReferences;
 uniform sampler2D uQuadRecords,uFast,uAtlas,uAtlasNormals,uAtlasSpecular;
-// 材质包的三套同布局贴图：颜色、labPBR 法线（_n）与高光（_s）。原版没有后两者，取默认值后与不带材质时一致。
+// 材质包的三套同布局贴图：颜色、labPBR 法线（_n）与高光（_s）。缺图时取默认值，原版灯块由资源合成器补自发光。
 uniform sampler2DArray uSurfaces,uSurfaceNormals,uSurfaceSpecular;
 uniform vec3 uSize,uCamera,uRight,uUp,uForward;
 uniform vec2 uViewport;
@@ -28,8 +28,12 @@ uniform int uPass;
 uniform uint uFrame,uWaterGroup;
 // 远景雾在这个距离上接近不透明，遮住观察窗口的边界。
 uniform float uFog;
-// 秒；水面波浪随它起伏。累积样本取不同时刻，静止后的水面因此平滑。
+// 秒；宿主固定时间后累积同一个波面，动画时重开预览。
 uniform float uTime;
+// 海面独立于体素窗口；波纹使用世界坐标，窗口移动时相位不变。
+uniform bool uOcean;
+uniform float uOceanHeight;
+uniform vec3 uWorldOrigin;
 // 累积样本的漫反射反弹次数：实时累积为 1，拍照时更多。
 uniform int uBounces;
 out vec4 outColor;
@@ -87,15 +91,40 @@ vec3 skyRadiance(vec3 d){
  float dusk=day*(1.0-smoothstep(0.0,.35,uSun.y))*pow(max(dot(d,toward),0.0),4.0)*(1.0-up)*(1.0-up);
  return mix(horizon,zenith,sqrt(up))+dusk*vec3(.6,.25,.08);
 }
-// 水面法线：几组不同方向的正弦波叠加，只扰动法线，不改变几何。
-vec3 waveNormal(vec2 p){
- vec2 slope=vec2(0);
- for(int i=0;i<4;i++){
-  float fi=float(i),angle=fi*2.4+.6,frequency=.55+fi*.45;
-  vec2 d=vec2(cos(angle),sin(angle));
-  slope+=d*frequency*cos(dot(d,p)*frequency+uTime*(.9+fi*.35))*.11/(1.0+fi*.5);
+// 像素在水面上的两条射线微分包含距离和掠射拉伸；按每个波向过滤，而非只用距离选级。
+// 被滤掉的斜率能量转入方差，远处仍有粗糙反射，却不会留下欠采样的波纹。
+vec3 waveNormal(vec2 p,vec3 view,float distance,out float roughness){
+ float pixel=uSpan/uViewport.y,scale=uOrtho?1.0:distance/rayLength;
+ vec2 dx=scale*pixel*(uRight-view*uRight.y/view.y).xz,dy=scale*pixel*(uUp-view*uUp.y/view.y).xz;
+ vec2 slope=vec2(0);float variance=.0003;
+ for(int i=0;i<16;i++){
+  float fi=float(i),angle=fi*2.399963+.37,frequency=.11*pow(1.43,fi),amplitude=.065*pow(.94,fi);
+  vec2 d=normalize(vec2(cos(angle),sin(angle)*.8)),k=d*frequency;
+  float footprint=dot(k,dx)*dot(k,dx)+dot(k,dy)*dot(k,dy),resolved=exp(-.125*footprint);
+  float phase=dot(k,p)-sqrt(9.81*frequency)*uTime+fi*fi*1.7;
+  slope+=d*(amplitude*resolved*cos(phase));
+  variance+=.5*amplitude*amplitude*(1.0-resolved*resolved);
  }
+ roughness=sqrt(variance);
  return normalize(vec3(-slope.x,1,-slope.y));
+}
+// 可见 GGX 微面采样把样本集中到朝向相机的微面，掠射时不用丢弃大量背面样本。
+// 斜率均方根作为分布宽度；Smith 遮蔽在反射合成时补上，避免地平线积出亮边。
+vec3 waterMicroNormal(vec3 n,vec3 view,float roughness){
+ vec3 t=normalize(cross(vec3(0,0,1),n)),b=cross(n,t);
+ vec3 v=normalize(vec3(dot(-view,t)*roughness,dot(-view,b)*roughness,max(dot(-view,n),.0001)));
+ float lensq=dot(v.xy,v.xy);
+ vec3 t1=lensq>0.0?vec3(-v.y,v.x,0)/sqrt(lensq):vec3(1,0,0),t2=cross(v,t1);
+ float r=sqrt(random()),phi=6.2831853*random(),x=r*cos(phi),y=r*sin(phi),s=.5*(1.0+v.z);
+ y=mix(sqrt(max(0.0,1.0-x*x)),y,s);
+ vec3 h=x*t1+y*t2+sqrt(max(0.0,1.0-x*x-y*y))*v;
+ h=normalize(vec3(roughness*h.xy,max(0.0,h.z)));
+ return t*h.x+b*h.y+n*h.z;
+}
+// 可见微面采样已抵消入射遮蔽，只需保留反射方向的 Smith 可见度。
+float waterMask(float cosine,float roughness){
+ float c=max(cosine,0.0);
+ return 2.0*c/(c+sqrt(roughness*roughness+(1.0-roughness*roughness)*c*c));
 }
 // 菲涅耳反射率（Schlick 近似）；水的正入射反射率约 2%，掠射时接近全反射。
 float fresnel(float cosine,float f0){return f0+(1.0-f0)*pow(1.0-clamp(cosine,0.0,1.0),5.0);}
@@ -149,8 +178,8 @@ Material decodeMaterial(vec3 geometric,vec3 tangentS,vec3 tangentT,vec4 normalTe
  return Material(geometric,normal,metal?albedo:vec3(reflectance/255.0),normalTexel.b,
   (1.0-specularTexel.r)*(1.0-specularTexel.r),glow<254.5?glow/254.0:0.0,metal?0.0:1.0);
 }
-// 自发光贴图的亮度倍数：满值的发光面约为正午阳光下白墙的三倍。
-const float EMISSION=3.0;
+// 自发光以线性颜色乘强度；满值为 1.6，配合夜间曝光仍保留灯块纹路。
+const float EMISSION=1.6;
 // 光源方向上的镜面高光（GGX 分布、Smith 遮蔽、Schlick 菲涅耳），已乘 N·L。F0 为零的表面没有镜面项。
 vec3 specularLight(Material m,vec3 view,vec3 light){
  if(brightest(m.f0)<=0.0)return vec3(0);
@@ -405,22 +434,26 @@ void windowInterval(out vec3 entry,out vec3 leave){
  leave=mix(leave,vec3(1e30),parallel);
 }
 // 沿当前射线走完窗口；高空起点先靠近入口，避免大距离浮点误差使格子边界漏面。
+// limit 让主射线停在解析水面；submerged 让窗口内外的路程都按海水吸收。
 // 主射线保留靠近前的距离，拾取、雾与透视纹理足迹仍相对原来的像平面。
-bool march(){
+bool march(float limit,bool submerged){
+ float traveled=0.0;
  invRay=vec3(1)/ray;
  vec3 entry,leave;windowInterval(entry,leave);
- float first=max(entry.x,max(entry.y,entry.z)),last=min(leave.x,min(leave.y,leave.z));
+ float first=max(entry.x,max(entry.y,entry.z)),last=min(limit,min(leave.x,min(leave.y,leave.z)));
  if(first>1.0&&first<last){
-  float travel=first-1.0;eye+=ray*travel;
+  float travel=first-1.0;eye+=ray*travel;traveled=travel;limit-=travel;
   if(primaryRay)primaryTravel+=travel;
   windowInterval(entry,leave);
-  first=max(entry.x,max(entry.y,entry.z));last=min(leave.x,min(leave.y,leave.z));
+  first=max(entry.x,max(entry.y,entry.z));last=min(limit,min(leave.x,min(leave.y,leave.z)));
  }
  float t=max(.01,first);int axis=entry.x>=entry.y&&entry.x>=entry.z?0:entry.y>=entry.z?1:2;
  int side=axis*2+(pick(ray,axis)<0.0?1:0);
  radiance=vec3(0);directSum=vec3(0);throughput=vec3(1);shadeWeight=0.0;bounceWeight=0.0;
- foliage=1.0;touched=false;firstDepth=0.0;waterFrom=-1.0;mirrored=false;
+ foliage=1.0;touched=false;firstDepth=0.0;waterFrom=submerged?0.0:-1.0;mirrored=false;
  cachedSection=ivec3(-1);cachedBrick=-1;
+ if(submerged){waterFrom=0.0;absorbWater(traveled);waterFrom=0.0;}
+ if(!uHasWorld){if(submerged)absorbWater(limit);return true;}
  float afterHit=.01;uint previous=0u;uvec4 previousModel=uvec4(0);bool entering=true,inside=first<.01;bool finished=t>=last;
  ivec3 cell=clamp(ivec3(floor(eye+ray*(t+EPS))),ivec3(0),ivec3(uSize)-1);
  for(int iteration=0;iteration<2048;iteration++){
@@ -443,7 +476,7 @@ bool march(){
    bool water=medium!=0u&&description.w==uWaterGroup;
    if(!inside&&!sameMedium(previous,previousModel.w,medium,description.w)){
     if(previous!=0u){absorbWater(t);cubeSurface(previousModel.y,side^1,t,false);}
-    if(!water)waterFrom=-1.0;
+    if(!water&&!submerged)waterFrom=-1.0;
     if(water&&primaryRay&&!mirrored&&side==3){mirrored=true;mirrorPoint=eye+ray*t;mirrorWeight=throughput;mirrorRadiance=radiance;mirrorDirect=directSum;}
     if(brightest(throughput)>0.001&&medium!=0u)cubeSurface(description.y,side,t,false);
    }
@@ -462,13 +495,35 @@ bool march(){
   }
   if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
   t=end;cell=nextCell;side=exitSide^1;entering=true;
-  if(t>=last-EPS){absorbWater(t);if(previous!=0u&&brightest(throughput)>.001)cubeSurface(previousModel.y,exitSide,t,false);finished=true;break;}
+  if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)cubeSurface(previousModel.y,exitSide,t,false);finished=true;break;}
  }
+ if(submerged&&brightest(throughput)>.001)absorbWater(limit);
  return finished;
+}
+// 星点固定在方向球的立体投影网格里；解析像素滤波保持点的能量，转动相机不会随机闪灭。
+// 星心留在格内，邻域合成覆盖跨格的像素足迹；只绘制地平线以上的夜空。
+vec3 stars(vec3 d){
+ float night=1.0-smoothstep(-.18,.02,uSun.y);
+ if(night<=0.0||d.y<=0.0)return vec3(0);
+ vec2 p=d.xz/(1.0+d.y)*240.0,cell=floor(p);
+ float footprint=uOrtho?.28:240.0*uSpan/uViewport.y/(1.0+d.y);
+ float width=sqrt(.035*.035+.25*footprint*footprint);
+ vec3 light=vec3(0);
+ for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
+  ivec2 c=ivec2(cell)+ivec2(x,y);
+  uint h=pcg(uint(c.x)*1973u+uint(c.y)*9277u);
+  float chance=float(h&65535u)/65535.0;
+  if(chance>.012)continue;
+  vec2 center=vec2(c)+.2+.6*vec2(float(pcg(h)&65535u),float(pcg(h+1u)&65535u))/65535.0;
+  vec2 delta=p-center;
+  float intensity=.0015/(width*width)*exp(-.5*dot(delta,delta)/(width*width));
+  light+=mix(vec3(.55,.7,1),vec3(1,.83,.6),float(pcg(h+2u)&255u)/255.0)*intensity*(.4+chance*120.0);
+ }
+ return light*night*smoothstep(0.0,.12,d.y);
 }
 // 背景天空；主射线与水面反射还能看到太阳与月亮的圆盘，漫反射反弹里的阳光已由直射项计入。
 vec3 background(vec3 d){
- vec3 sky=skyRadiance(d);
+ vec3 sky=skyRadiance(d)+stars(d);
  float toward=dot(d,uSun);
  sky+=vec3(1.0,.9,.75)*30.0*smoothstep(.9996,.9997,toward)*smoothstep(-.05,.02,uSun.y);
  sky+=vec3(.8,.85,1.0)*2.0*smoothstep(.9997,.9998,-toward)*smoothstep(-.02,.05,-uSun.y);
@@ -480,6 +535,37 @@ vec3 directLight(bool soft){
  if(!uShadows||shadeWeight<=0.0)return directSum;
  return directSum*sunVisibility(shadePoint+shadeNormal*1e-3,soft?coneDirection(lightDir,.012):lightDir);
 }
+// 海面只分出一条反射和一条折射，二者都复用体素求交；预览不为它们另发阴影射线。
+// 水下到窗口入口的路程也吸收，未命中的折射射线最终只剩深水散射。
+vec3 oceanRadiance(vec3 point,vec3 view,float distance){
+ float roughness;vec3 n=waveNormal((point+uWorldOrigin).xz,view,distance,roughness);
+ vec3 micro=uPass==1?waterMicroNormal(n,view,roughness):n;
+ float f=fresnel(dot(-view,micro),.02);
+ vec3 reflected=vec3(0),r=reflect(view,micro);
+ // 预览把朝入几何平面的方向折回；单条平均法线不能表达波峰遮蔽，折回可避免黑色裂缝。
+ if(uPass==0)r.y=abs(r.y);
+ if(r.y>0.0){
+  eye=point+vec3(0,.001,0);ray=r;primaryRay=false;
+  march(1e30,false);
+  reflected=radiance+(brightest(throughput)>.001?throughput*background(r):vec3(0))+(uPass==1?directLight(true):directSum);
+  if(uPass==1)reflected*=waterMask(dot(n,r),roughness);
+ }
+ // 折射取已过滤的平均法线，避免单样本透射把水下几何打碎。
+ vec3 refracted=refract(view,n,1.0/1.333);
+ eye=point-vec3(0,.001,0);ray=refracted;primaryRay=false;
+ march(1e4,true);
+ vec3 transmitted=radiance+(uPass==1?directLight(true):directSum);
+ return f*reflected+(1.0-f)*transmitted;
+}
+// 水下视点用平面界面折射出水；超出临界角时全反射，避免把水面上方的世界截掉。
+vec3 oceanExitRadiance(vec3 point,vec3 view){
+ vec3 outgoing=refract(view,vec3(0,-1,0),1.333);
+ bool internal=dot(outgoing,outgoing)<.001;
+ if(internal)outgoing=reflect(view,vec3(0,1,0));
+ eye=point+vec3(0,internal?-.001:.001,0);ray=outgoing;primaryRay=false;
+ march(internal?1e4:1e30,internal);
+ return radiance+throughput*background(outgoing)+(uPass==1?directLight(true):directSum);
+}
 // 一个像素的线性亮度。主射线之后最多再分出三类射线：阴影、水面反射、累积时的反弹。
 // 反弹用看到的亮度替换代表表面的常量环境光，墙角、屋檐下因此自然变暗，亮面也会映到旁边；
 // 有反射率的材质还会按菲涅耳的比例沿镜面方向反弹，光滑的表面因此映出周围。
@@ -490,29 +576,42 @@ vec3 tracePixel(vec2 pixel){
  vec3 direction=uOrtho?uForward:uForward+offset;
  rayLength=length(direction);ray=direction/rayLength;eye=uCamera+(uOrtho?offset:vec3(0));primaryRay=true;primaryTravel=0.0;
  touched=false;firstDepth=-1.0;firstNormal=vec3(0);
- if(!uHasWorld)return background(ray);
- vec3 view=ray;
+ if(!uHasWorld&&!uOcean)return background(ray);
+ vec3 view=ray,origin=eye;
+ bool underwater=uOcean&&!uPicking&&eye.y<uOceanHeight;
+ float oceanDistance=uOcean&&!uPicking&&abs(ray.y)>1e-8?(uOceanHeight-eye.y)/ray.y:-1.0;
+ bool oceanHit=oceanDistance>0.0;
  // 迭代用尽时输出极亮的品红，色调映射后仍是纯品红，实验脚本据此统计。
- if(!march())return vec3(1e4,0,1e4);
+ if(!march(oceanHit?oceanDistance:1e30,underwater))return vec3(1e4,0,1e4);
  if(uPicking)return vec3(0);
  bool soft=uPass==1;
  // 八次方让近处几乎没有雾，接近雾距离时才迅速变浓。
- float fog=touched?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
+ float fog=touched&&!underwater?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
  // 后面的射线会覆盖合成结果与代表表面，先把主射线需要的部分留下。
- vec3 front=radiance,frontDirect=directSum,behind=throughput*background(view);
+ vec3 front=radiance,frontDirect=directSum,remaining=throughput;
+ vec3 behind=brightest(throughput)>.001?throughput*background(view):vec3(0);
+ bool sea=oceanHit&&!underwater&&brightest(remaining)>.001;
  bool water=mirrored,bounce=uPass==1&&bounceWeight>0.0;
  vec3 waterPoint=mirrorPoint,waterWeight=mirrorWeight,above=mirrorRadiance,aboveDirect=mirrorDirect;
  vec3 weight=bounceAlbedo,constant=bounceAmbient,specular=bounceSpecular,point=bouncePoint,normal=bounceNormal,shading=bounceShading,incoming=bounceView;
  float roughness=bounceRoughness;
  vec3 visible=uShadows&&shadeWeight>0.0?sunVisibility(shadePoint+shadeNormal*1e-3,soft?coneDirection(lightDir,.012):lightDir):vec3(1);
  vec3 color=front+frontDirect*visible+behind;
+ if(underwater&&oceanHit&&brightest(remaining)>.001){
+  color=front+frontDirect*visible+remaining*oceanExitRadiance(origin+view*oceanDistance,view);
+ }
+ if(sea){
+  color=front+frontDirect*visible+remaining*oceanRadiance(origin+view*oceanDistance,view,oceanDistance);
+ }
  if(water){
   // 水面以上的部分不变，水面及水下按 1-F 透过，再加上反射看到的 F。
-  vec3 n=waveNormal(waterPoint.xz),r=reflect(view,n);r.y=abs(r.y);
+  float waterRoughness;vec3 n=waveNormal((waterPoint+uWorldOrigin).xz,view,length(waterPoint-origin),waterRoughness);
+  if(soft)n=waterMicroNormal(n,view,waterRoughness);
+  vec3 r=reflect(view,n);r.y=abs(r.y);
   float f=fresnel(dot(-view,n),.02);
   vec3 kept=above+aboveDirect*visible;
   eye=waterPoint+vec3(0,1e-3,0);ray=r;primaryRay=false;
-  march();
+  march(1e30,false);
   vec3 seen=radiance+throughput*background(r)+directLight(soft);
   color=kept+(1.0-f)*(color-kept)+f*waterWeight*seen;
  }
@@ -530,11 +629,23 @@ vec3 tracePixel(vec2 pixel){
     carried=specular/chance;
    }else{ray=cosineDirection(normal);carried=weight/(1.0-chance);}
    eye=point+normal*1e-3;primaryRay=false;
-   vec3 toward=ray;
-   march();
+   vec3 toward=ray,start=eye;
+   float seaDistance=uOcean&&abs(ray.y)>1e-8?(uOceanHeight-eye.y)/ray.y:-1.0;
+   bool submerged=uOcean&&eye.y<uOceanHeight;
+   march(seaDistance>0.0?seaDistance:1e30,submerged);
+   bool reachesSea=seaDistance>0.0&&!submerged&&brightest(throughput)>.001;
    bool more=bounceWeight>0.0&&b+1<uBounces;
    vec3 hitAlbedo=bounceAlbedo,hitAmbient=bounceAmbient,hitSpecular=bounceSpecular,hitPoint=bouncePoint,hitNormal=bounceNormal;
-   color+=carried*(radiance+throughput*skyRadiance(toward)+directLight(true));
+   vec3 hitLight=radiance+directLight(true),transmission=throughput;
+   if(reachesSea){
+    color+=carried*(hitLight+transmission*oceanRadiance(start+toward*seaDistance,toward,length(start-uCamera)+seaDistance));
+    break;
+   }
+   if(submerged&&seaDistance>0.0&&brightest(transmission)>.001){
+    color+=carried*(hitLight+transmission*oceanExitRadiance(start+toward*seaDistance,toward));
+    break;
+   }
+   color+=carried*(hitLight+transmission*skyRadiance(toward));
    if(!more)break;
    color-=carried*hitAmbient;
    weight=carried*hitAlbedo;specular=carried*hitSpecular;point=hitPoint;normal=hitNormal;

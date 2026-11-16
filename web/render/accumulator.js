@@ -36,7 +36,7 @@ void main(){
  outColor=vec4(srgbColor(aces(color*uExposure)),1);
 }`;
 // 光晕在最终画面里的占比。
-const BLOOM = 0.04;
+const BLOOM = 0.075;
 // 显示时读取的两张缓冲放在射线程序用不到的单元上，射线程序已绑定的贴图不受影响。
 const UNIT = 15,
   BLOOM_UNIT = 16;
