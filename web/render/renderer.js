@@ -18,7 +18,7 @@ import {
  * @param {HTMLCanvasElement} canvas
  * @param {{assets?:string}} options
  */
-export async function createRenderer(canvas, { assets = "/r2/assets/" } = {}) {
+export async function createRenderer(canvas, { assets = "/r2/assets/", onProgress } = {}) {
   const gl = canvas.getContext("webgl2", {
     antialias: false,
     preserveDrawingBuffer: true,
@@ -78,7 +78,14 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     return program;
   }
-  const programs = await Promise.all([createRayProgram(0), createRayProgram(1)]);
+  // 两个程序逐个编译并报告进度：Windows 的 D3D 后端编一个大射线程序可能要几十秒，
+  // 让人对着空白页面等是最糟的体验。宿主把进度显示在页面顶部那行提示里。
+  const modules = ["预览射线程序", "累积射线程序"];
+  const programs = [];
+  for (const [index, label] of modules.entries()) {
+    onProgress?.({ index: index + 1, total: modules.length, label });
+    programs.push(await createRayProgram(index));
+  }
   let program = programs[1];
   gl.useProgram(program);
   const vao = gl.createVertexArray();
