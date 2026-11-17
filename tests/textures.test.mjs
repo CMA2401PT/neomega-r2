@@ -35,13 +35,13 @@ test("贴图上传保留六张图的格式、布局与 mip，并释放被替换�
     assert.equal(calls.filter(([name]) => name === "texSubImage3D").length, 15);
     const normals = calls.filter(([name]) => name === "texSubImage3D")[5].at(-1);
     assert.deepEqual([...normals.slice(0, 4)], [128, 128, 255, 255]);
-    assert.equal(live.size, 10);
+    assert.equal(live.size, 11);
     const byteCount = textures.bytes;
     const files = new Map();
     for (const name of ["headers.bin", "fast.bin", "quad-records.bin", "surface-layers.bin", "surface-normals.bin", "surface-specular.bin", "atlas-color.bin", "atlas-normals.bin", "atlas-specular.bin"])
       files.set(name, await (await fetch(name)).arrayBuffer());
     textures.install({ files, info: await (await fetch("textures-info.json")).json(), catalog: textures.catalog });
-    assert.equal(live.size, 10);
+    assert.equal(live.size, 11);
     assert.equal(textures.bytes, byteCount);
     assert(!calls.some(([name, unit]) => name === "activeTexture" && unit === 15));
     textures.dispose();

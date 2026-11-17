@@ -5,6 +5,8 @@ export {
   type LightingOptions,
   type DrawOptions,
   type PhotoOptions,
+  type Tier,
+  type PreviewTier,
 } from "./render/renderer.ts";
 export { decodeTextures, type TextureSet, type TextureInfo } from "./render/textures.ts";
 export { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./render/camera.ts";

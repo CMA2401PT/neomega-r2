@@ -130,9 +130,14 @@ function render(now) {
     width = Math.round(innerWidth * scale),
     height = Math.round(innerHeight * scale);
   renderer.objects.enabled = globalThis.r2.specialEnabled !== false;
+  // 选中的档第一次使用时编译，编译完成前沿用已有的档。
+  const tier = document.querySelector("#tier").value;
+  if (renderer.ready(tier)) shownTier = tier;
+  else renderer.compile(tier).catch((error) => (status.textContent = String(error)));
   renderer.draw(camera, {
     width,
     height,
+    tier: shownTier,
     time: globalThis.r2.fixedTime ?? now / 1000,
     debug: Number(document.querySelector("#debug").value),
     hierarchy: document.querySelector("#hierarchy").checked,
@@ -146,8 +151,10 @@ function render(now) {
     statusAt = now;
   }
 }
+let shownTier = "shading";
 globalThis.r2 = {
   gl: renderer.gl,
+  renderer,
   loadScene,
   setCamera,
   resetTiming: () => {

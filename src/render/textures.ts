@@ -1,4 +1,5 @@
 import type { Catalog } from "../contracts.ts";
+import { voxelColors } from "./voxels.ts";
 
 export interface TextureInfo {
   side: number;
@@ -116,6 +117,18 @@ export async function createTextures(gl: WebGL2RenderingContext, uniforms: Unifo
       bytes += data.byteLength;
     }
     Object.assign(catalog, set.catalog);
+    // 体素档的代表色随材质包一起换。
+    table(18, "uVoxels", voxelColors({
+      catalog: set.catalog,
+      info: set.info,
+      fast: set.files.get("fast.bin")!,
+      references: files.get("quad-references.bin")!,
+      records: set.files.get("quad-records.bin")!,
+      surfaces: set.files.get("surface-layers.bin")!,
+      surfaceSpecular: set.files.get("surface-specular.bin")!,
+      atlas: set.files.get("atlas-color.bin")!,
+      atlasSpecular: set.files.get("atlas-specular.bin")!,
+    }).buffer, false);
   }
   table(8, "uQuadReferences", files.get("quad-references.bin"), true);
   referenceBytes = bytes;

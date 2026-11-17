@@ -20,17 +20,27 @@ uniform bool uOrtho,uHasWorld,uPicking;
 uniform vec2 uPickPixel;
 vec3 firstNormal;
 uniform int uDebug;
-uniform bool uHierarchy,uFragments,uShadows;
+uniform bool uHierarchy,uFragments;
 // 指向太阳的单位向量；太阳落到地平线下以后由反方向的月亮照明。
 uniform vec3 uSun;
-// 0 是单帧预览：像素中心、硬阴影、常量天空光。1 是静止时的累积样本：像素内抖动、软阴影、一次漫反射反弹。
-// 预览移除累积反弹的路径，避免它的中间状态增加每个预览像素的负担。
-#ifdef RENDER_PASS
-const int uPass=RENDER_PASS;
-#else
-uniform int uPass;
+// 四档绘制器各自编译，低档用预处理去掉整段代码，弱设备只需编译、执行自己那一档：
+// 0 体素：每个非空格子都是纯色立方体，水与玻璃是透明纯色块；无阴影、无雾、无水面效果。
+// 1 基础：完整的方块形状与贴图，水只是像玻璃一样的透明面；无阴影、无雾、无水面效果与反射、无 PBR。
+// 2 光影：硬阴影、远景雾、水面波纹与反射、labPBR 材质；单帧预览的最高档。
+// 3 累积：在光影之上加像素内抖动、软阴影与漫反射反弹，静止累积与拍照专用。
+#ifndef RENDER_TIER
+#define RENDER_TIER 2
 #endif
+const int uPass=RENDER_TIER==3?1:0;
+// 预览档的像素内偏移（像素）；导出时按网格超采样，单帧预览为零。累积档自己随机抖动。
+uniform vec2 uJitter;
 uniform uint uFrame,uWaterGroup;
+// 静止水源的模型编号；低档把无限海面画成一层与它同色的透明平面。
+uniform uint uWater;
+#if RENDER_TIER==0
+// 体素档的每模型代表色：每个模型两项，线性颜色与不透明度、自发光强度。
+uniform sampler2D uVoxels;
+#endif
 // 远景雾在这个距离上接近不透明，遮住观察窗口的边界。
 uniform float uFog;
 // 秒；宿主固定时间后累积同一个波面，动画时重开预览。
@@ -96,6 +106,7 @@ vec3 skyRadiance(vec3 d){
  float dusk=day*(1.0-smoothstep(0.0,.35,uSun.y))*pow(max(dot(d,toward),0.0),4.0)*(1.0-up)*(1.0-up);
  return mix(horizon,zenith,sqrt(up))+dusk*vec3(.6,.25,.08);
 }
+#if RENDER_TIER>=2
 // 像素在水面上的两条射线微分包含距离和掠射拉伸；按每个波向过滤，而非只用距离选级。
 // 被滤掉的斜率能量转入方差，远处仍有粗糙反射，却不会留下欠采样的波纹。
 vec3 waveNormal(vec2 p,vec3 view,float distance,out float roughness){
@@ -131,6 +142,7 @@ float waterMask(float cosine,float roughness){
  float c=max(cosine,0.0);
  return 2.0*c/(c+sqrt(roughness*roughness+(1.0-roughness*roughness)*c*c));
 }
+#endif
 // 菲涅耳反射率（Schlick 近似）；水的正入射反射率约 2%，掠射时接近全反射。
 float fresnel(float cosine,float f0){return f0+(1.0-f0)*pow(1.0-clamp(cosine,0.0,1.0),5.0);}
 // 材质的菲涅耳；F0 为零表示材质包没有给出反射率，此时完全不反射。
@@ -153,11 +165,14 @@ void setupLight(){
 // 水每格的消光：红光衰减最快，深水因此偏蓝绿。散射比例决定水体自身透出的颜色。
 const vec3 WATER_EXTINCTION=vec3(.28,.075,.05),WATER_SCATTER=vec3(.03,.22,.30);
 // 把射线在水里走过的一段计入：透过率按距离指数衰减，损失的部分换成水体散射的光。
+// 低档的水不吸收，只在界面上像玻璃一样透过。
 void absorbWater(float t){
+#if RENDER_TIER>=2
  if(waterFrom<0.0||t<=waterFrom)return;
  vec3 kept=exp(-WATER_EXTINCTION*(t-waterFrom));
  radiance+=throughput*(1.0-kept)*WATER_SCATTER*(ambient+lightColor*max(lightDir.y,0.0)*.5);
  throughput*=kept;waterFrom=t;
+#endif
 }
 // 按轴取分量时不用 v[axis]：ANGLE 在 D3D 上会把动态下标翻译成可索引临时数组，很慢。
 float pick(vec3 v,int axis){return axis==0?v.x:axis==1?v.y:v.z;}
@@ -182,6 +197,13 @@ Material decodeMaterial(vec3 geometric,vec3 tangentS,vec3 tangentT,vec4 normalTe
  bool metal=reflectance>229.5;
  return Material(geometric,normal,metal?albedo:vec3(reflectance/255.0),normalTexel.b,
   (1.0-specularTexel.r)*(1.0-specularTexel.r),glow<254.5?glow/254.0:0.0,metal?0.0:1.0);
+}
+// 低档不读法线与反射率，只保留自发光，夜间灯块仍然亮着。
+Material glowMaterial(vec3 normal,vec4 specularTexel){
+ Material m=plainMaterial(normal);
+ float glow=specularTexel.a*255.0;
+ m.emission=glow<254.5?glow/254.0:0.0;
+ return m;
 }
 // 自发光以线性颜色乘强度；满值为 1.6，配合夜间曝光仍保留灯块纹路。
 const float EMISSION=1.6;
@@ -268,13 +290,35 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
  if(cutout&&texel.a<0.5)return false;
  vec3 color=texel.rgb/max(texel.a,1e-4)*f2.rgb;
  float alpha=cutout?1.0:mod(f1.w,2.0)==1.0?texel.a*f2.w:table(uFast,offset+3).a;
+#if RENDER_TIER>=2
  // 贴图坐标对面内坐标的导数是 [f0.zw f1.xy]，取逆得到贴图横纵两个方向在面内的走向。
  float det=f0.z*f1.y-f1.x*f0.w;
  vec3 tangentS=normalize(fromAcross(vec2(f1.y,-f0.w)/det,axis)),tangentT=normalize(fromAcross(vec2(-f1.x,f0.z)/det,axis));
  Material m=decodeMaterial(normal,tangentS,tangentT,
   textureLod(uSurfaceNormals,vec3(tile,f1.z),lod),textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod),color);
+#else
+ Material m=glowMaterial(normal,textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod));
+#endif
  contribute(color,alpha,t,m,f1.w>=2.0);
  return true;
+}
+// 介质边界上的面：体素档画模型代表色的纯色面，其余各档按完整方块面表着色。
+void boundarySurface(uint id,uvec4 description,int side,float t){
+#if RENDER_TIER==0
+ // 完整方块每面用资源包的代表色（已含色调；草方块顶面绿、侧面土色），复杂模型整体用平均色。
+ int at=int(id)*2;
+ vec4 color=table(uVoxels,at);
+ if(description.x==1u||description.x==3u){
+  int face=int(description.y)+side*4;
+  color=vec4(linearColor(table(uFast,face+3).rgb),color.a);
+ }
+ vec3 normal=axisNormal(side);
+ if(dot(normal,ray)>0.0)normal=-normal;
+ Material m=plainMaterial(normal);m.emission=table(uVoxels,at+1).x;
+ contribute(color.rgb,color.a,t,m,false);
+#else
+ cubeSurface(description.y,side,t,false);
+#endif
 }
 struct Hit{float t;vec3 color;float alpha;Material material;bool unlit;};
 #include <objects>
@@ -309,14 +353,18 @@ void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
   if(int(b.z)==1&&alpha<.1)continue;
   if(int(b.z)!=2)alpha=1.0;
   if(alpha<=0.0)continue;
+  vec3 geometric=table(uQuadRecords,offset+6).xyz;
+  if(dot(geometric,ray)>0.0)geometric=-geometric;
+  hit.t=t;hit.color=linearColor(texel.rgb)*tint.rgb;hit.alpha=alpha;hit.unlit=b.w>=2.0;
+#if RENDER_TIER>=2
   // 平面上沿参数 u、v 前进的方向（与 U、V 互为对偶），再按贴图坐标对 (u,v) 的导数 [a.zw b.xy] 取逆，得到贴图横纵方向。
   vec3 alongU=cross(V.xyz,normal)/dot(U.xyz,cross(V.xyz,normal)),alongV=cross(normal,U.xyz)/dot(V.xyz,cross(normal,U.xyz));
   float det=a.z*b.y-b.x*a.w;
   vec3 tangentS=normalize((alongU*b.y-alongV*a.w)/det),tangentT=normalize((alongV*a.z-alongU*b.x)/det);
-  vec3 geometric=table(uQuadRecords,offset+6).xyz;
-  if(dot(geometric,ray)>0.0)geometric=-geometric;
-  hit.t=t;hit.color=linearColor(texel.rgb)*tint.rgb;hit.alpha=alpha;hit.unlit=b.w>=2.0;
   hit.material=decodeMaterial(geometric,tangentS,tangentT,texelFetch(uAtlasNormals,pixel,0),texelFetch(uAtlasSpecular,pixel,0),hit.color);
+#else
+  hit.material=glowMaterial(geometric,texelFetch(uAtlasSpecular,pixel,0));
+#endif
  }
 }
 // 求射线离开轴对齐节点的时间；落在边界上的轴按整数跳到下一格，避免掠射时反复停在同一格。
@@ -384,6 +432,7 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  }
  return result;
 }
+#if RENDER_TIER>=2
 // 阴影射线：从命中点走向光源，只关心沿途透过了多少光，不着色。
 // 不透明立方体与镂空面的实心处完全遮挡；玻璃按代表色过滤，染色玻璃因此投下彩色影子；水按走过的距离吸收。
 // 射线离开观察窗口即视为照到光源，窗口外的地形不投影。
@@ -436,6 +485,7 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
  }
  return light;
 }
+#endif
 // 平行于窗口边界的射线单独处理，避免 0×无穷产生 NaN。
 void windowInterval(out vec3 entry,out vec3 leave){
  bvec3 parallel=lessThan(abs(ray),vec3(1e-8));
@@ -479,25 +529,37 @@ bool march(float limit,bool submerged){
   int width=1<<level;
   ivec3 lower=((cell+uDirectoryOffset)&ivec3(~(width-1)))-uDirectoryOffset;
   uvec4 description=current==0u?uvec4(0):model(current);
+#if RENDER_TIER==0
+  // 体素档把每个非空格子都当作完整立方体的介质，不再区分模型形状。
+  bool cutout=false;uint cutoutFaces=0u,medium=current;
+#else
   // 镂空立方体（树叶、格栅）对介质规则而言等同空气，只在进入时测本格的入射面，相邻同类之间的面也可见。
   bool cutout=description.x==3u;uint cutoutFaces=description.y;
-  uint medium=description.x==1u?current:0u;if(medium==0u)description=uvec4(0);
+  uint medium=description.x==1u?current:0u;
+#endif
+  if(medium==0u)description=uvec4(0);
   int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
   if(entering){
    // 水只在进出两个界面着色，界面之间按走过的距离吸收。
    bool water=medium!=0u&&description.w==uWaterGroup;
    if(!inside&&!sameMedium(previous,previousModel.w,medium,description.w)){
-    if(previous!=0u){absorbWater(t);cubeSurface(previousModel.y,side^1,t,false);}
+    if(previous!=0u){absorbWater(t);boundarySurface(previous,previousModel,side^1,t);}
     if(!water&&!submerged)waterFrom=-1.0;
+#if RENDER_TIER>=2
     if(water&&primaryRay&&!mirrored&&side==3){mirrored=true;mirrorPoint=eye+ray*t;mirrorWeight=throughput;mirrorRadiance=radiance;mirrorDirect=directSum;}
-    if(brightest(throughput)>0.001&&medium!=0u)cubeSurface(description.y,side,t,false);
+#endif
+    if(brightest(throughput)>0.001&&medium!=0u)boundarySurface(medium,description,side,t);
    }
    if(water&&waterFrom<0.0)waterFrom=t;
-   if(cutout&&!inside&&brightest(throughput)>0.001&&!cubeSurface(cutoutFaces,side,t,true))foliage*=0.6;
+   bool gap=cutout&&!inside&&brightest(throughput)>0.001&&!cubeSurface(cutoutFaces,side,t,true);
+#if RENDER_TIER>=2
+   if(gap)foliage*=0.6;
+#endif
    inside=false;previous=medium;previousModel=description;entering=false;
   }
   if(brightest(throughput)<=.001){finished=true;break;}
   Hit hit;hit.t=end+1.0;hit.alpha=0.0;
+#if RENDER_TIER>0
   if(cellLevel){
    intersectModel(current,cell,max(t,afterHit),end,hit);
    if(parts!=0u){
@@ -505,9 +567,10 @@ bool march(float limit,bool submerged){
     for(uint j=0u;j<count;j++)intersectModel(worldWord(parts+1u+j),cell,max(t,afterHit),end,hit);
    }
   }
+#endif
   if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
   t=end;cell=nextCell;side=exitSide^1;entering=true;
-  if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)cubeSurface(previousModel.y,exitSide,t,false);finished=true;break;}
+  if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)boundarySurface(previous,previousModel,exitSide,t);finished=true;break;}
  }
  if(submerged&&brightest(throughput)>.001)absorbWater(limit);
  return finished;
@@ -541,10 +604,11 @@ vec3 background(vec3 d){
  sky+=vec3(.8,.85,1.0)*2.0*smoothstep(.9997,.9998,-toward)*smoothstep(-.02,.05,-uSun.y);
  return sky;
 }
+#if RENDER_TIER>=2
 // 刚走完的射线所受的直射光：乘一条阴影射线的可见度。soft 为真时在太阳圆盘范围内抖动方向，得到柔和的影子边缘。
 // 阴影射线会改写 eye 与 ray。
 vec3 directLight(bool soft){
- if(!uShadows||shadeWeight<=0.0)return directSum;
+ if(shadeWeight<=0.0)return directSum;
  return directSum*sunVisibility(shadePoint+shadeNormal*1e-3,soft?coneDirection(lightDir,.012):lightDir);
 }
 // 海面只分出一条反射和一条折射，二者都复用体素求交；预览不为它们另发阴影射线。
@@ -578,6 +642,7 @@ vec3 oceanExitRadiance(vec3 point,vec3 view){
  march(internal?1e4:1e30,internal);
  return radiance+throughput*background(outgoing)+(uPass==1?directLight(true):directSum);
 }
+#endif
 // 一个像素的线性亮度。主射线之后最多再分出三类射线：阴影、水面反射、累积时的反弹。
 // 反弹用看到的亮度替换代表表面的常量环境光，墙角、屋檐下因此自然变暗，亮面也会映到旁边；
 // 有反射率的材质还会按菲涅耳的比例沿镜面方向反弹，光滑的表面因此映出周围。
@@ -596,6 +661,28 @@ vec3 tracePixel(vec2 pixel){
  // 迭代用尽时输出极亮的品红，色调映射后仍是纯品红，实验脚本据此统计。
  if(!march(oceanHit?oceanDistance:1e30,underwater))return vec3(1e4,0,1e4);
  if(uPicking)return vec3(0);
+#if RENDER_TIER<2
+ // 低档没有阴影、雾与水面效果。无限海面只是一层与静止水同色的透明平面，穿过后沿原方向继续；
+ // 最终停在海平面以下的射线显示深水的颜色，而不是天空。
+ vec4 waterColor=table(uFast,int(model(uWater).y)+3*4+3);
+ vec3 waterLinear=linearColor(waterColor.rgb);
+ vec3 color=radiance+directSum,remaining=throughput;
+ bool deep=underwater;
+ if(oceanHit&&brightest(remaining)>.001){
+  radiance=vec3(0);directSum=vec3(0);throughput=vec3(1);
+  eye=origin+view*oceanDistance;ray=view;primaryRay=false;
+  contribute(waterLinear,waterColor.a,0.0,plainMaterial(vec3(0,underwater?-1:1,0)),false);
+  vec3 surface=radiance+directSum,through=throughput;
+  eye+=vec3(0,underwater?1e-3:-1e-3,0);
+  march(1e30,false);
+  color+=remaining*(surface+through*(radiance+directSum));
+  remaining*=through*throughput;
+  deep=!underwater;
+ }
+ if(brightest(remaining)>.001)
+  color+=remaining*(deep?waterLinear*(ambient+lightColor*max(lightDir.y,0.0))*.5:background(view));
+ return color;
+#else
  bool soft=uPass==1;
  // 八次方让近处几乎没有雾，接近雾距离时才迅速变浓。
  float fog=touched&&!underwater?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
@@ -607,7 +694,7 @@ vec3 tracePixel(vec2 pixel){
  vec3 waterPoint=mirrorPoint,waterWeight=mirrorWeight,above=mirrorRadiance,aboveDirect=mirrorDirect;
  vec3 weight=bounceAlbedo,constant=bounceAmbient,specular=bounceSpecular,point=bouncePoint,normal=bounceNormal,shading=bounceShading,incoming=bounceView;
  float roughness=bounceRoughness;
- vec3 visible=uShadows&&shadeWeight>0.0?sunVisibility(shadePoint+shadeNormal*1e-3,soft?coneDirection(lightDir,.012):lightDir):vec3(1);
+ vec3 visible=shadeWeight>0.0?sunVisibility(shadePoint+shadeNormal*1e-3,soft?coneDirection(lightDir,.012):lightDir):vec3(1);
  vec3 color=front+frontDirect*visible+behind;
  if(underwater&&oceanHit&&brightest(remaining)>.001){
   color=front+frontDirect*visible+remaining*oceanExitRadiance(origin+view*oceanDistance,view);
@@ -665,12 +752,13 @@ vec3 tracePixel(vec2 pixel){
   }
  }
  return mix(color,skyRadiance(view),fog);
+#endif
 }
 // 输出线性亮度与权重；绘制器把多帧按权重相加，显示时除以总权重。预览帧权重更高，累积初期的噪点因此不显眼。
 void main(){
  seed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u+uFrame*26699u);
  setupLight();steps=0;faceTests=0;
- vec2 jitter=uPass==1?vec2(random(),random())-.5:vec2(0);
+ vec2 jitter=uPass==1?vec2(random(),random())-.5:uJitter;
  vec3 color=tracePixel(uPicking?uPickPixel:gl_FragCoord.xy+jitter);
  if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
