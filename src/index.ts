@@ -13,6 +13,17 @@ export { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./render/camera.ts";
 export { ObjectRegistry } from "./objects/registry.ts";
 export { enchantingBook } from "./effects/enchanting-book.ts";
 export { regionKey, decodeRegion, modelOf, unpack } from "./scene/prepare.ts";
+export {
+  WorldSession,
+  type DataSource,
+  type WorldSink,
+  type WantChange,
+  type RegionCoord,
+  type ObjectWant,
+  type Focus,
+  type SessionOptions,
+  type SessionStats,
+} from "./session/session.ts";
 export type * from "./contracts.ts";
 export type { WorkerRequest, WorkerResponse } from "./scene/worker.ts";
 

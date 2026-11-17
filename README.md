@@ -2,7 +2,7 @@
 
 R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部件。射线先穿过空间格子，再检查格内登记的表面：立方体直接求命中面，复杂模型检查登记到该格的四边形，活动部件把射线变换到局部坐标求交。所有命中共用排序、光照和透明合成。
 
-本模块提供共享模型、场景准备器、WebGL 2 绘制器以及特殊对象接口。存档读取、HTTP 会话、连续加载、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`cmd/r2` 与 `demo/` 是独立模型验证页。
+本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来（HTTP、内存、WebSocket）由宿主实现数据源决定。存档读取、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`cmd/r2` 与 `demo/` 是独立模型验证页。
 
 浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。宿主只从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
 
@@ -139,6 +139,48 @@ labPBR 是把材质属性编码到配套图片中的约定。同名 `_n.png` 保
 
 仅三张数组的显存为 `563 × 4 × 3 × (S² + (S/2)² + … + 1)` 字节，其中 `S` 是实际层边长。图集另占 `宽 × 高 × 4 × 3` 字节，共享模型表、实例贴图和场景池另计。
 
+## 世界会话与数据源
+
+宿主创建渲染器后，用一个数据源创建 `WorldSession`，并在每帧调用 `focus` 与 `publish`：
+
+```ts
+const session = new WorldSession(renderer, source, { registry });
+function frame() {
+  session.focus(camera.position, { nearRadius: 4, farRadius: 32 });
+  session.publish();
+  renderer.draw({ tier: 3, accumulate: true });
+}
+```
+
+会话以区域为单位工作：一个区域是 8×8 区块（128×128 方块）的整根柱子。`focus` 根据远景半径算出可见窗口内的区域，加上窗口外一圈用于接收伸入片段的邻接区域，再算出近景半径内需要特殊对象的区域；只有集合变化时才调用一次 `source.want`，告知增减：
+
+| 字段 | 含义 |
+|---|---|
+| `center` | 远景中心的方块坐标 `[x, z]`，数据源排队时可先供给离它近的区域。 |
+| `regions.add` / `remove` | 新需要、不再需要的区域，`add` 由近到远排列。 |
+| `objects.add` / `remove` | 需要特殊对象的区域，带近景圆心（区块坐标）与半径。已需要的区域再次出现在 `add` 里，表示圆心或半径变了。 |
+
+数据源通过 `open` 收到的 `WorldSink` 交付数据：`region(x, z, data)` 提交区域方块，`data` 为 `null` 表示区域为空；`objects(x, z, descriptors)` 提交近景对象；`error(x, z, err)` 把区域标为失败。同一区域可以重复提交，会话用新内容替换，旧画面保留到新内容准备完成。不再需要的区域的提交被忽略，数据源不必处理竞态，但应尽早取消对应的工作。`want` 是唯一的订阅方式，会话不会主动拉取。
+
+收到的数据在后台线程缓存，按离相机由近到远逐个准备；`publish` 每帧最多上传一个准备好的区域。`session.stats` 给出窗口内区域数、已显示数、等待数、近景未完成数、显存占用和未知方块数；`published(x, z)` 告诉宿主区域是否已经可以拾取。`dispose` 关闭数据源、结束线程并释放对象。
+
+### 区域编码
+
+`region` 提交的数据是小端 u32 数组：
+
+```text
+magic 0x34504c54, section 数
+每个 section：
+  sx, sy, sz          section 坐标（方块坐标除以 16，有符号）
+  bits                每个索引的位数，0 表示整块只有调色板第一项
+  count               调色板项数
+  length              索引字数
+  palette[count]      方块状态的 neomega-blocks 哈希
+  words[length]       索引，每字容纳 floor(32 / bits) 个，低位在前，不跨字
+```
+
+section 内第 i 个索引对应格子 `x = i >> 8, z = (i >> 4) & 15, y = i & 15`。未列出的 section 视为空气。世界高度固定为 -64 到 448（32 个 section）。
+
 ## 模块边界
 
 为了让来源和绘制互不牵制，浏览器部分以纯数据为边界，公共数据类型见 [contracts.ts](src/contracts.ts)，公开入口为 [index.ts](src/index.ts)。
@@ -149,6 +191,7 @@ labPBR 是把材质属性编码到配套图片中的约定。同名 `_n.png` 保
 | `src/render/textures.ts` | 解码完整贴图集，上传和释放共享 GPU 纹理。 |
 | `src/scene/prepare.ts` | 接收压缩区域与候选对象，生成可上传数据；不读取 UI，不持有 WebGL。 |
 | `src/scene/worker.ts` | 在后台线程缓存来源区域并调用准备器；不决定加载范围。 |
+| `src/session/session.ts` | 由相机位置决定需要的区域和近景对象，向数据源订阅，排队准备并逐帧发布；不知道数据来自哪里。 |
 | `src/render/world-gpu.ts` | 管理循环区域目录、增量上传与地址回收。 |
 | `src/render/renderer.ts`、`ray.frag` | 接收相机和帧参数，执行统一射线绘制；不读取存档。 |
 | `object/`、`effector/`、`blockactor/` | Go 侧特殊对象描述、无 NBT 特效路由和需要 NBT 的外观处理器。 |
