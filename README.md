@@ -2,7 +2,9 @@
 
 R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部件。射线先穿过空间格子，再检查格内登记的表面：立方体直接求命中面，复杂模型检查登记到该格的四边形，活动部件把射线变换到局部坐标求交。所有命中共用排序、光照和透明合成。
 
-本模块提供共享模型、场景准备器、WebGL 2 绘制器以及特殊对象接口。存档读取、HTTP 会话、连续加载、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`cmd/r2` 是独立模型验证页。
+本模块提供共享模型、场景准备器、WebGL 2 绘制器以及特殊对象接口。存档读取、HTTP 会话、连续加载、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`cmd/r2` 与 `demo/` 是独立模型验证页。
+
+浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。宿主只从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
 
 ## 数据怎样到达屏幕
 
@@ -115,7 +117,7 @@ labPBR 是把材质属性编码到配套图片中的约定。同名 `_n.png` 保
 
 完整方块使用颜色、法线和高光三张纹理数组，三者的层号、边长和 mip 布局一致。数组边长取所用替换图片的最大边长，向上取二次幂，再限制到调用方指定的上限；原版基准为 16，上限默认 128，可选 16、32、64、128、256、512。小图按最近点放大，大图按覆盖面积缩小。颜色 mip 在线性预乘空间逐级平均，再编码为 SRGB8_ALPHA8；数据 mip 直接平均四个通道。带 `.mcmeta` 的动画按帧列表取首帧，未列帧序时取第 0 帧。
 
-复杂模型的三张图集共用装箱区域，保留各张图片的宽高比，在同一上限内缩放。图集颜色使用未预乘的 RGBA8，由着色器转线性；法线和高光仍保留原值。完整方块的三张数组由 `uSurfaces`、`uSurfaceNormals`、`uSurfaceSpecular` 读取，复杂模型对应 `uAtlas`、`uAtlasNormals`、`uAtlasSpecular`。上传与释放集中在 [textures.js](web/render/textures.js)，纹理单元依次为数组 6／7／9、图集 5／0／14。
+复杂模型的三张图集共用装箱区域，保留各张图片的宽高比，在同一上限内缩放。图集颜色使用未预乘的 RGBA8，由着色器转线性；法线和高光仍保留原值。完整方块的三张数组由 `uSurfaces`、`uSurfaceNormals`、`uSurfaceSpecular` 读取，复杂模型对应 `uAtlas`、`uAtlasNormals`、`uAtlasSpecular`。上传与释放集中在 [textures.ts](src/render/textures.ts)，纹理单元依次为数组 6／7／9、图集 5／0／14。
 
 宿主只需调用 `r2.BuildTextures(path, maxSize)` 得到 `TextureSet`；空路径表示原版，尺寸上限为零表示默认值。返回值包含图片和匹配的共享模型表，可以用 `set.WriteTo(writer)` 写成单个二进制响应。浏览器通过 `decodeTextures(buffer)` 解码，再交给 `renderer.setTextures(set)` 上传。应用的切换流程还会让后台准备器用新分类重建已显示区域，并在同一帧发布空间目录和贴图；准备期间继续显示旧场景。
 
@@ -123,20 +125,20 @@ labPBR 是把材质属性编码到配套图片中的约定。同名 `_n.png` 保
 
 ## 模块边界
 
-为了让来源和绘制互不牵制，浏览器部分以纯数据为边界，公共数据类型见 [contracts.js](web/contracts.js)。
+为了让来源和绘制互不牵制，浏览器部分以纯数据为边界，公共数据类型见 [contracts.ts](src/contracts.ts)，公开入口为 [index.ts](src/index.ts)。
 
 | 位置 | 责任 |
 |---|---|
 | `catalog.go`、`assets/` | 共享状态、模型、贴图与四边形资源。 |
 | `textures.go`、`internal/texturepack/` | 读取材质包、重建三通道贴图及透明度派生表。 |
-| `web/render/textures.js` | 解码完整贴图集，上传和释放共享 GPU 纹理。 |
-| `web/scene/prepare.js` | 接收压缩区域与候选对象，生成可上传数据；不读取 UI，不持有 WebGL。 |
-| `web/scene/worker.js` | 在后台线程缓存来源区域并调用准备器；不决定加载范围。 |
-| `web/render/world-gpu.js` | 管理循环区域目录、增量上传与地址回收。 |
-| `web/render/renderer.js`、`ray.frag` | 接收相机和帧参数，执行统一射线绘制；不读取存档。 |
+| `src/render/textures.ts` | 解码完整贴图集，上传和释放共享 GPU 纹理。 |
+| `src/scene/prepare.ts` | 接收压缩区域与候选对象，生成可上传数据；不读取 UI，不持有 WebGL。 |
+| `src/scene/worker.ts` | 在后台线程缓存来源区域并调用准备器；不决定加载范围。 |
+| `src/render/world-gpu.ts` | 管理循环区域目录、增量上传与地址回收。 |
+| `src/render/renderer.ts`、`ray.frag` | 接收相机和帧参数，执行统一射线绘制；不读取存档。 |
 | `object/`、`effector/`、`blockactor/` | Go 侧特殊对象描述、无 NBT 特效路由和需要 NBT 的外观处理器。 |
-| `web/objects/`、`web/effects/` | 通用实例资源管理及各类外观、动画实现。 |
-| `scene.go`、`cmd/r2`、`web/main.js` | 固定验证场景与最小宿主，不承担应用的世界调度。 |
+| `src/objects/`、`src/effects/` | 通用实例资源管理及各类外观、动画实现。 |
+| `scene.go`、`cmd/r2`、`demo/` | 固定验证场景与最小宿主，不承担应用的世界调度。 |
 
 场景准备以 8×8 区块为一个区域，收集目标区域及相邻来源伸入的片段。整个可见窗口边缘保留邻接来源区域，以接收窗口外模型伸入的片段。来源加载卸载或活动对象候选变化时，宿主重新准备受影响的目标区域；近景半径本身不参与静态准备。准备结果包含相对地址及重定位位置，显存分配器在上传时转换地址。移动窗口使用循环目录，不搬动仍在范围内的数据；同一帧内先上传完成的区域，再切换目录，最后回收旧地址。
 
@@ -149,10 +151,10 @@ GPU 的目录覆盖容量为 4096×4096×512，宿主使用不超过这个容量
 添加实现需要连接两端：
 
 1. Go 端在 `effector/` 添加构造器，或在 `blockactor/` 实现 `Handler`，输出 `object.Descriptor`。描述包含稳定标识、类型、位置和该类型的数据。
-2. 浏览器端添加外观工厂，返回贴图、局部盒体、动画包围盒和逐帧变换。特效放在 `web/effects/`；NBT 外观可在 `web/blockactors/` 按类型增加文件。
+2. 浏览器端添加外观工厂，返回贴图、局部盒体、动画包围盒和逐帧变换。特效放在 `src/effects/`；NBT 外观可在 `src/blockactors/` 按类型增加文件。
 3. 应用在 Go 入口注册来源处理器，在浏览器入口通过 `ObjectRegistry` 注册同名工厂。绘制循环无需添加方块类型判断。
 
-[附魔书](web/effects/enchanting-book.js) 是现有实例：七个盒体共享贴图，逐帧只更新变换。`ObjectStore` 管理实例槽、私有贴图和生命周期，场景准备器把包围盒覆盖的格子登记为候选，着色器在格内求交。句柄带代数，卸载后的旧格子引用不会误指向复用槽位的新对象。
+[附魔书](src/effects/enchanting-book.ts) 是现有实例：七个盒体共享贴图，逐帧只更新变换。`ObjectStore` 管理实例槽、私有贴图和生命周期，场景准备器把包围盒覆盖的格子登记为候选，着色器在格内求交。句柄带代数，卸载后的旧格子引用不会误指向复用槽位的新对象。
 
 包围盒必须覆盖整个动画，部件目前支持正交旋转、平移和统一缩放。贴图支持透明裁切。需要替换静态本体时，描述设置 `Replace`；实例准备完成后，本体格切换为实例，卸载后重新准备区域恢复静态模型。当前实现不涵盖任意变形网格和半透明活动部件；增加这些能力时应扩展通用部件求交，而不是在世界调度器加入特殊分支。
 
@@ -160,11 +162,15 @@ GPU 的目录覆盖容量为 4096×4096×512，宿主使用不超过这个容量
 
 `cmd/build-models` 读取本模块保存的输入资源，生成共享表。模型、原始图集、材质表和附魔书资源来自 viewer-core `8afee71`，运行时不导入该模块。原始图集保存在 `sourceassets/atlas.png`；贴图名字直接取自 `sourceassets/geometry.nvtables` 中的 `Surface.Texture`，UV 与染色也来自同一份几何。生成器输出 `assets/textures.json` 的名字和合成配方，以及供每次合成使用的 `base-*` 原版基表；原版六张贴图由相同的合成器生成。许可证见 [LICENSE](LICENSE) 和 [资源说明](sourceassets/THIRD_PARTY_NOTICES.txt)。核心 Go 依赖仅为状态目录与 NBT 类型。
 
-从工作区根目录启动验证页：
+先构建渲染核心（需要 Node.js 22.18 以上，首次执行 `npm ci`），再从工作区根目录启动验证页：
 
 ```sh
+npm --prefix neomega-r2 ci
+npm --prefix neomega-r2 run build
 go run ./neomega-r2/cmd/r2 -listen 127.0.0.1:2415
 ```
+
+开发时加 `-web neomega-r2/demo -core neomega-r2/dist` 直接读取目录，改动后重新构建即可，不必重新编译 Go。
 
 打开 <http://127.0.0.1:2415>，特殊对象场景为 `/?scene=special`。拖动转向，WASD 移动，Q/E 升降。页面可选择原生分辨率，以及用于对照的逐格遍历。要浏览真实 Java 存档，运行应用：
 
@@ -177,7 +183,8 @@ go run ./apps/neomega-viewer-r2/cmd/viewer -listen 127.0.0.1:2412
 ```sh
 go generate ./neomega-r2
 ./check.sh neomega-r2
-node --test neomega-r2/tests/*.mjs
+npm --prefix neomega-r2 run check
+npm --prefix neomega-r2 test
 R2_URL=http://127.0.0.1:2415 node neomega-r2/experiment/check.cjs
 R2_URL=http://127.0.0.1:2415 node neomega-r2/experiment/special.cjs
 R2_URL=http://127.0.0.1:2412 node neomega-r2/experiment/ocean.cjs

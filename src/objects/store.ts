@@ -1,57 +1,88 @@
+import type {
+  ObjectDescriptor,
+  ObjectRecipe,
+  ObjectReference,
+  ObjectTexture,
+} from "../contracts.ts";
+import type { ObjectRegistry } from "./registry.ts";
+
+interface AtlasImage {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  width: number;
+  height: number;
+  refs: number;
+  name: string;
+}
+interface StoredObject {
+  descriptor: ObjectDescriptor;
+  recipe: ObjectRecipe;
+  image: AtlasImage;
+  slots: Array<{ slot: number; id: number }>;
+}
+
 const SIDE = 2048,
   TILE = 64,
   SLOTS = 4096,
   STRIDE = 48;
 /** 管理活动部件与私有贴图；候选格只保存实例句柄，句柄代数避免卸载后的旧引用指向新对象。 */
 export class ObjectStore {
-  /** @param {WebGL2RenderingContext} gl @param {Map<string,WebGLUniformLocation>} uniforms */
-  constructor(gl, uniforms) {
+  gl: WebGL2RenderingContext;
+  objects = new Map<string, StoredObject>();
+  regions = new Map<string, Set<string>>();
+  images = new Map<string, AtlasImage>();
+  tiles = new Uint8Array(32 * 32);
+  free = Array.from({ length: SLOTS }, (_, i) => SLOTS - 1 - i);
+  generations = new Uint32Array(SLOTS);
+  data = new Float32Array(SLOTS * STRIDE);
+  high = 0;
+  // 对象增删时加一；动画本身不改变它。
+  version = 0;
+  /** 宿主可整体关闭对象绘制；undefined 视为开启。 */
+  enabled: boolean | undefined;
+  disposed = false;
+  table: WebGLTexture;
+  atlas: WebGLTexture;
+  textureBytes: number;
+  constructor(gl: WebGL2RenderingContext, uniforms: Map<string, WebGLUniformLocation | null>) {
     this.gl = gl;
-    this.objects = new Map();
-    this.regions = new Map();
-    this.images = new Map();
-    this.tiles = new Uint8Array(32 * 32);
-    this.free = Array.from({ length: SLOTS }, (_, i) => SLOTS - 1 - i);
-    this.generations = new Uint32Array(SLOTS);
-    this.data = new Float32Array(SLOTS * STRIDE);
-    this.high = 0;
-    // 对象增删时加一；动画本身不改变它。
-    this.version = 0;
     this.table = gl.createTexture();
     gl.activeTexture(gl.TEXTURE12);
     gl.bindTexture(gl.TEXTURE_2D, this.table);
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, 1024, (SLOTS * 12) / 1024);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.uniform1i(uniforms.get("uObjectData"), 12);
+    gl.uniform1i(uniforms.get("uObjectData") ?? null, 12);
     this.atlas = gl.createTexture();
     gl.activeTexture(gl.TEXTURE13);
     gl.bindTexture(gl.TEXTURE_2D, this.atlas);
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, SIDE, SIDE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.uniform1i(uniforms.get("uObjectAtlas"), 13);
+    gl.uniform1i(uniforms.get("uObjectAtlas") ?? null, 13);
     this.textureBytes = this.data.byteLength + SIDE * SIDE * 4;
   }
-  async image(source, key) {
+  async image(source: ObjectTexture, key: string): Promise<AtlasImage> {
     const name = source.url || key;
     let cached = this.images.get(name);
     if (cached) {
       cached.refs++;
       return cached;
     }
-    let image = source.pixels;
+    let decoded: HTMLImageElement | undefined;
     if (source.url) {
-      image = new Image();
-      image.src = source.url;
-      await image.decode();
+      decoded = new Image();
+      decoded.src = source.url;
+      await decoded.decode();
       if (this.disposed) throw new DOMException("对象来源已关闭", "AbortError");
     }
-    const width = source.width || image.width,
-      height = source.height || image.height,
+    const width = source.width || decoded!.width,
+      height = source.height || decoded!.height,
       w = Math.ceil(width / TILE),
       h = Math.ceil(height / TILE);
-    let found = null;
+    let found: { x: number; y: number; w: number; h: number } | null = null;
     for (let y = 0; y <= 32 - h && !found; y++)
       for (let x = 0; x <= 32 - w && !found; x++) {
         let free = true;
@@ -68,7 +99,7 @@ export class ObjectStore {
     gl.activeTexture(gl.TEXTURE13);
     gl.bindTexture(gl.TEXTURE_2D, this.atlas);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    if (source.url)
+    if (decoded)
       gl.texSubImage2D(
         gl.TEXTURE_2D,
         0,
@@ -76,7 +107,7 @@ export class ObjectStore {
         y * TILE,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
-        image,
+        decoded,
       );
     else
       gl.texSubImage2D(
@@ -88,24 +119,27 @@ export class ObjectStore {
         height,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
-        image,
+        source.pixels!,
       );
     cached = { ...found, width, height, refs: 1, name };
     this.images.set(name, cached);
     return cached;
   }
   /** 更新拥有者区域的实例，返回候选是否改变；无变化时宿主不必重建静态区域。 */
-  /** @param {string} key @param {import("../contracts.js").ObjectDescriptor[]} descriptors @param {import("./registry.js").ObjectRegistry} registry */
-  async setRegion(key, descriptors, registry) {
-    const previous = this.regions.get(key) || new Set(),
-      next = new Set();
+  async setRegion(
+    key: string,
+    descriptors: ObjectDescriptor[],
+    registry: ObjectRegistry,
+  ): Promise<boolean> {
+    const previous = this.regions.get(key) || new Set<string>(),
+      next = new Set<string>();
     for (const descriptor of descriptors) {
       next.add(descriptor.key);
       if (this.objects.has(descriptor.key)) continue;
       const recipe = await registry.create(descriptor);
       if (this.disposed) throw new DOMException("对象来源已关闭", "AbortError");
       const image = await this.image(recipe.texture, descriptor.key),
-        slots = [];
+        slots: StoredObject["slots"] = [];
       for (const part of recipe.parts) {
         const slot = this.free.pop();
         if (slot === undefined) throw Error("特殊对象部件空间不足");
@@ -141,7 +175,7 @@ export class ObjectStore {
       [...previous].some((name) => !next.has(name))
     );
   }
-  remove(name) {
+  remove(name: string): void {
     const object = this.objects.get(name);
     if (!object) return;
     for (const { slot } of object.slots) {
@@ -158,14 +192,13 @@ export class ObjectStore {
     this.objects.delete(name);
     this.version++;
   }
-  removeRegion(key) {
+  removeRegion(key: string): boolean {
     const changed = (this.regions.get(key)?.size || 0) > 0;
     for (const name of this.regions.get(key) || []) this.remove(name);
     this.regions.delete(key);
     return changed;
   }
-  /** @returns {import("../contracts.js").ObjectReference[]} */
-  references() {
+  references(): ObjectReference[] {
     return [...this.objects.values()].map(({ descriptor, recipe, slots }) => ({
       key: descriptor.key,
       owner: descriptor.position,
@@ -176,7 +209,7 @@ export class ObjectStore {
       ids: slots.map((v) => v.id),
     }));
   }
-  update(time, origin) {
+  update(time: number, origin: number[]): void {
     for (const { descriptor, recipe, slots } of this.objects.values())
       for (let i = 0; i < slots.length; i++) {
         const { axes, position, scale = 1 } = recipe.pose(time, i),
@@ -222,11 +255,11 @@ export class ObjectStore {
       );
     }
   }
-  clear() {
+  clear(): void {
     for (const name of [...this.objects.keys()]) this.remove(name);
     this.regions.clear();
   }
-  dispose() {
+  dispose(): void {
     this.disposed = true;
     this.clear();
     this.gl.deleteTexture(this.table);

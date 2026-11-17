@@ -8,7 +8,8 @@ import (
 )
 
 //go:generate go run ./cmd/build-models
-//go:embed assets/* web/*
+// dist 由 npm run build 生成，go build 之前需要先构建一次。
+//go:embed assets/* dist demo/*
 var Files embed.FS
 
 // Fragment 指向模型伸进相邻格子的部分。

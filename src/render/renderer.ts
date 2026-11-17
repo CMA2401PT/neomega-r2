@@ -1,9 +1,10 @@
-import { createTextures } from "./textures.js";
-import { createAccumulator } from "./accumulator.js";
-import { WorldGPU } from "./world-gpu.js";
-import { ObjectStore } from "../objects/store.js";
-import { prepareRegion } from "../scene/prepare.js";
-import { gridRegions } from "../scene/grid.js";
+import { createTextures, type TextureSet } from "./textures.ts";
+import { createAccumulator } from "./accumulator.ts";
+import { WorldGPU } from "./world-gpu.ts";
+import { ObjectStore } from "../objects/store.ts";
+import { prepareRegion } from "../scene/prepare.ts";
+import { gridRegions } from "../scene/grid.ts";
+import type { Camera } from "../contracts.ts";
 
 // 水体按距离吸收光线，着色器需要知道哪个介质组是水。
 const WATER = 'minecraft:water ["level"="0"]';
@@ -13,19 +14,82 @@ import {
   cameraBasis as basis,
   cameraRay,
   PERSPECTIVE_SPAN as SPAN,
-} from "./camera.js";
+} from "./camera.ts";
+
+export interface RendererOptions {
+  /** 资源目录的 URL，以 / 结尾。 */
+  assets?: string;
+  /** 每个启动阶段开始前调用；返回 Promise 时等它完成，宿主可先绘制状态提示。 */
+  onProgress?: (step: { index: number; total: number; label: string }) => void | Promise<void>;
+}
+
+/** 光照、时间与可选效果；预览、累积与拍照共用。 */
+export interface LightingOptions {
+  /** 动画时钟（秒），驱动水波与活动对象。 */
+  time?: number;
+  shadows?: boolean;
+  /** 指向太阳的方向；太阳在地平线下时由月亮照明。 */
+  sun?: number[];
+  /** 远景雾接近不透明的距离，默认为观察窗口半径。 */
+  fog?: number;
+  /** 无限海面的世界高度；省略时只绘制场景里的体素水。 */
+  ocean?: number;
+  /** 为假时这次绘制隐藏特殊对象。 */
+  objects?: boolean;
+}
+
+export interface DrawOptions extends LightingOptions {
+  width: number;
+  height: number;
+  /** 相机、设置与场景都和上一帧相同：这一帧作为累积样本加到画面上。 */
+  accumulate?: boolean;
+  debug?: number;
+  hierarchy?: boolean;
+  fragments?: boolean;
+  /** 绘制后读回一个像素，等待 GPU 完成。 */
+  synchronize?: boolean;
+}
+
+export interface PhotoOptions extends LightingOptions {
+  width: number;
+  height: number;
+  /** 光线最多反弹次数。 */
+  bounces?: number;
+}
+
+/** 一帧的全部着色器输入。 */
+interface FrameInputs {
+  width: number;
+  height: number;
+  pass: 0 | 1;
+  bounces: number;
+  time: number;
+  waterTime?: number;
+  debug: number;
+  hierarchy: boolean;
+  fragments: boolean;
+  shadows: boolean;
+  sun: number[];
+  fog: number;
+  ocean?: number;
+  objects?: boolean;
+}
+
+type Uniforms = Map<string, WebGLUniformLocation | null>;
 /** 创建射线绘制器；宿主负责相机、帧循环和数据来源，绘制器不读取 UI。
  * 启动时只编译预览程序。静止累积与拍照用的程序更大，在 Windows 的 D3D 后端可能要编一两分钟，
  * 宿主在第一次需要时调用 prepareAccumulation()，编译期间预览照常绘制。
- * @param {HTMLCanvasElement} canvas
- * @param {{assets?:string,onProgress?:(step:{index:number,total:number,label:string})=>void|Promise<void>}} options
  */
-export async function createRenderer(canvas, { assets = "/r2/assets/", onProgress } = {}) {
-  const gl = canvas.getContext("webgl2", {
+export async function createRenderer(
+  canvas: HTMLCanvasElement,
+  { assets = "/r2/assets/", onProgress }: RendererOptions = {},
+) {
+  const context = canvas.getContext("webgl2", {
     antialias: false,
     preserveDrawingBuffer: true,
   });
-  if (!gl) throw Error("需要支持 WebGL 2 的浏览器");
+  if (!context) throw Error("需要支持 WebGL 2 的浏览器");
+  const gl: WebGL2RenderingContext = context;
   const [fragmentSource, objectSource] = await Promise.all(
     ["ray.frag", "objects.frag"].map((name) =>
       fetch(new URL(name, import.meta.url)).then((r) => r.text()),
@@ -34,12 +98,10 @@ export async function createRenderer(canvas, { assets = "/r2/assets/", onProgres
   const fragment = fragmentSource.replace("#include <objects>", objectSource);
   const vertex = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0,1);}`;
-  /** 预览与累积各自编译，让预览去掉累积反弹路径；两者共享纹理和世界数据。
-   * @param {0|1} pass
-   */
-  async function createRayProgram(pass) {
+  /** 预览与累积各自编译，让预览去掉累积反弹路径；两者共享纹理和世界数据。 */
+  async function createRayProgram(pass: 0 | 1): Promise<WebGLProgram> {
     const program = gl.createProgram();
-    const shaders = [];
+    const shaders: WebGLShader[] = [];
     const parallel = gl.getExtension("KHR_parallel_shader_compile");
     for (const [type, source] of [
       [gl.VERTEX_SHADER, vertex],
@@ -50,8 +112,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
           `#version 300 es\n#define RENDER_PASS ${pass}`,
         ),
       ],
-    ]) {
+    ] as const) {
       const shader = gl.createShader(type);
+      if (!shader) throw Error("无法创建着色器");
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       shaders.push(shader);
@@ -82,13 +145,14 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   }
   // 宿主可先绘制状态提示，再进入可能阻塞页面的驱动编译。
   await onProgress?.({ index: 1, total: 3, label: "正在编译预览着色器…" });
-  /** 预览与累积程序；累积程序第一次需要时才编译。 @type {[WebGLProgram, WebGLProgram|null]} */
-  const programs = [await createRayProgram(0), null];
+  /** 预览与累积程序；累积程序第一次需要时才编译。 */
+  const programs: [WebGLProgram, WebGLProgram | null] = [await createRayProgram(0), null];
   let program = programs[0];
   gl.useProgram(program);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
-  const uniforms = new Map();
+  const uniforms: Uniforms = new Map();
+  const u = (name: string) => uniforms.get(name) ?? null;
   for (const name of [
     "uTree",
     "uModels",
@@ -138,6 +202,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     [10, gl.TEXTURE_3D, "uSections"],
     [11, gl.TEXTURE_2D, "uWorldData"],
   ].map(([unit, target, name]) => {
+    // 表项是固定的三元组。
+    return [unit, target, name] as [number, number, string];
+  }).map(([unit, target, name]) => {
     const texture = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(target, texture);
@@ -148,32 +215,29 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     return { unit, target, name, texture };
   });
   let objects = new ObjectStore(gl, uniforms);
-  /** @param {WebGLProgram} target */
-  const locationsOf = (target) =>
+  const locationsOf = (target: WebGLProgram): Uniforms =>
     new Map([...uniforms.keys()].map((name) => [name, gl.getUniformLocation(target, name)]));
-  /** @type {[Map<string,WebGLUniformLocation|null>, Map<string,WebGLUniformLocation|null>|null]} */
-  const locations = [locationsOf(programs[0]), null];
+  const locations: [Uniforms, Uniforms | null] = [locationsOf(programs[0]), null];
   // 两个程序的采样器都用全部贴图；累积程序沿用资源仓库给预览程序分配的纹理单元，不另维护一份编号表。
-  const samplerTypes = [
+  const samplerTypes: number[] = [
     gl.SAMPLER_2D,
     gl.SAMPLER_2D_ARRAY,
     gl.UNSIGNED_INT_SAMPLER_2D,
     gl.UNSIGNED_INT_SAMPLER_3D,
   ];
-  /** @type {Promise<void>|null} */
-  let accumulation = null;
+  let accumulation: Promise<void> | null = null;
   /** 编译累积与拍照用的程序；只编译一次，重复调用返回同一个 Promise。失败后可以再次调用重试。 */
-  function prepareAccumulation() {
+  function prepareAccumulation(): Promise<void> {
     accumulation ??= createRayProgram(1).then(
       (compiled) => {
         const own = locationsOf(compiled),
           current = gl.getParameter(gl.CURRENT_PROGRAM);
         gl.useProgram(compiled);
         for (let i = 0; i < gl.getProgramParameter(compiled, gl.ACTIVE_UNIFORMS); i++) {
-          const { name, type } = gl.getActiveUniform(compiled, i),
+          const { name, type } = gl.getActiveUniform(compiled, i)!,
             from = locations[0].get(name);
           if (samplerTypes.includes(type) && from)
-            gl.uniform1i(own.get(name), gl.getUniform(programs[0], from));
+            gl.uniform1i(own.get(name) ?? null, gl.getUniform(programs[0], from));
         }
         gl.useProgram(current);
         locations[1] = own;
@@ -193,9 +257,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   // 一个累积序列固定水面时刻，否则样本会把移动波纹平均成模糊镜面。
   let waterTime = 0;
   const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2"),
-    queries = [],
-    times = [];
-  let world = null,
+    queries: WebGLQuery[] = [],
+    times: number[] = [];
+  let world: WorldGPU | null = null,
     origin = [0, 0, 0],
     // 世界或对象仓库被整体替换时加一，与它们各自的版本一起组成场景版本。
     generation = 0;
@@ -215,14 +279,12 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     ),
   };
   /** 验证页的固定场景：转换为来源区域后与存档走同一路径，已登记的特殊对象一并准备。
-   * @param {{grid:{size:number[]}}} scene
-   * @param {Uint32Array} cells
    */
-  function setGrid(scene, cells) {
+  function setGrid(scene: { grid: { size: number[] } }, cells: Uint32Array): void {
     gl.useProgram(program);
     world?.dispose();
     const size = scene.grid.size,
-      align = (v) => Math.ceil(v / 128) * 128;
+      align = (v: number) => Math.ceil(v / 128) * 128;
     world = new WorldGPU(gl, uniforms, { capacityWords: 4 * 1024 * 1024 });
     generation++;
     world.setWindow([0, -64, 0], [align(size[0]), 512, align(size[2])]);
@@ -230,7 +292,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       references = objects.references();
     for (const key of regions.keys()) {
       const [x, z] = key.split("/").map(Number);
-      world.install(
+      world!.install(
         prepareRegion({
           x,
           z,
@@ -242,7 +304,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     resetTiming();
   }
-  function createWorld(options = {}) {
+  function createWorld(options: { capacityWords?: number } = {}): WorldGPU {
     gl.useProgram(program);
     objects.dispose();
     objects = new ObjectStore(gl, uniforms);
@@ -254,11 +316,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   }
   /** 绑定射线程序并写入一帧的全部输入，预览、累积和拍照共用；返回这一帧的曝光。
    * 夜间提高曝光，让微弱月光仍可见，同时给灯块保留高光余量。
-   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,pass:number,bounces:number,time:number,waterTime?:number,debug:number,hierarchy:boolean,fragments:boolean,shadows:boolean,sun:number[],fog:number,ocean?:number,objects?:boolean}} options
    */
   function prepare(
-    camera,
+    camera: Camera,
     {
       width,
       height,
@@ -274,12 +334,12 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       fog,
       ocean,
       objects: drawObjects = true,
-    },
-  ) {
+    }: FrameInputs,
+  ): number {
     if (!programs[pass]) throw Error("累积程序尚未编译，先调用 prepareAccumulation()");
     if (program !== programs[pass]) {
-      program = programs[pass];
-      for (const [name, location] of locations[pass])
+      program = programs[pass]!;
+      for (const [name, location] of locations[pass]!)
         uniforms.set(name, location);
     }
     gl.useProgram(program);
@@ -293,44 +353,44 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       for (const { unit, target, name, texture } of empty) {
         gl.activeTexture(gl.TEXTURE0 + unit);
         gl.bindTexture(target, texture);
-        gl.uniform1i(uniforms.get(name), unit);
+        gl.uniform1i(u(name), unit);
       }
     }
-    gl.uniform1i(uniforms.get("uHasWorld"), Number(world !== null));
-    gl.uniform1i(uniforms.get("uPicking"), 0);
-    gl.uniform1i(uniforms.get("uOrtho"), Number(camera.ortho !== undefined));
+    gl.uniform1i(u("uHasWorld"), Number(world !== null));
+    gl.uniform1i(u("uPicking"), 0);
+    gl.uniform1i(u("uOrtho"), Number(camera.ortho !== undefined));
     const { forward, right, up } = basis(camera);
-    gl.uniform2f(uniforms.get("uViewport"), width, height);
+    gl.uniform2f(u("uViewport"), width, height);
     gl.uniform3fv(
-      uniforms.get("uCamera"),
+      u("uCamera"),
       camera.position.map((v, i) => v - origin[i]),
     );
-    gl.uniform3fv(uniforms.get("uForward"), forward);
-    gl.uniform3fv(uniforms.get("uRight"), right);
-    gl.uniform3fv(uniforms.get("uUp"), up);
-    gl.uniform1f(uniforms.get("uSpan"), camera.ortho ?? SPAN);
-    gl.uniform1ui(uniforms.get("uFrame"), frame++);
+    gl.uniform3fv(u("uForward"), forward);
+    gl.uniform3fv(u("uRight"), right);
+    gl.uniform3fv(u("uUp"), up);
+    gl.uniform1f(u("uSpan"), camera.ortho ?? SPAN);
+    gl.uniform1ui(u("uFrame"), frame++);
     gl.uniform1ui(
-      uniforms.get("uWaterGroup"),
+      u("uWaterGroup"),
       catalog.models[catalog.states[WATER]].group,
     );
-    gl.uniform1f(uniforms.get("uFog"), fog);
-    gl.uniform1f(uniforms.get("uTime"), waterTime);
-    gl.uniform1i(uniforms.get("uOcean"), Number(ocean !== undefined));
-    gl.uniform1f(uniforms.get("uOceanHeight"), (ocean ?? 0) - origin[1]);
-    gl.uniform3fv(uniforms.get("uWorldOrigin"), origin);
-    gl.uniform1i(uniforms.get("uBounces"), bounces);
-    gl.uniform1i(uniforms.get("uDebug"), debug);
-    gl.uniform1i(uniforms.get("uHierarchy"), Number(hierarchy));
-    gl.uniform1i(uniforms.get("uFragments"), Number(fragments));
-    gl.uniform1i(uniforms.get("uShadows"), Number(shadows));
+    gl.uniform1f(u("uFog"), fog);
+    gl.uniform1f(u("uTime"), waterTime);
+    gl.uniform1i(u("uOcean"), Number(ocean !== undefined));
+    gl.uniform1f(u("uOceanHeight"), (ocean ?? 0) - origin[1]);
+    gl.uniform3fv(u("uWorldOrigin"), origin);
+    gl.uniform1i(u("uBounces"), bounces);
+    gl.uniform1i(u("uDebug"), debug);
+    gl.uniform1i(u("uHierarchy"), Number(hierarchy));
+    gl.uniform1i(u("uFragments"), Number(fragments));
+    gl.uniform1i(u("uShadows"), Number(shadows));
     const length = Math.hypot(...sun);
     gl.uniform3fv(
-      uniforms.get("uSun"),
+      u("uSun"),
       sun.map((v) => v / length),
     );
     gl.uniform1i(
-      uniforms.get("uObjectsEnabled"),
+      u("uObjectsEnabled"),
       !drawObjects || objects.enabled === false ? 0 : 1,
     );
     objects.update(time, origin);
@@ -342,11 +402,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    * 带抗锯齿、软阴影和一次漫反射反弹；为假时重新出一帧干净的预览。累积程序尚未编译好时不画，返回 false。
    * ocean 指定无限海面的世界高度；省略时只绘制场景里的体素水。
    * sun 是指向太阳的方向，太阳在地平线下时由月亮照明；fog 是远景雾接近不透明的距离，默认为观察窗口半径。
-   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,accumulate?:boolean,time?:number,debug?:number,hierarchy?:boolean,fragments?:boolean,shadows?:boolean,sun?:number[],fog?:number,ocean?:number,objects?:boolean,synchronize?:boolean}} options
    */
   function draw(
-    camera,
+    camera: Camera,
     {
       width,
       height,
@@ -361,8 +419,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       ocean,
       objects = true,
       synchronize = false,
-    },
-  ) {
+    }: DrawOptions,
+  ): boolean {
     if (accumulate && !programs[1]) return false;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
@@ -392,7 +450,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       queries.length &&
       gl.getQueryParameter(queries[0], gl.QUERY_RESULT_AVAILABLE)
     ) {
-      const q = queries.shift();
+      const q = queries.shift()!;
       times.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
       if (times.length > 240) times.shift();
       gl.deleteQuery(q);
@@ -416,11 +474,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    * 批量按完成速度调整：每帧都把队列画空就加倍，一批拖过两帧就减半。
    * 宿主在每个动画帧调用 step() 推进、present() 把当前结果显示到画布上，期间暂停交互绘制；
    * 满意时用 png() 取图，再 dispose()。需要先 prepareAccumulation()。
-   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number,ocean?:number,objects?:boolean}} options
    */
   function photograph(
-    camera,
+    camera: Camera,
     {
       width,
       height,
@@ -431,11 +487,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       sun = [0.45, 0.62, 0.3],
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
-    },
+    }: PhotoOptions,
   ) {
     if (!programs[1]) throw Error("拍照需要先调用 prepareAccumulation()");
     const film = createAccumulator(gl, vertex),
-      tiles = [];
+      tiles: Array<[number, number]> = [];
     film.resize(width, height);
     film.clear();
     for (let y = 0; y < height; y += PHOTO_TILE)
@@ -446,8 +502,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       batch = 1,
       exposure = 1;
     // 已提交、尚未完成的批次；end 是这一批画完后累计画完的小块数，age 是提交后经过的 step 次数。
-    /** @type {{sync:WebGLSync,end:number,age:number}[]} */
-    const pending = [];
+    const pending: Array<{ sync: WebGLSync; end: number; age: number }> = [];
     /** 绑定照片缓冲并写入输入；每轮样本开始时也调用一次，换随机种子。 */
     function begin() {
       exposure = prepare(view, {
@@ -478,7 +533,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       }
       gl.disable(gl.SCISSOR_TEST);
       pending.push({
-        sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
+        sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!,
         end: done,
         age: 0,
       });
@@ -496,7 +551,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
           pending.length &&
           gl.getSyncParameter(pending[0].sync, gl.SYNC_STATUS) === gl.SIGNALED
         ) {
-          const item = pending.shift();
+          const item = pending.shift()!;
           finished = item.end;
           gl.deleteSync(item.sync);
         }
@@ -531,7 +586,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
             y * row,
           );
         const target = new OffscreenCanvas(width, height);
-        target.getContext("2d").putImageData(image, 0, 0);
+        target.getContext("2d")!.putImageData(image, 0, 0);
         return target.convertToBlob({ type: "image/png" });
       },
       dispose() {
@@ -557,11 +612,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   /** 拾取该像素主射线最先遇到的可见表面，坐标从画面左上角计数。
    * 返回整数方块坐标和几何法线；透明孔洞继续穿透，活动对象不参与地图选点。
-   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,x:number,y:number}} pixel
-   * @returns {{position:number[],normal:number[]}|null}
    */
-  function pick(camera, pixel) {
+  function pick(
+    camera: Camera,
+    pixel: { width: number; height: number; x: number; y: number },
+  ): { position: number[]; normal: number[] } | null {
     const framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     const viewport = gl.getParameter(gl.VIEWPORT);
     const blend = gl.isEnabled(gl.BLEND);
@@ -578,9 +633,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       fog: Infinity,
       objects: false,
     });
-    gl.uniform1i(uniforms.get("uPicking"), 1);
+    gl.uniform1i(u("uPicking"), 1);
     gl.uniform2f(
-      uniforms.get("uPickPixel"),
+      u("uPickPixel"),
       Math.floor(pixel.x) + 0.5,
       pixel.height - Math.floor(pixel.y) - 0.5,
     );
@@ -590,9 +645,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     const result = new Float32Array(4);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, result);
-    gl.uniform1i(uniforms.get("uPicking"), 0);
+    gl.uniform1i(u("uPicking"), 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.viewport(...viewport);
+    gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
     if (blend) gl.enable(gl.BLEND);
     if (result[0] < 0) return null;
     const normal = [...result.slice(1)],
@@ -610,13 +665,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   }
   /** 视野里是否有足够大的动画对象；没有时静止画面不必逐帧重画。
    * 对象只按包围球与视锥比较，投影不足一个像素的忽略。
-   * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number}} size
    */
-  function animating(camera, { width, height }) {
+  function animating(camera: Camera, { width, height }: { width: number; height: number }): boolean {
     if (objects.enabled === false) return false;
     const { forward, right, up } = basis(camera),
-      dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+      dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
       halfHeight = (camera.ortho ?? SPAN) / 2,
       halfWidth = (halfHeight * width) / height;
     return objects.references().some(({ bounds: [low, high] }) => {
@@ -645,10 +698,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       return program;
     },
     catalog,
-    /** 贴图与派生表在同一帧替换；宿主同时发布按新分类准备的区域。
-     * @param {import("./textures.js").TextureSet} set
-     */
-    setTextures(set) {
+    /** 贴图与派生表在同一帧替换；宿主同时发布按新分类准备的区域。 */
+    setTextures(set: TextureSet): void {
       gl.useProgram(program);
       textures.install(set);
       preparation.models = catalog.models;

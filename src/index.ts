@@ -1,0 +1,18 @@
+// R2 渲染核心的公开入口；宿主只从这里导入。
+export {
+  createRenderer,
+  type RendererOptions,
+  type LightingOptions,
+  type DrawOptions,
+  type PhotoOptions,
+} from "./render/renderer.ts";
+export { decodeTextures, type TextureSet, type TextureInfo } from "./render/textures.ts";
+export { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./render/camera.ts";
+export { ObjectRegistry } from "./objects/registry.ts";
+export { enchantingBook } from "./effects/enchanting-book.ts";
+export { regionKey, decodeRegion, unpack } from "./scene/prepare.ts";
+export type * from "./contracts.ts";
+export type { WorkerRequest, WorkerResponse } from "./scene/worker.ts";
+
+import type { createRenderer } from "./render/renderer.ts";
+export type Renderer = Awaited<ReturnType<typeof createRenderer>>;

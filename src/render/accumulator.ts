@@ -44,35 +44,35 @@ const UNIT = 15,
 /** 射线着色器每帧输出 (线性亮度×权重, 权重)。画面变化时预览帧覆盖缓冲，静止后的样本逐帧相加；
  * 显示时除以总权重，再做曝光与色调映射。这样实时画面和静止后的收敛画面走同一条路径。
  * 32 位浮点缓冲与浮点混合需要 EXT_color_buffer_float 和 EXT_float_blend。
- * @param {WebGL2RenderingContext} gl
- * @param {string} vertexSource 全屏三角形的顶点着色器
+ * @param gl
+ * @param vertexSource 全屏三角形的顶点着色器
  */
-export function createAccumulator(gl, vertexSource) {
+export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: string) {
   gl.getExtension("EXT_color_buffer_float");
   gl.getExtension("EXT_float_blend");
-  /** @param {string} fragmentSource */
-  function compile(fragmentSource) {
+  function compile(fragmentSource: string): WebGLProgram {
     const program = gl.createProgram();
     for (const [type, source] of [
       [gl.VERTEX_SHADER, vertexSource],
       [gl.FRAGMENT_SHADER, fragmentSource],
-    ]) {
+    ] as const) {
       const shader = gl.createShader(type);
+      if (!shader) throw Error("无法创建着色器");
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-        throw Error(gl.getShaderInfoLog(shader));
+        throw Error(gl.getShaderInfoLog(shader) ?? "着色器编译失败");
       gl.attachShader(program, shader);
       gl.deleteShader(shader);
     }
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-      throw Error(gl.getProgramInfoLog(program));
+      throw Error(gl.getProgramInfoLog(program) ?? "着色器链接失败");
     return program;
   }
   const prefilter = compile(PREFILTER),
     program = compile(COMPOSITE.replace("BLOOM", BLOOM.toFixed(3)));
-  const location = (name) => gl.getUniformLocation(program, name);
+  const location = (name: string) => gl.getUniformLocation(program, name);
   const exposure = location("uExposure"),
     raw = location("uRaw");
   gl.useProgram(prefilter);
@@ -80,18 +80,18 @@ export function createAccumulator(gl, vertexSource) {
   gl.useProgram(program);
   gl.uniform1i(location("uImage"), UNIT);
   gl.uniform1i(location("uBloom"), BLOOM_UNIT);
-  let texture = null,
-    framebuffer = null,
+  let texture: WebGLTexture | null = null,
+    framebuffer: WebGLFramebuffer | null = null,
     // 半尺寸、带完整 mipmap 的泛光缓冲。
-    glow = null,
-    glowFramebuffer = null,
+    glow: WebGLTexture | null = null,
+    glowFramebuffer: WebGLFramebuffer | null = null,
     width = 0,
     height = 0,
     // 当前画面已经相加的累积样本数，不含预览帧。
     samples = 0;
 
-  /** 尺寸变化时重建缓冲。 @param {number} w @param {number} h */
-  function resize(w, h) {
+  /** 尺寸变化时重建缓冲。 */
+  function resize(w: number, h: number): void {
     if (w === width && h === height) return;
     gl.deleteTexture(texture);
     gl.deleteFramebuffer(framebuffer);
@@ -142,10 +142,8 @@ export function createAccumulator(gl, vertexSource) {
     samples = 0;
   }
 
-  /** 先生成泛光的各级模糊，再把缓冲画到 target 上。
-   * @param {WebGLFramebuffer|null} target @param {number} value @param {boolean} debug
-   */
-  function composite(target, value, debug) {
+  /** 先生成泛光的各级模糊，再把缓冲画到 target 上。 */
+  function composite(target: WebGLFramebuffer | null, value: number, debug: boolean): void {
     gl.disable(gl.BLEND);
     gl.activeTexture(gl.TEXTURE0 + UNIT);
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -167,9 +165,9 @@ export function createAccumulator(gl, vertexSource) {
   return {
     resize,
     /** 让随后的射线绘制写入缓冲；返回这一帧的通道：0 预览（覆盖），1 累积（相加）。
-     * @param {boolean} accumulate 画面与上一帧完全相同时为真
+     * @param accumulate 画面与上一帧完全相同时为真
      */
-    begin(accumulate) {
+    begin(accumulate: boolean): 0 | 1 {
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       if (accumulate) {
         samples++;
@@ -187,12 +185,12 @@ export function createAccumulator(gl, vertexSource) {
       gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
       samples = 0;
     },
-    /** 把缓冲显示到画布。 @param {{exposure:number,raw:boolean}} options */
-    present({ exposure, raw }) {
+    /** 把缓冲显示到画布。 */
+    present({ exposure, raw }: { exposure: number; raw: boolean }): void {
       composite(null, exposure, raw);
     },
-    /** 色调映射后读回 8 位 RGBA，第一行在画面底部。 @param {{exposure:number}} options */
-    read({ exposure }) {
+    /** 色调映射后读回 8 位 RGBA，第一行在画面底部。 */
+    read({ exposure }: { exposure: number }): Uint8Array {
       const target = gl.createTexture(),
         output = gl.createFramebuffer(),
         pixels = new Uint8Array(width * height * 4);
@@ -233,3 +231,5 @@ export function createAccumulator(gl, vertexSource) {
     },
   };
 }
+
+export type Accumulator = ReturnType<typeof createAccumulator>;

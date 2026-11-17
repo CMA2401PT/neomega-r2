@@ -13,7 +13,8 @@ import (
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:2413", "研究页面监听地址")
-	webPath := flag.String("web", "", "开发时直接读取网页目录")
+	webPath := flag.String("web", "", "开发时直接读取验证页目录")
+	corePath := flag.String("core", "", "开发时直接读取渲染核心的构建目录（dist）")
 
 	flag.Parse()
 	catalog, err := r2.OpenCatalog()
@@ -58,7 +59,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	web, err := fs.Sub(r2.Files, "web")
+	web, err := fs.Sub(r2.Files, "demo")
+	if err != nil {
+		panic(err)
+	}
+	core, err := fs.Sub(r2.Files, "dist")
 	if err != nil {
 		panic(err)
 	}
@@ -66,6 +71,10 @@ func main() {
 	if *webPath != "" {
 		web = os.DirFS(*webPath)
 	}
+	if *corePath != "" {
+		core = os.DirFS(*corePath)
+	}
+	mux.Handle("/r2/", http.StripPrefix("/r2/", http.FileServerFS(core)))
 	files := http.FileServerFS(web)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		files.ServeHTTP(w, r)

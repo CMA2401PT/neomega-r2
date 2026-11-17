@@ -1,7 +1,5 @@
 // 独立验证页只组装场景、相机和控件；应用的存档与流式调度位于 apps/neomega-viewer-r2。
-import { createRenderer } from "./render/renderer.js";
-import { ObjectRegistry } from "./objects/registry.js";
-import { enchantingBook } from "./effects/enchanting-book.js";
+import { createRenderer, ObjectRegistry, enchantingBook } from "/r2/index.js";
 const canvas = document.querySelector("#view"),
   renderer = await createRenderer(canvas, { assets: "/assets/" }),
   params = new URLSearchParams(location.search),

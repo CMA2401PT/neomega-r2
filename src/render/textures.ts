@@ -1,59 +1,64 @@
-/** @typedef {{side:number,levels:number,layers:number,atlasWidth:number,atlasHeight:number}} TextureInfo */
-/** @typedef {{kind:number,offset:number,count:number,group:number,fragments?:Array<{offset:number[],model:number}>}} Model */
-/** @typedef {{models:Model[],states:Record<string,number>,statistics:Record<string,number>,unsupported:string[]}} Catalog */
-/** @typedef {{info:TextureInfo,files:Map<string,ArrayBuffer>,catalog:Catalog}} TextureSet */
+import type { Catalog } from "../contracts.ts";
+
+export interface TextureInfo {
+  side: number;
+  levels: number;
+  layers: number;
+  atlasWidth: number;
+  atlasHeight: number;
+}
+export type { Catalog, Model } from "../contracts.ts";
+export interface TextureSet {
+  info: TextureInfo;
+  files: Map<string, ArrayBuffer>;
+  catalog: Catalog;
+}
+type Uniforms = Map<string, WebGLUniformLocation | null>;
 const binaryNames = [
   "headers.bin", "fast.bin", "quad-records.bin",
   "surface-layers.bin", "surface-normals.bin", "surface-specular.bin",
   "atlas-color.bin", "atlas-normals.bin", "atlas-specular.bin",
 ];
 
-/** 一次响应包含图片及派生表，读取结束后才允许替换 GPU 资源。
- * @param {ArrayBuffer} buffer @returns {TextureSet}
- */
-export function decodeTextures(buffer) {
+/** 一次响应包含图片及派生表，读取结束后才允许替换 GPU 资源。 */
+export function decodeTextures(buffer: ArrayBuffer): TextureSet {
   const length = new DataView(buffer).getUint32(0, true),
     decoder = new TextDecoder(),
     header = JSON.parse(decoder.decode(new Uint8Array(buffer, 4, length))),
-    files = new Map();
+    files = new Map<string, ArrayBuffer>();
   let offset = 4 + length;
-  for (const { name, length } of header.files) {
+  for (const { name, length } of header.files as Array<{ name: string; length: number }>) {
     files.set(name, buffer.slice(offset, offset + length));
     offset += Math.ceil(length / 4) * 4;
   }
-  return { info: header.info, files, catalog: JSON.parse(decoder.decode(files.get("catalog.json"))) };
+  return { info: header.info, files, catalog: JSON.parse(decoder.decode(files.get("catalog.json")!)) };
 }
 
-/** 共享表和三通道贴图使用固定纹理单元；所有上传集中在这里。
- * @param {WebGL2RenderingContext} gl
- * @param {Map<string,WebGLUniformLocation|null>} uniforms
- * @param {string} assets
- */
-export async function createTextures(gl, uniforms, assets) {
+/** 共享表和三通道贴图使用固定纹理单元；所有上传集中在这里。 */
+export async function createTextures(gl: WebGL2RenderingContext, uniforms: Uniforms, assets: string) {
   const program = gl.getParameter(gl.CURRENT_PROGRAM);
   for (const name of ["uSurfaceNormals", "uSurfaceSpecular", "uAtlasNormals", "uAtlasSpecular"])
     uniforms.set(name, gl.getUniformLocation(program, name));
   const files = new Map(await Promise.all(
     [...binaryNames, "quad-references.bin"].map(async (name) =>
-      [name, await (await fetch(assets + name)).arrayBuffer()],
+      [name, await (await fetch(assets + name)).arrayBuffer()] as const,
     ),
   ));
-  const [info, catalog] = await Promise.all(
+  const [info, catalog] = (await Promise.all(
     ["textures-info.json", "catalog.json"].map(async (name) => (await fetch(assets + name)).json()),
-  );
-  const handles = new Map();
+  )) as [TextureInfo, Catalog];
+  const handles = new Map<string, WebGLTexture>();
   let bytes = 0, referenceBytes = 0;
-  /** @param {number} unit @param {number} target @param {string} name */
-  function texture(unit, target, name) {
-    gl.deleteTexture(handles.get(name));
+  function texture(unit: number, target: number, name: string): void {
+    gl.deleteTexture(handles.get(name) ?? null);
     const handle = gl.createTexture();
     handles.set(name, handle);
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(target, handle);
-    gl.uniform1i(uniforms.get(name), unit);
+    gl.uniform1i(uniforms.get(name) ?? null, unit);
   }
-  /** @param {number} unit @param {string} name @param {ArrayBuffer} buffer @param {boolean} integer */
-  function table(unit, name, buffer, integer) {
+  function table(unit: number, name: string, buffer: ArrayBuffer | undefined, integer: boolean): void {
+    if (!buffer) throw Error("材质数据缺少 " + name);
     const Input = integer ? Uint32Array : Float32Array,
       width = 2048, height = Math.max(1, Math.ceil(buffer.byteLength / 16 / width)),
       data = new Input(width * height * 4);
@@ -66,8 +71,7 @@ export async function createTextures(gl, uniforms, assets) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     bytes += data.byteLength;
   }
-  /** @param {TextureSet} set */
-  function install(set) {
+  function install(set: TextureSet): void {
     bytes = referenceBytes;
     table(2, "uModels", set.files.get("headers.bin"), true);
     table(3, "uQuadRecords", set.files.get("quad-records.bin"), false);
@@ -77,10 +81,10 @@ export async function createTextures(gl, uniforms, assets) {
       [6, "uSurfaces", "surface-layers.bin", true],
       [7, "uSurfaceNormals", "surface-normals.bin", false],
       [9, "uSurfaceSpecular", "surface-specular.bin", false],
-    ]) {
+    ] as const) {
       texture(unit, gl.TEXTURE_2D_ARRAY, name);
       gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, color ? gl.SRGB8_ALPHA8 : gl.RGBA8, side, side, layers);
-      const data = new Uint8Array(set.files.get(file));
+      const data = new Uint8Array(set.files.get(file)!);
       let offset = 0;
       for (let level = 0; level < levels; level++) {
         const size = side >> level, length = size * size * 4 * layers;
@@ -99,9 +103,9 @@ export async function createTextures(gl, uniforms, assets) {
       [5, "uAtlas", "atlas-color.bin"],
       [0, "uAtlasNormals", "atlas-normals.bin"],
       [14, "uAtlasSpecular", "atlas-specular.bin"],
-    ]) {
+    ] as const) {
       texture(unit, gl.TEXTURE_2D, name);
-      const data = new Uint8Array(set.files.get(file));
+      const data = new Uint8Array(set.files.get(file)!);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, atlasWidth, atlasHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);

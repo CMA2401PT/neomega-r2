@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareRegion, unpack, decodeRegion } from "../web/scene/prepare.js";
-import { WordAllocator } from "../web/render/allocator.js";
-import { ObjectStore } from "../web/objects/store.js";
-import { ObjectRegistry } from "../web/objects/registry.js";
-import { WorldGPU } from "../web/render/world-gpu.js";
+import { prepareRegion, unpack, decodeRegion } from "../src/scene/prepare.ts";
+import { WordAllocator } from "../src/render/allocator.ts";
+import { ObjectStore } from "../src/objects/store.ts";
+import { ObjectRegistry } from "../src/objects/registry.ts";
+import { WorldGPU } from "../src/render/world-gpu.ts";
 const catalog = {
   fragmentReach: 1,
   models: [

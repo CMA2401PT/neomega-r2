@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cameraBasis, cameraRay } from "../web/render/camera.js";
+import { cameraBasis, cameraRay } from "../src/render/camera.ts";
 
 const near = (actual, expected) =>
   actual.forEach((v, i) => assert(Math.abs(v - expected[i]) < 1e-10));

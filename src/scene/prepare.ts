@@ -1,12 +1,20 @@
+import type {
+  ObjectReference,
+  PreparationCatalog,
+  PreparedRegion,
+  SourceRegion,
+  SourceSection,
+} from "../contracts.ts";
+
 const MIXED = 0xffffffff;
-export const regionKey = (x, z) => `${x}/${z}`;
-const sectionKey = (p) => p.join("/"),
-  cellIndex = (x, y, z) => (x << 8) | (z << 4) | y;
+export const regionKey = (x: number, z: number): string => `${x}/${z}`;
+const sectionKey = (p: number[]) => p.join("/"),
+  cellIndex = (x: number, y: number, z: number) => (x << 8) | (z << 4) | y;
 class Words {
   data = new Uint32Array(4096);
   length = 1;
-  relocations = [];
-  append(values) {
+  relocations: number[] = [];
+  append(values: ArrayLike<number>): number {
     const at = this.length;
     this.length += values.length;
     if (this.length > this.data.length) {
@@ -18,13 +26,10 @@ class Words {
     return at;
   }
 }
-/** 解码传输布局，压缩格子索引仍引用原始缓冲；不会展开整片世界。
- * @param {ArrayBuffer} buffer
- * @returns {import("../contracts.js").SourceRegion}
- */
-export function decodeRegion(buffer) {
+/** 解码传输布局，压缩格子索引仍引用原始缓冲；不会展开整片世界。 */
+export function decodeRegion(buffer: ArrayBuffer): SourceRegion {
   const data = new Uint32Array(buffer),
-    sections = [];
+    sections: SourceSection[] = [];
   let p = 3;
   if (data[0] !== 0x33504c54) throw Error("无法识别区块数据格式");
   for (let n = 0; n < data[1]; n++) {
@@ -40,7 +45,7 @@ export function decodeRegion(buffer) {
   }
   return { sections, unknown: data[2], bytes: buffer.byteLength };
 }
-export function unpack(section) {
+export function unpack(section: SourceSection): Uint32Array {
   const cells = new Uint32Array(4096),
     { bits, palette, words } = section,
     per = Math.floor(32 / bits),
@@ -52,7 +57,7 @@ export function unpack(section) {
       ];
   return cells;
 }
-function empty(position) {
+function empty(position: number[]): SourceSection {
   return {
     position,
     bits: 0,
@@ -61,11 +66,11 @@ function empty(position) {
   };
 }
 /** 只替换已准备好实例的本体；同 section 的其他方块保留原值。 */
-function replaceCells(section, indices) {
+function replaceCells(section: SourceSection, indices: number[]): SourceSection {
   const cells = unpack(section);
   for (const i of indices) cells[i] = 0;
-  const palette = [],
-    lookup = new Map();
+  const palette: number[] = [],
+    lookup = new Map<number, number>();
   for (const id of cells)
     if (!lookup.has(id)) {
       lookup.set(id, palette.length);
@@ -76,16 +81,18 @@ function replaceCells(section, indices) {
     words = new Uint32Array(bits ? Math.ceil(4096 / per) : 0);
   if (bits)
     for (let i = 0; i < 4096; i++)
-      words[Math.floor(i / per)] |= lookup.get(cells[i]) << ((i % per) * bits);
+      words[Math.floor(i / per)] |= lookup.get(cells[i])! << ((i % per) * bits);
   return { ...section, palette: new Uint32Array(palette), words, bits };
 }
 /** 把 section 分成 64 个 4×4×4 小块，供着色器用位运算跳过空格。
  * 占用指非空气或带有附加片段；小块内全是同一完整立方体时记下其编号，射线可以整块穿过同一介质。
  * 小块和格子都按 XZY 顺序编号：小块 ((x>>2)*4+(z>>2))*4+(y>>2)，块内 ((x&3)*4+(z&3))*4+(y&3)。
- * @param {Uint32Array} cells
- * @param {Map<number, number[]> | undefined} parts
  */
-export function describeBricks(cells, parts, catalog) {
+export function describeBricks(
+  cells: Uint32Array,
+  parts: Map<number, number[]> | undefined,
+  catalog: Pick<PreparationCatalog, "models">,
+) {
   const cellMasks = new Uint32Array(128),
     tags = new Uint32Array(64),
     brickMask = [0, 0];
@@ -111,32 +118,46 @@ export function describeBricks(cells, parts, catalog) {
   return { cellMasks, tags, brickMask, uniform };
 }
 /** 准备单个目标区域，同时收集相邻来源伸入的片段；片段归属跟随来源，输出归属目标格。 */
-export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
+export function prepareRegion({
+  x,
+  z,
+  regions,
+  catalog,
+  objects = [],
+}: {
+  x: number;
+  z: number;
+  regions: Map<string, SourceRegion>;
+  catalog: PreparationCatalog;
+  objects?: ObjectReference[];
+}): PreparedRegion {
   const started = performance.now(),
-    source = regions.get(regionKey(x, z)),
-    sections = new Map(),
-    fragments = new Map(),
-    replacements = new Map();
+    source = regions.get(regionKey(x, z));
+  if (!source) throw Error("没有来源区域 " + regionKey(x, z));
+  const sections = new Map<string, SourceSection>(),
+    fragments = new Map<string, Map<number, number[]>>(),
+    replacements = new Map<string, number[]>();
   for (const section of source.sections)
     sections.set(sectionKey(section.position), section);
-  const ensure = (position) => {
+  const ensure = (position: number[]) => {
     const key = sectionKey(position);
     if (!sections.has(key)) sections.set(key, empty(position));
     if (!fragments.has(key)) fragments.set(key, new Map());
-    return fragments.get(key);
+    return fragments.get(key)!;
   };
-  const inside = (p) =>
+  const inside = (p: number[]) =>
     Math.floor(p[0] / 128) === x &&
     Math.floor(p[2] / 128) === z &&
     p[1] >= -64 &&
     p[1] < 448;
-  const add = (p, ids) => {
+  const add = (p: number[], ids: number[]) => {
     if (!inside(p)) return;
     const position = p.map((v) => Math.floor(v / 16)),
       list = ensure(position),
-      cell = cellIndex(...p.map((v) => ((v % 16) + 16) % 16));
+      [cx, cy, cz] = p.map((v) => ((v % 16) + 16) % 16),
+      cell = cellIndex(cx, cy, cz);
     if (!list.has(cell)) list.set(cell, []);
-    list.get(cell).push(...ids);
+    list.get(cell)!.push(...ids);
   };
   // 模型目录中的最大越界距离决定来源范围，接口不假定模型最多只跨一格。
   const halo = Math.ceil(catalog.fragmentReach / 128);
@@ -179,16 +200,16 @@ export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
         key = sectionKey(position);
       if (!replacements.has(key)) replacements.set(key, []);
       replacements
-        .get(key)
+        .get(key)!
         .push(
           cellIndex(
-            ...object.owner.map((v) => ((Math.floor(v) % 16) + 16) % 16),
+            ...(object.owner.map((v) => ((Math.floor(v) % 16) + 16) % 16) as [number, number, number]),
           ),
         );
     }
   }
   const pool = new Words(),
-    headers = [],
+    headers: number[] = [],
     stats = {
       sections: 0,
       fragmentReferences: 0,
@@ -196,7 +217,7 @@ export function prepareRegion({ x, z, regions, catalog, objects = [] }) {
     };
   for (const [key, original] of sections) {
     const section = replacements.has(key)
-        ? replaceCells(original, replacements.get(key))
+        ? replaceCells(original, replacements.get(key)!)
         : original,
       parts = fragments.get(key);
     stats.sections++;

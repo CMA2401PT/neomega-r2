@@ -1,16 +1,18 @@
 // 附魔书只提供七个盒体及其运动；格子登记、贴图和 GPU 上传由公共对象层负责。
-const rotateY = (v, a) => [
+import type { ObjectRecipe } from "../contracts.ts";
+
+const rotateY = (v: number[], a: number): number[] => [
   Math.cos(a) * v[0] + Math.sin(a) * v[2],
   v[1],
   -Math.sin(a) * v[0] + Math.cos(a) * v[2],
 ];
-const rotateZ = (v, a) => [
+const rotateZ = (v: number[], a: number): number[] => [
   Math.cos(a) * v[0] - Math.sin(a) * v[1],
   Math.sin(a) * v[0] + Math.cos(a) * v[1],
   v[2],
 ];
-export function enchantingBook(textureURL) {
-  const definitions = [
+export function enchantingBook(textureURL: string): ObjectRecipe {
+  const definitions: number[][][] = [
     [
       [-6, -5, -0.005],
       [6, 10, 0.005],
@@ -68,7 +70,7 @@ export function enchantingBook(textureURL) {
         ],
       };
     }),
-    pose(time, i) {
+    pose(time: number, i: number) {
       const openness = 1.25 + Math.sin(time * 0.4) * 0.1,
         slide = Math.sin(openness),
         angle = [
@@ -82,7 +84,7 @@ export function enchantingBook(textureURL) {
         ][i],
         pivot =
           i < 2 ? [0, 0, i === 0 ? -1 : 1] : i > 2 ? [slide, 0, 0] : [0, 0, 0];
-      const transform = (v) =>
+      const transform = (v: number[]) =>
           rotateY(rotateZ(rotateY(v, angle), (80 * Math.PI) / 180), time * 0.3),
         position = rotateY(
           rotateZ(

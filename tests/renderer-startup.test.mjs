@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRenderer } from "../web/render/renderer.js";
+import { createRenderer } from "../src/render/renderer.ts";
 
 // GPU 进程退出时，完成查询可能为真，链接状态和日志则返回 null。
 // 模拟真实 API 的返回组合，确保错误不会退化成“编译失败：null”。

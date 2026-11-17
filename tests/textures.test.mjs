@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createTextures, decodeTextures } from "../web/render/textures.js";
-import { prepareRegion } from "../web/scene/prepare.js";
+import { createTextures, decodeTextures } from "../src/render/textures.ts";
+import { prepareRegion } from "../src/scene/prepare.ts";
 
 test("贴图上传保留六张图的格式、布局与 mip，并释放被替换的纹理", async () => {
   const calls = [], live = new Set();

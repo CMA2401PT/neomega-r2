@@ -1,12 +1,38 @@
-import { WordAllocator } from "./allocator.js";
+import { WordAllocator, type WordBlock } from "./allocator.ts";
+import type { PreparedRegion, RegionStatistics } from "../contracts.ts";
+
+type Uniforms = Map<string, WebGLUniformLocation | null>;
+interface InstalledRegion {
+  block: WordBlock;
+  stats: RegionStatistics;
+  x: number;
+  z: number;
+}
 const MIXED = 0xffffffff,
   // 目录覆盖 256×32×256 个 section，即 4096×512×4096 方块，可容纳半径 96 区块的窗口与对齐余量。
   SIZE = [256, 32, 256],
-  mod = (v, n) => ((v % n) + n) % n;
+  mod = (v: number, n: number) => ((v % n) + n) % n;
 
 /** 世界目录使用循环坐标，移动窗口只更新边界区域，不搬动已有格子数据。 */
 export class WorldGPU {
-  constructor(gl, uniforms, { capacityWords = 64 * 1024 * 1024 } = {}) {
+  gl: WebGL2RenderingContext;
+  uniforms: Uniforms;
+  origin: number[];
+  size: number[];
+  regions: Map<string, InstalledRegion>;
+  version: number;
+  allocator: WordAllocator;
+  sections: Uint32Array;
+  levels: Array<{ size: number[]; data: Uint32Array }>;
+  info: WebGLTexture;
+  tree: WebGLTexture;
+  pool: WebGLTexture;
+  textureBytes: number;
+  constructor(
+    gl: WebGL2RenderingContext,
+    uniforms: Uniforms,
+    { capacityWords = 64 * 1024 * 1024 }: { capacityWords?: number } = {},
+  ) {
     this.gl = gl;
     this.uniforms = uniforms;
     this.origin = [0, -64, 0];
@@ -29,13 +55,13 @@ export class WorldGPU {
     this.info = gl.createTexture();
     gl.activeTexture(gl.TEXTURE10);
     gl.bindTexture(gl.TEXTURE_3D, this.info);
-    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA32UI, ...SIZE);
+    gl.texStorage3D(gl.TEXTURE_3D, 1, gl.RGBA32UI, SIZE[0], SIZE[1], SIZE[2]);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     this.tree = gl.createTexture();
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_3D, this.tree);
-    gl.texStorage3D(gl.TEXTURE_3D, this.levels.length, gl.R32UI, ...SIZE);
+    gl.texStorage3D(gl.TEXTURE_3D, this.levels.length, gl.R32UI, SIZE[0], SIZE[1], SIZE[2]);
     gl.texParameteri(
       gl.TEXTURE_3D,
       gl.TEXTURE_MIN_FILTER,
@@ -60,32 +86,31 @@ export class WorldGPU {
       this.levels.reduce((sum, l) => sum + l.data.byteLength, 0);
     this.bind();
   }
-  setWindow(origin, size) {
+  setWindow(origin: number[], size: number[]): void {
     this.origin = [...origin];
     this.size = [...size];
     this.version++;
   }
-  bind() {
+  bind(): void {
     const { gl, uniforms: u } = this;
     for (const [unit, target, texture, name] of [
       [1, gl.TEXTURE_3D, this.tree, "uTree"],
       [10, gl.TEXTURE_3D, this.info, "uSections"],
       [11, gl.TEXTURE_2D, this.pool, "uWorldData"],
-    ]) {
+    ] as const) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(target, texture);
-      gl.uniform1i(u.get(name), unit);
+      gl.uniform1i(u.get(name) ?? null, unit);
     }
-    gl.uniform3fv(u.get("uSize"), this.size);
-    gl.uniform3iv(u.get("uDirectoryOffset"), [
+    gl.uniform3fv(u.get("uSize") ?? null, this.size);
+    gl.uniform3iv(u.get("uDirectoryOffset") ?? null, [
       mod(this.origin[0], SIZE[0] * 16),
       0,
       mod(this.origin[2], SIZE[2] * 16),
     ]);
   }
   /** 同一帧内先上传新地址，再发布目录，最后释放旧地址，避免看到一半的新区域。 */
-  /** @param {import("../contracts.js").PreparedRegion} region */
-  install(region) {
+  install(region: PreparedRegion): void {
     const { gl } = this,
       key = region.key,
       old = this.regions.get(key),
@@ -130,7 +155,7 @@ export class WorldGPU {
     if (old) this.allocator.release(old.block);
     this.version++;
   }
-  remove(key) {
+  remove(key: string): void {
     const region = this.regions.get(key);
     if (!region) return;
     this.writeRegion(
@@ -145,7 +170,7 @@ export class WorldGPU {
     this.allocator.release(region.block);
     this.version++;
   }
-  writeRegion(region, base) {
+  writeRegion(region: { x: number; z: number; headers: Uint32Array }, base: number): void {
     const x = mod(region.x * 8, SIZE[0]),
       z = mod(region.z * 8, SIZE[2]),
       info = new Uint32Array(8 * 32 * 8 * 4),
@@ -239,15 +264,15 @@ export class WorldGPU {
       gl.texSubImage3D(
         gl.TEXTURE_3D,
         l,
-        ...low,
-        ...extent,
+        low[0], low[1], low[2],
+        extent[0], extent[1], extent[2],
         gl.RED_INTEGER,
         gl.UNSIGNED_INT,
         data,
       );
     }
   }
-  dispose() {
+  dispose(): void {
     for (const texture of [this.info, this.tree, this.pool])
       this.gl.deleteTexture(texture);
     this.regions.clear();
