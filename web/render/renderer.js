@@ -18,7 +18,7 @@ import {
  * 启动时只编译预览程序。静止累积与拍照用的程序更大，在 Windows 的 D3D 后端可能要编一两分钟，
  * 宿主在第一次需要时调用 prepareAccumulation()，编译期间预览照常绘制。
  * @param {HTMLCanvasElement} canvas
- * @param {{assets?:string,onProgress?:(step:{index:number,total:number,label:string})=>void}} options
+ * @param {{assets?:string,onProgress?:(step:{index:number,total:number,label:string})=>void|Promise<void>}} options
  */
 export async function createRenderer(canvas, { assets = "/r2/assets/", onProgress } = {}) {
   const gl = canvas.getContext("webgl2", {
@@ -80,8 +80,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     return program;
   }
-  // Windows 的 D3D 后端编射线程序可能要几十秒，让人对着空白页面等是最糟的体验；宿主把进度显示在页面顶部那行提示里。
-  onProgress?.({ index: 1, total: 1, label: "预览射线程序" });
+  // 宿主可先绘制状态提示，再进入可能阻塞页面的驱动编译。
+  await onProgress?.({ index: 1, total: 3, label: "正在编译预览着色器…" });
   /** 预览与累积程序；累积程序第一次需要时才编译。 @type {[WebGLProgram, WebGLProgram|null]} */
   const programs = [await createRayProgram(0), null];
   let program = programs[0];
@@ -129,6 +129,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uObjectsEnabled",
   ])
     uniforms.set(name, gl.getUniformLocation(program, name));
+  await onProgress?.({ index: 2, total: 3, label: "正在加载材质与方块模型…" });
   const textures = await createTextures(gl, uniforms, assets),
     catalog = textures.catalog;
   // 即使只画天空，WebGL 仍验证所有采样器；用最小的空纹理满足整数采样器绑定。
@@ -185,6 +186,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     );
     return accumulation;
   }
+  await onProgress?.({ index: 3, total: 3, label: "正在准备绘制缓冲区…" });
   const accumulator = createAccumulator(gl, vertex);
   // 累积样本的随机种子；每帧不同，样本之间才互不相关。
   let frame = 0;
