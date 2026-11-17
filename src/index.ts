@@ -24,6 +24,8 @@ export {
   type SessionOptions,
   type SessionStats,
 } from "./session/session.ts";
+export { blockHash, AIR } from "./source/hash.ts";
+export { MemoryWorld, memorySource, encodeRegion, type SectionBlocks } from "./source/memory.ts";
 export type * from "./contracts.ts";
 export type { WorkerRequest, WorkerResponse } from "./scene/worker.ts";
 

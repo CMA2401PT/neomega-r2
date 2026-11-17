@@ -2,7 +2,7 @@
 
 R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部件。射线先穿过空间格子，再检查格内登记的表面：立方体直接求命中面，复杂模型检查登记到该格的四边形，活动部件把射线变换到局部坐标求交。所有命中共用排序、光照和透明合成。
 
-本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来（HTTP、内存、WebSocket）由宿主实现数据源决定。存档读取、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`cmd/r2` 与 `demo/` 是独立模型验证页。
+本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来（HTTP、内存、WebSocket）由宿主实现数据源决定。存档读取、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
 
 浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。宿主只从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
 
@@ -148,7 +148,7 @@ const session = new WorldSession(renderer, source, { registry });
 function frame() {
   session.focus(camera.position, { nearRadius: 4, farRadius: 32 });
   session.publish();
-  renderer.draw({ tier: 3, accumulate: true });
+  renderer.draw(camera, { width, height, tier: "shading" });
 }
 ```
 
@@ -181,6 +181,23 @@ magic 0x34504c54, section 数
 
 section 内第 i 个索引对应格子 `x = i >> 8, z = (i >> 4) & 15, y = i & 15`。未列出的 section 视为空气。世界高度固定为 -64 到 448（32 个 section）。
 
+### 内存世界
+
+不读存档的宿主（验证页、测试、小工具）可以把方块写进 `MemoryWorld`，再用 `memorySource` 交给会话。方块状态用 Java 写法，`blockHash` 把它换成与 Go 的 `BlockToHash` 相同的哈希：
+
+```ts
+const world = new MemoryWorld();
+world.fill([0, 0, 0], [63, 0, 63], "minecraft:stone");
+world.set(4, 1, 4, 'minecraft:oak_fence ["east"="true","west"="true"]');
+world.addObject({ key: "book", kind: "enchanting_book", position: [4, 2, 4] });
+const session = new WorldSession(renderer, memorySource(world), { registry });
+// 之后的修改在 commit 时提交，正在显示的区域重新准备：
+world.set(4, 1, 5, "minecraft:glass");
+world.commit();
+```
+
+`memorySource` 在下一个微任务交付需要的区域；`commit` 只重新提交方块或对象有变化、且仍被需要的区域。对象按近景圆心与半径筛选，规则与 Go 的 `worlddata.Objects` 相同。自己实现数据源时，可以用 `encodeRegion(sections)` 把每个 section 的 4096 个哈希编码成上面的格式。
+
 ## 模块边界
 
 为了让来源和绘制互不牵制，浏览器部分以纯数据为边界，公共数据类型见 [contracts.ts](src/contracts.ts)，公开入口为 [index.ts](src/index.ts)。
@@ -192,11 +209,12 @@ section 内第 i 个索引对应格子 `x = i >> 8, z = (i >> 4) & 15, y = i & 1
 | `src/scene/prepare.ts` | 接收压缩区域与候选对象，生成可上传数据；不读取 UI，不持有 WebGL。 |
 | `src/scene/worker.ts` | 在后台线程缓存来源区域并调用准备器；不决定加载范围。 |
 | `src/session/session.ts` | 由相机位置决定需要的区域和近景对象，向数据源订阅，排队准备并逐帧发布；不知道数据来自哪里。 |
+| `src/source/` | 方块状态哈希、区域编码和内存世界数据源。 |
 | `src/render/world-gpu.ts` | 管理循环区域目录、增量上传与地址回收。 |
 | `src/render/renderer.ts`、`ray.frag` | 接收相机和帧参数，执行统一射线绘制；不读取存档。 |
 | `object/`、`effector/`、`blockactor/` | Go 侧特殊对象描述、无 NBT 特效路由和需要 NBT 的外观处理器。 |
 | `src/objects/`、`src/effects/` | 通用实例资源管理及各类外观、动画实现。 |
-| `scene.go`、`cmd/r2`、`demo/` | 固定验证场景与最小宿主，不承担应用的世界调度。 |
+| `demo/` | 固定验证场景与最小宿主，经内存数据源走和存档相同的会话路径。 |
 
 场景准备以 8×8 区块为一个区域，收集目标区域及相邻来源伸入的片段。整个可见窗口边缘保留邻接来源区域，以接收窗口外模型伸入的片段。来源加载卸载或活动对象候选变化时，宿主重新准备受影响的目标区域；近景半径本身不参与静态准备。准备结果包含相对地址及重定位位置，显存分配器在上传时转换地址。移动窗口使用循环目录，不搬动仍在范围内的数据；同一帧内先上传完成的区域，再切换目录，最后回收旧地址。
 
@@ -218,19 +236,18 @@ GPU 的目录覆盖容量为 4096×4096×512，宿主使用不超过这个容量
 
 ## 资源与运行
 
-资源包及其生成工具位于 [neomega-view-utils/r2assets](../neomega-view-utils/README.md)；渲染器通过 `assets` 选项给出的 URL 读取，`cmd/r2` 在 `/assets/` 提供默认资源包。
+资源包及其生成工具位于 [neomega-view-utils/r2assets](../neomega-view-utils/README.md)；渲染器通过 `assets` 选项给出的 URL 读取，验证页在 `/assets/` 提供默认资源包。
 
-先构建渲染核心（需要 Node.js 22.18 以上，首次执行 `npm ci`），再从工作区根目录启动验证页：
+构建渲染核心并启动验证页（需要 Node.js 22.18 以上，首次执行 `npm ci`）：
 
 ```sh
 npm --prefix neomega-r2 ci
-npm --prefix neomega-r2 run build
-go run ./neomega-r2/cmd/r2 -listen 127.0.0.1:2415
+npm --prefix neomega-r2 run demo
 ```
 
-开发时加 `-web neomega-r2/demo -core neomega-r2/dist` 直接读取目录，改动后重新构建即可，不必重新编译 Go。
+`demo` 先构建核心与验证页，再用 `scripts/serve.mjs` 提供静态文件：`/r2/` 是 `dist/`，`/assets/` 是默认资源包，其余是 `demo/`。另选地址时运行 `node scripts/serve.mjs 127.0.0.1:端口`。验证页只是静态文件，不需要 Go。
 
-打开 <http://127.0.0.1:2415>，特殊对象场景为 `/?scene=special`。拖动转向，WASD 移动，Q/E 升降。页面可选择原生分辨率，以及用于对照的逐格遍历。要浏览真实 Java 存档，运行应用：
+打开 <http://127.0.0.1:2415>，特殊对象场景为 `/?scene=special`。拖动转向，WASD 移动，Q/E 升降。页面可选择渲染档、原生分辨率，以及用于对照的逐格遍历。要浏览真实 Java 存档，运行应用：
 
 ```sh
 go run ./apps/neomega-viewer-r2/cmd/viewer -listen 127.0.0.1:2412
@@ -248,6 +265,6 @@ R2_URL=http://127.0.0.1:2415 node neomega-r2/experiment/special.cjs
 R2_URL=http://127.0.0.1:2412 node neomega-r2/experiment/ocean.cjs
 ```
 
-浏览器回归验证玻璃厚度、跨格片段、活动部件、透明孔与遮挡。`ocean.cjs` 连接应用的 Möbius 场景，固定夜间光照与水面时刻，输出预览、128 样本累积、照片、水下和窗口外视图，并检查拾取与累积时刻。GPU 查询与单像素同步读回耗时一起写到 `/tmp/r2mobius/astra/results.json`，截图位于同一目录。
+浏览器脚本需要 playwright：默认按 Node 的解析查找，也可以用 `PLAYWRIGHT_MODULE` 指向已有的模块目录；`CHROME` 指定浏览器，`R2_BROWSER_ARGS` 追加启动参数（例如 Windows 上的 `--use-angle=vulkan`），`R2_OUTPUT` 指定结果目录。浏览器回归验证玻璃厚度、跨格片段、矩形窗口的离开面、活动部件、透明孔与遮挡。`ocean.cjs` 连接应用的 Möbius 场景，固定夜间光照与水面时刻，输出预览、128 样本累积、照片、水下和窗口外视图，并检查拾取与累积时刻。GPU 查询与单像素同步读回耗时一起写到系统临时目录下的 `r2-ocean/results.json`，截图位于同一目录。
 
 Java 存档流式更新与 GPU 对照见[应用的验收说明](../apps/neomega-viewer-r2/experiment/README.md)。早期固定窗口研究的报告与数据见提交 `4a37e99`。

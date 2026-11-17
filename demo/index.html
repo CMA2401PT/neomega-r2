@@ -54,16 +54,7 @@
   <canvas id="view"></canvas>
   <aside>
     <h1>R2 · 一个格子，两种求交方式</h1>
-    <select id="scene">
-      <option value="special">附魔书与独立旗面</option>
-      <option value="showcase">综合场景</option>
-      <option value="fences">密集栏杆</option>
-      <option value="cutouts">密集花朵</option>
-      <option value="cubes">完整立方体</option>
-      <option value="spill">伸出本格的模型</option>
-      <option value="glass8">8 格厚玻璃</option>
-      <option value="glass16">16 格厚玻璃</option>
-    </select>
+    <select id="scene"></select>
     <select id="tier">
       <option value="voxel">体素渲染器</option>
       <option value="basic">基础渲染器</option>
@@ -98,8 +89,11 @@
     <div id="status">正在加载共享模型表…</div>
     <p class="hint">
       拖动旋转视角，WASD 前后左右，Q/E
-      升降。全屏三角形只负责发射射线；场景没有区域网格。
+      升降。场景放在内存世界里，与存档走同一条准备与绘制路径。
     </p>
   </aside>
-  <script type="module" src="/main.js"></script>
+  <script type="importmap">
+    { "imports": { "neomega-r2": "/r2/index.js" } }
+  </script>
+  <script type="module" src="/dist/main.js"></script>
 </html>

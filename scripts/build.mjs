@@ -1,4 +1,5 @@
 // 编译 TS 并复制着色器；dist 的目录结构与 src 相同，着色器按 import.meta.url 相对路径加载。
+// 随后编译验证页 demo/，它按 dist 的类型声明检查对核心的使用。
 import { execFileSync } from "node:child_process";
 import { cpSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,3 +17,7 @@ for (const entry of readdirSync(src, { recursive: true, withFileTypes: true }))
     const from = join(entry.parentPath, entry.name);
     cpSync(from, join(dist, from.slice(src.length)));
   }
+rmSync(join(root, "demo/dist"), { recursive: true, force: true });
+execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "demo")], {
+  stdio: "inherit",
+});

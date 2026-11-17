@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "declaration": false,
+    "paths": { "neomega-r2": ["../dist/index.d.ts"] }
+  },
+  "include": ["*.ts"]
+}

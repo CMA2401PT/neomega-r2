@@ -1,0 +1,605 @@
+{
+ "note": "neomega-blocks Java 状态哈希（BlockToHash）的抽样，每 151 个状态取一个，另加空气",
+ "vectors": [
+  {
+   "state": "minecraft:acacia_button [\"face\"=\"ceiling\",\"facing\"=\"east\",\"powered\"=\"false\"]",
+   "hash": 2457087418
+  },
+  {
+   "state": "minecraft:acacia_hanging_sign [\"attached\"=\"false\",\"rotation\"=\"9\"]",
+   "hash": 3848920051
+  },
+  {
+   "state": "minecraft:acacia_trapdoor [\"facing\"=\"south\",\"half\"=\"top\",\"open\"=\"false\",\"powered\"=\"true\"]",
+   "hash": 1273411354
+  },
+  {
+   "state": "minecraft:andesite_wall [\"east\"=\"none\",\"north\"=\"low\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"low\"]",
+   "hash": 1064683681
+  },
+  {
+   "state": "minecraft:bamboo_button [\"face\"=\"floor\",\"facing\"=\"east\",\"powered\"=\"true\"]",
+   "hash": 4131485077
+  },
+  {
+   "state": "minecraft:bamboo_hanging_sign [\"attached\"=\"true\",\"rotation\"=\"2\"]",
+   "hash": 3710094378
+  },
+  {
+   "state": "minecraft:bamboo_trapdoor [\"facing\"=\"east\",\"half\"=\"top\",\"open\"=\"false\",\"powered\"=\"false\"]",
+   "hash": 881770701
+  },
+  {
+   "state": "minecraft:big_dripleaf [\"facing\"=\"west\",\"tilt\"=\"none\"]",
+   "hash": 766230945
+  },
+  {
+   "state": "minecraft:birch_hanging_sign [\"attached\"=\"false\",\"rotation\"=\"2\"]",
+   "hash": 1365000697
+  },
+  {
+   "state": "minecraft:birch_trapdoor [\"facing\"=\"north\",\"half\"=\"top\",\"open\"=\"true\",\"powered\"=\"false\"]",
+   "hash": 2644907637
+  },
+  {
+   "state": "minecraft:black_wool_slab [\"type\"=\"double\"]",
+   "hash": 3995111433
+  },
+  {
+   "state": "minecraft:blackstone_wall [\"east\"=\"none\",\"north\"=\"low\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 4136393032
+  },
+  {
+   "state": "minecraft:blue_concrete_slab [\"type\"=\"double\"]",
+   "hash": 4017276605
+  },
+  {
+   "state": "minecraft:brick_stairs [\"facing\"=\"east\",\"half\"=\"top\",\"shape\"=\"straight\"]",
+   "hash": 3436962347
+  },
+  {
+   "state": "minecraft:brick_wall [\"east\"=\"tall\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"low\"]",
+   "hash": 2902258758
+  },
+  {
+   "state": "minecraft:brown_mushroom_block [\"down\"=\"false\",\"east\"=\"false\",\"north\"=\"true\",\"south\"=\"true\",\"up\"=\"true\",\"west\"=\"true\"]",
+   "hash": 3298131193
+  },
+  {
+   "state": "minecraft:cake [\"bites\"=\"2\"]",
+   "hash": 2784544422
+  },
+  {
+   "state": "minecraft:calibrated_sculk_sensor [\"facing\"=\"west\",\"power\"=\"0\",\"sculk_sensor_phase\"=\"cooldown\"]",
+   "hash": 1063049467
+  },
+  {
+   "state": "minecraft:chain_command_block [\"conditional\"=\"true\",\"facing\"=\"south\"]",
+   "hash": 4048102404
+  },
+  {
+   "state": "minecraft:cherry_hanging_sign [\"attached\"=\"false\",\"rotation\"=\"6\"]",
+   "hash": 2748438333
+  },
+  {
+   "state": "minecraft:cherry_trapdoor [\"facing\"=\"south\",\"half\"=\"bottom\",\"open\"=\"true\",\"powered\"=\"false\"]",
+   "hash": 4084731424
+  },
+  {
+   "state": "minecraft:chiseled_bookshelf [\"facing\"=\"north\",\"slot_0_occupied\"=\"true\",\"slot_1_occupied\"=\"false\",\"slot_2_occupied\"=\"true\",\"slot_3_occupied\"=\"true\",\"slot_4_occupied\"=\"true\",\"slot_5_occupied\"=\"false\"]",
+   "hash": 3235698659
+  },
+  {
+   "state": "minecraft:chiseled_quartz_block []",
+   "hash": 2531280709
+  },
+  {
+   "state": "minecraft:cinnabar_brick_wall [\"east\"=\"low\",\"north\"=\"none\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 1606087910
+  },
+  {
+   "state": "minecraft:cinnabar_stairs [\"facing\"=\"north\",\"half\"=\"bottom\",\"shape\"=\"straight\"]",
+   "hash": 1116530435
+  },
+  {
+   "state": "minecraft:cinnabar_wall [\"east\"=\"tall\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 1297663176
+  },
+  {
+   "state": "minecraft:cobbled_deepslate_wall [\"east\"=\"none\",\"north\"=\"low\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 1265314612
+  },
+  {
+   "state": "minecraft:cobblestone_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"none\"]",
+   "hash": 3453433183
+  },
+  {
+   "state": "minecraft:cobblestone_wall [\"east\"=\"tall\",\"north\"=\"tall\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 3024473837
+  },
+  {
+   "state": "minecraft:copper_door [\"facing\"=\"west\",\"half\"=\"upper\",\"hinge\"=\"right\",\"open\"=\"true\",\"powered\"=\"true\"]",
+   "hash": 1442203651
+  },
+  {
+   "state": "minecraft:creeper_head [\"powered\"=\"true\",\"rotation\"=\"12\"]",
+   "hash": 4058340698
+  },
+  {
+   "state": "minecraft:crimson_fence_gate [\"facing\"=\"west\",\"in_wall\"=\"false\",\"open\"=\"true\",\"powered\"=\"true\"]",
+   "hash": 1081568793
+  },
+  {
+   "state": "minecraft:crimson_trapdoor [\"facing\"=\"north\",\"half\"=\"bottom\",\"open\"=\"true\",\"powered\"=\"true\"]",
+   "hash": 3260532919
+  },
+  {
+   "state": "minecraft:cyan_concrete_stairs [\"facing\"=\"south\",\"half\"=\"bottom\",\"shape\"=\"inner_right\"]",
+   "hash": 3431672355
+  },
+  {
+   "state": "minecraft:dark_oak_door [\"facing\"=\"north\",\"half\"=\"upper\",\"hinge\"=\"left\",\"open\"=\"true\",\"powered\"=\"true\"]",
+   "hash": 2447424547
+  },
+  {
+   "state": "minecraft:dark_oak_shelf [\"facing\"=\"north\",\"powered\"=\"true\",\"side_chain\"=\"center\"]",
+   "hash": 385216947
+  },
+  {
+   "state": "minecraft:dark_prismarine_stairs [\"facing\"=\"south\",\"half\"=\"top\",\"shape\"=\"inner_left\"]",
+   "hash": 3718914816
+  },
+  {
+   "state": "minecraft:deepslate_brick_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"tall\"]",
+   "hash": 2341974826
+  },
+  {
+   "state": "minecraft:deepslate_diamond_ore []",
+   "hash": 811072115
+  },
+  {
+   "state": "minecraft:deepslate_tile_wall [\"east\"=\"none\",\"north\"=\"tall\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 3335089836
+  },
+  {
+   "state": "minecraft:diorite_wall [\"east\"=\"low\",\"north\"=\"none\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"none\"]",
+   "hash": 2095706171
+  },
+  {
+   "state": "minecraft:dragon_head [\"powered\"=\"false\",\"rotation\"=\"13\"]",
+   "hash": 3650318651
+  },
+  {
+   "state": "minecraft:end_stone_brick_wall [\"east\"=\"low\",\"north\"=\"none\",\"south\"=\"low\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 607402779
+  },
+  {
+   "state": "minecraft:exposed_copper_bars [\"east\"=\"false\",\"north\"=\"true\",\"south\"=\"false\",\"west\"=\"true\"]",
+   "hash": 47588443
+  },
+  {
+   "state": "minecraft:exposed_cut_copper_stairs [\"facing\"=\"east\",\"half\"=\"bottom\",\"shape\"=\"outer_left\"]",
+   "hash": 3727594680
+  },
+  {
+   "state": "minecraft:fire [\"age\"=\"10\",\"east\"=\"true\",\"north\"=\"true\",\"south\"=\"true\",\"up\"=\"false\",\"west\"=\"false\"]",
+   "hash": 2206120547
+  },
+  {
+   "state": "minecraft:fire [\"age\"=\"15\",\"east\"=\"true\",\"north\"=\"false\",\"south\"=\"false\",\"up\"=\"true\",\"west\"=\"true\"]",
+   "hash": 4175568016
+  },
+  {
+   "state": "minecraft:fire [\"age\"=\"6\",\"east\"=\"false\",\"north\"=\"true\",\"south\"=\"false\",\"up\"=\"true\",\"west\"=\"false\"]",
+   "hash": 1335690139
+  },
+  {
+   "state": "minecraft:furnace [\"facing\"=\"north\",\"lit\"=\"true\"]",
+   "hash": 762719808
+  },
+  {
+   "state": "minecraft:granite_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"none\"]",
+   "hash": 442892986
+  },
+  {
+   "state": "minecraft:gray_banner [\"rotation\"=\"10\"]",
+   "hash": 473130635
+  },
+  {
+   "state": "minecraft:gray_wool_stairs [\"facing\"=\"south\",\"half\"=\"top\",\"shape\"=\"straight\"]",
+   "hash": 2450821650
+  },
+  {
+   "state": "minecraft:green_wool_stairs [\"facing\"=\"north\",\"half\"=\"top\",\"shape\"=\"inner_right\"]",
+   "hash": 892726871
+  },
+  {
+   "state": "minecraft:iron_door [\"facing\"=\"south\",\"half\"=\"upper\",\"hinge\"=\"right\",\"open\"=\"false\",\"powered\"=\"true\"]",
+   "hash": 927382059
+  },
+  {
+   "state": "minecraft:jungle_door [\"facing\"=\"west\",\"half\"=\"upper\",\"hinge\"=\"left\",\"open\"=\"false\",\"powered\"=\"true\"]",
+   "hash": 944970513
+  },
+  {
+   "state": "minecraft:jungle_sign [\"rotation\"=\"4\"]",
+   "hash": 2399900092
+  },
+  {
+   "state": "minecraft:lava_cauldron []",
+   "hash": 1295496733
+  },
+  {
+   "state": "minecraft:light_blue_concrete_stairs [\"facing\"=\"west\",\"half\"=\"bottom\",\"shape\"=\"inner_left\"]",
+   "hash": 324700202
+  },
+  {
+   "state": "minecraft:light_gray_concrete_stairs [\"facing\"=\"north\",\"half\"=\"top\",\"shape\"=\"outer_left\"]",
+   "hash": 1296635458
+  },
+  {
+   "state": "minecraft:lime_bed [\"facing\"=\"north\",\"occupied\"=\"false\",\"part\"=\"foot\"]",
+   "hash": 3984270275
+  },
+  {
+   "state": "minecraft:magenta_banner [\"rotation\"=\"10\"]",
+   "hash": 803100002
+  },
+  {
+   "state": "minecraft:magenta_wool_stairs [\"facing\"=\"south\",\"half\"=\"top\",\"shape\"=\"straight\"]",
+   "hash": 1297695879
+  },
+  {
+   "state": "minecraft:mangrove_hanging_sign [\"attached\"=\"false\",\"rotation\"=\"11\"]",
+   "hash": 4272638264
+  },
+  {
+   "state": "minecraft:mangrove_stairs [\"facing\"=\"west\",\"half\"=\"bottom\",\"shape\"=\"inner_left\"]",
+   "hash": 4139052631
+  },
+  {
+   "state": "minecraft:mossy_cobblestone_wall [\"east\"=\"low\",\"north\"=\"tall\",\"south\"=\"low\",\"up\"=\"false\",\"west\"=\"none\"]",
+   "hash": 433857894
+  },
+  {
+   "state": "minecraft:mossy_stone_brick_stairs [\"facing\"=\"south\",\"half\"=\"bottom\",\"shape\"=\"outer_right\"]",
+   "hash": 3062699726
+  },
+  {
+   "state": "minecraft:mossy_stone_brick_wall [\"east\"=\"tall\",\"north\"=\"none\",\"south\"=\"none\",\"up\"=\"false\",\"west\"=\"tall\"]",
+   "hash": 2641181930
+  },
+  {
+   "state": "minecraft:mud_brick_wall [\"east\"=\"none\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"low\"]",
+   "hash": 2136643084
+  },
+  {
+   "state": "minecraft:mushroom_stem [\"down\"=\"true\",\"east\"=\"true\",\"north\"=\"false\",\"south\"=\"false\",\"up\"=\"true\",\"west\"=\"true\"]",
+   "hash": 2400193517
+  },
+  {
+   "state": "minecraft:nether_brick_wall [\"east\"=\"none\",\"north\"=\"none\",\"south\"=\"low\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 2353389334
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"basedrum\",\"note\"=\"1\",\"powered\"=\"true\"]",
+   "hash": 512009472
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"bit\",\"note\"=\"10\",\"powered\"=\"false\"]",
+   "hash": 1841830116
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"creeper\",\"note\"=\"10\",\"powered\"=\"true\"]",
+   "hash": 3558489931
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"dragon\",\"note\"=\"11\",\"powered\"=\"false\"]",
+   "hash": 2588056358
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"harp\",\"note\"=\"11\",\"powered\"=\"true\"]",
+   "hash": 1963836030
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"piglin\",\"note\"=\"12\",\"powered\"=\"false\"]",
+   "hash": 1420847265
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"snare\",\"note\"=\"12\",\"powered\"=\"true\"]",
+   "hash": 1006660398
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"trumpet_oxidized\",\"note\"=\"13\",\"powered\"=\"false\"]",
+   "hash": 4183154051
+  },
+  {
+   "state": "minecraft:note_block [\"instrument\"=\"xylophone\",\"note\"=\"13\",\"powered\"=\"true\"]",
+   "hash": 2284390004
+  },
+  {
+   "state": "minecraft:oak_door [\"facing\"=\"south\",\"half\"=\"lower\",\"hinge\"=\"right\",\"open\"=\"true\",\"powered\"=\"false\"]",
+   "hash": 1623523066
+  },
+  {
+   "state": "minecraft:oak_shelf [\"facing\"=\"south\",\"powered\"=\"true\",\"side_chain\"=\"unconnected\"]",
+   "hash": 3981007509
+  },
+  {
+   "state": "minecraft:orange_bed [\"facing\"=\"north\",\"occupied\"=\"true\",\"part\"=\"head\"]",
+   "hash": 805187726
+  },
+  {
+   "state": "minecraft:orange_wool_stairs [\"facing\"=\"west\",\"half\"=\"top\",\"shape\"=\"inner_left\"]",
+   "hash": 744794670
+  },
+  {
+   "state": "minecraft:oxidized_copper_trapdoor [\"facing\"=\"west\",\"half\"=\"bottom\",\"open\"=\"false\",\"powered\"=\"true\"]",
+   "hash": 2056182103
+  },
+  {
+   "state": "minecraft:pale_moss_carpet [\"bottom\"=\"true\",\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"low\",\"west\"=\"tall\"]",
+   "hash": 3643225419
+  },
+  {
+   "state": "minecraft:pale_oak_door [\"facing\"=\"west\",\"half\"=\"lower\",\"hinge\"=\"left\",\"open\"=\"false\",\"powered\"=\"false\"]",
+   "hash": 2394122809
+  },
+  {
+   "state": "minecraft:pale_oak_sign [\"rotation\"=\"1\"]",
+   "hash": 2970629382
+  },
+  {
+   "state": "minecraft:pink_banner [\"rotation\"=\"10\"]",
+   "hash": 496349566
+  },
+  {
+   "state": "minecraft:pink_wool_stairs [\"facing\"=\"north\",\"half\"=\"bottom\",\"shape\"=\"outer_left\"]",
+   "hash": 1135452109
+  },
+  {
+   "state": "minecraft:polished_andesite_stairs [\"facing\"=\"north\",\"half\"=\"top\",\"shape\"=\"straight\"]",
+   "hash": 812387707
+  },
+  {
+   "state": "minecraft:polished_blackstone_brick_wall [\"east\"=\"none\",\"north\"=\"none\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 3840659929
+  },
+  {
+   "state": "minecraft:polished_blackstone_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"low\",\"up\"=\"false\",\"west\"=\"tall\"]",
+   "hash": 4030796978
+  },
+  {
+   "state": "minecraft:polished_blackstone_wall [\"east\"=\"tall\",\"north\"=\"tall\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"low\"]",
+   "hash": 1186604497
+  },
+  {
+   "state": "minecraft:polished_cinnabar_wall [\"east\"=\"none\",\"north\"=\"tall\",\"south\"=\"none\",\"up\"=\"false\",\"west\"=\"tall\"]",
+   "hash": 2920373246
+  },
+  {
+   "state": "minecraft:polished_deepslate_wall [\"east\"=\"low\",\"north\"=\"tall\",\"south\"=\"none\",\"up\"=\"false\",\"west\"=\"none\"]",
+   "hash": 3398949818
+  },
+  {
+   "state": "minecraft:polished_diorite_stairs [\"facing\"=\"south\",\"half\"=\"top\",\"shape\"=\"outer_right\"]",
+   "hash": 3892990596
+  },
+  {
+   "state": "minecraft:polished_sulfur_wall [\"east\"=\"low\",\"north\"=\"tall\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"low\"]",
+   "hash": 1529325265
+  },
+  {
+   "state": "minecraft:polished_tuff_stairs [\"facing\"=\"west\",\"half\"=\"top\",\"shape\"=\"inner_right\"]",
+   "hash": 2017916702
+  },
+  {
+   "state": "minecraft:polished_tuff_wall [\"east\"=\"tall\",\"north\"=\"tall\",\"south\"=\"low\",\"up\"=\"true\",\"west\"=\"low\"]",
+   "hash": 4050891033
+  },
+  {
+   "state": "minecraft:poplar_hanging_sign [\"attached\"=\"false\",\"rotation\"=\"0\"]",
+   "hash": 2874649736
+  },
+  {
+   "state": "minecraft:poplar_trapdoor [\"facing\"=\"south\",\"half\"=\"top\",\"open\"=\"false\",\"powered\"=\"false\"]",
+   "hash": 2213100694
+  },
+  {
+   "state": "minecraft:prismarine_stairs [\"facing\"=\"north\",\"half\"=\"bottom\",\"shape\"=\"inner_right\"]",
+   "hash": 2394496105
+  },
+  {
+   "state": "minecraft:prismarine_wall [\"east\"=\"tall\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"tall\"]",
+   "hash": 793261366
+  },
+  {
+   "state": "minecraft:purple_stained_glass_pane [\"east\"=\"false\",\"north\"=\"false\",\"south\"=\"true\",\"west\"=\"true\"]",
+   "hash": 1334892791
+  },
+  {
+   "state": "minecraft:quartz_stairs [\"facing\"=\"west\",\"half\"=\"bottom\",\"shape\"=\"straight\"]",
+   "hash": 3110560089
+  },
+  {
+   "state": "minecraft:red_mushroom_block [\"down\"=\"true\",\"east\"=\"false\",\"north\"=\"false\",\"south\"=\"true\",\"up\"=\"true\",\"west\"=\"true\"]",
+   "hash": 355173234
+  },
+  {
+   "state": "minecraft:red_nether_brick_wall [\"east\"=\"none\",\"north\"=\"none\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 3173240251
+  },
+  {
+   "state": "minecraft:red_sandstone_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"low\"]",
+   "hash": 1555328824
+  },
+  {
+   "state": "minecraft:red_shulker_box [\"facing\"=\"down\"]",
+   "hash": 3411205982
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"none\",\"north\"=\"none\",\"power\"=\"15\",\"south\"=\"none\",\"west\"=\"none\"]",
+   "hash": 2136716394
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"none\",\"north\"=\"side\",\"power\"=\"15\",\"south\"=\"up\",\"west\"=\"side\"]",
+   "hash": 1554799879
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"none\",\"north\"=\"up\",\"power\"=\"2\",\"south\"=\"side\",\"west\"=\"up\"]",
+   "hash": 4121143056
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"side\",\"north\"=\"none\",\"power\"=\"3\",\"south\"=\"side\",\"west\"=\"none\"]",
+   "hash": 4064169364
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"side\",\"north\"=\"side\",\"power\"=\"4\",\"south\"=\"none\",\"west\"=\"side\"]",
+   "hash": 74786308
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"side\",\"north\"=\"up\",\"power\"=\"4\",\"south\"=\"up\",\"west\"=\"up\"]",
+   "hash": 2540469231
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"up\",\"north\"=\"none\",\"power\"=\"5\",\"south\"=\"up\",\"west\"=\"none\"]",
+   "hash": 3233063358
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"up\",\"north\"=\"side\",\"power\"=\"6\",\"south\"=\"side\",\"west\"=\"side\"]",
+   "hash": 2923993657
+  },
+  {
+   "state": "minecraft:redstone_wire [\"east\"=\"up\",\"north\"=\"up\",\"power\"=\"7\",\"south\"=\"none\",\"west\"=\"up\"]",
+   "hash": 3947415099
+  },
+  {
+   "state": "minecraft:resin_brick_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"low\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 2046955212
+  },
+  {
+   "state": "minecraft:resin_brick_wall [\"east\"=\"tall\",\"north\"=\"tall\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"low\"]",
+   "hash": 1802821696
+  },
+  {
+   "state": "minecraft:sandstone_wall [\"east\"=\"low\",\"north\"=\"none\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"low\"]",
+   "hash": 1471150438
+  },
+  {
+   "state": "minecraft:sculk []",
+   "hash": 1041212874
+  },
+  {
+   "state": "minecraft:skeleton_skull [\"powered\"=\"false\",\"rotation\"=\"3\"]",
+   "hash": 3112768319
+  },
+  {
+   "state": "minecraft:smooth_sandstone_stairs [\"facing\"=\"east\",\"half\"=\"bottom\",\"shape\"=\"outer_right\"]",
+   "hash": 1999325005
+  },
+  {
+   "state": "minecraft:spruce_door [\"facing\"=\"south\",\"half\"=\"upper\",\"hinge\"=\"right\",\"open\"=\"false\",\"powered\"=\"true\"]",
+   "hash": 3615448365
+  },
+  {
+   "state": "minecraft:spruce_shelf [\"facing\"=\"west\",\"powered\"=\"true\",\"side_chain\"=\"right\"]",
+   "hash": 1880423508
+  },
+  {
+   "state": "minecraft:stone_brick_stairs [\"facing\"=\"west\",\"half\"=\"bottom\",\"shape\"=\"inner_right\"]",
+   "hash": 877544654
+  },
+  {
+   "state": "minecraft:stone_brick_wall [\"east\"=\"tall\",\"north\"=\"none\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"none\"]",
+   "hash": 2166052602
+  },
+  {
+   "state": "minecraft:stripped_mangrove_log [\"axis\"=\"z\"]",
+   "hash": 2824533094
+  },
+  {
+   "state": "minecraft:sulfur_brick_wall [\"east\"=\"low\",\"north\"=\"tall\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"none\"]",
+   "hash": 301622564
+  },
+  {
+   "state": "minecraft:sulfur_stairs [\"facing\"=\"south\",\"half\"=\"top\",\"shape\"=\"outer_left\"]",
+   "hash": 41843804
+  },
+  {
+   "state": "minecraft:sulfur_wall [\"east\"=\"tall\",\"north\"=\"none\",\"south\"=\"tall\",\"up\"=\"false\",\"west\"=\"low\"]",
+   "hash": 3708414112
+  },
+  {
+   "state": "minecraft:tripwire [\"attached\"=\"false\",\"disarmed\"=\"true\",\"east\"=\"true\",\"north\"=\"false\",\"powered\"=\"true\",\"south\"=\"true\",\"west\"=\"true\"]",
+   "hash": 3067049529
+  },
+  {
+   "state": "minecraft:tuff_brick_wall [\"east\"=\"low\",\"north\"=\"low\",\"south\"=\"none\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 2922276680
+  },
+  {
+   "state": "minecraft:tuff_bricks []",
+   "hash": 3246918122
+  },
+  {
+   "state": "minecraft:tuff_wall [\"east\"=\"none\",\"north\"=\"tall\",\"south\"=\"tall\",\"up\"=\"true\",\"west\"=\"tall\"]",
+   "hash": 3629527690
+  },
+  {
+   "state": "minecraft:vine [\"east\"=\"true\",\"north\"=\"false\",\"south\"=\"true\",\"up\"=\"true\",\"west\"=\"false\"]",
+   "hash": 2985889946
+  },
+  {
+   "state": "minecraft:warped_fungus []",
+   "hash": 2872033764
+  },
+  {
+   "state": "minecraft:warped_trapdoor [\"facing\"=\"south\",\"half\"=\"bottom\",\"open\"=\"false\",\"powered\"=\"false\"]",
+   "hash": 196640448
+  },
+  {
+   "state": "minecraft:waxed_copper_golem_statue [\"copper_golem_pose\"=\"sitting\",\"facing\"=\"south\"]",
+   "hash": 688036487
+  },
+  {
+   "state": "minecraft:waxed_exposed_copper_door [\"facing\"=\"north\",\"half\"=\"upper\",\"hinge\"=\"left\",\"open\"=\"false\",\"powered\"=\"true\"]",
+   "hash": 975795639
+  },
+  {
+   "state": "minecraft:waxed_lightning_rod [\"facing\"=\"north\",\"powered\"=\"true\"]",
+   "hash": 450229519
+  },
+  {
+   "state": "minecraft:waxed_oxidized_copper_trapdoor [\"facing\"=\"west\",\"half\"=\"bottom\",\"open\"=\"false\",\"powered\"=\"false\"]",
+   "hash": 461423321
+  },
+  {
+   "state": "minecraft:waxed_weathered_copper_door [\"facing\"=\"west\",\"half\"=\"lower\",\"hinge\"=\"left\",\"open\"=\"true\",\"powered\"=\"false\"]",
+   "hash": 1518066238
+  },
+  {
+   "state": "minecraft:weathered_copper_chest [\"facing\"=\"north\",\"type\"=\"single\"]",
+   "hash": 3130637694
+  },
+  {
+   "state": "minecraft:weathered_cut_copper_stairs [\"facing\"=\"south\",\"half\"=\"top\",\"shape\"=\"inner_left\"]",
+   "hash": 2932082820
+  },
+  {
+   "state": "minecraft:white_glazed_terracotta [\"facing\"=\"east\"]",
+   "hash": 1920140214
+  },
+  {
+   "state": "minecraft:yellow_bed [\"facing\"=\"east\",\"occupied\"=\"false\",\"part\"=\"head\"]",
+   "hash": 3701794523
+  },
+  {
+   "state": "minecraft:yellow_wool_stairs [\"facing\"=\"west\",\"half\"=\"bottom\",\"shape\"=\"inner_left\"]",
+   "hash": 3277264283
+  },
+  {
+   "state": "minecraft:air []",
+   "hash": 3690217760
+  }
+ ]
+}

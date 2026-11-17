@@ -1,20 +1,14 @@
 // 固定动画时间验证格内动态候选、透明孔洞、方块遮挡，并比较开启与关闭层次的像素。
-const { chromium } = require(
-  process.env.PLAYWRIGHT_MODULE ||
-    "/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/playwright",
-);
+// 先运行 npm run demo；R2_URL 指定其他地址，R2_OUTPUT 指定结果目录。
 const fs = require("node:fs"),
+  os = require("node:os"),
+  path = require("node:path"),
   assert = require("node:assert/strict");
-const out = process.env.R2_OUTPUT || "/tmp/r2-special-check";
+const { launch, base } = require("./launch.cjs");
+const out = process.env.R2_OUTPUT || path.join(os.tmpdir(), "r2-special-check");
 fs.mkdirSync(out, { recursive: true });
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.CHROME ||
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-webgl", "--ignore-gpu-blocklist", "--use-angle=metal"],
-  });
+  const browser = await launch();
   try {
     const page = await browser.newPage({
         viewport: { width: 1920, height: 1080 },
@@ -22,11 +16,10 @@ fs.mkdirSync(out, { recursive: true });
       }),
       errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto(
-      (process.env.R2_URL || "http://127.0.0.1:2413") + "/?scene=special",
-    );
+    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    await page.goto(base + "/?scene=special");
     await page.waitForFunction(
-      () => globalThis.r2?.state.times.length >= 30,
+      () => globalThis.r2?.state.ready && r2.state.times.length >= 30,
       null,
       { timeout: 90000 },
     );
@@ -49,7 +42,7 @@ fs.mkdirSync(out, { recursive: true });
       document.querySelector("aside").style.visibility = "hidden";
     });
     const initial = await pixels();
-    await page.screenshot({ path: out + "/special.png" });
+    await page.screenshot({ path: path.join(out, "special.png") });
     await page.evaluate(
       () => (document.querySelector("#hierarchy").checked = false),
     );
@@ -124,7 +117,7 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(await page.evaluate(() => r2.gl.getError()), 0);
     assert.deepEqual(errors, []);
     fs.writeFileSync(
-      out + "/results.json",
+      path.join(out, "results.json"),
       JSON.stringify(
         { changed, staticBoundaryChannels, probes, errors },
         null,

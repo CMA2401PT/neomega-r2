@@ -4,7 +4,8 @@ const PREFILTER = `#version 300 es
 precision highp float;
 uniform sampler2D uImage;
 out vec4 outColor;
-vec3 texel(ivec2 p){vec4 s=texelFetch(uImage,p,0);return min(s.rgb/s.a,vec3(50));}
+// 宽或高为 1 时，相邻纹素落在图像外；夹到边缘，避免 0/0 污染整幅画面。
+vec3 texel(ivec2 p){vec4 s=texelFetch(uImage,min(p,textureSize(uImage,0)-1),0);return min(s.rgb/s.a,vec3(50));}
 void main(){
  ivec2 p=ivec2(gl_FragCoord.xy)*2;
  outColor=vec4((texel(p)+texel(p+ivec2(1,0))+texel(p+ivec2(0,1))+texel(p+1))*.25,1);

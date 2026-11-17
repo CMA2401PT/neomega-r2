@@ -1,11 +1,9 @@
 // 在真实 Möbius 应用里验证海面、累积、拍照和拾取；固定水面时刻，让画质比较可重复。
-const { chromium } = require(
-  process.env.PLAYWRIGHT_MODULE ||
-    "/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/playwright",
-);
-const fs = require("node:fs"), assert = require("node:assert/strict");
-const base = process.env.R2_URL || "http://127.0.0.1:2430";
-const out = process.env.R2_OUTPUT || "/tmp/r2mobius/astra";
+// R2_URL 指向已运行的 neomega-viewer-r2（默认 2412），R2_OUTPUT 指定截图目录。
+const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), assert = require("node:assert/strict");
+const { launch } = require("./launch.cjs");
+const base = process.env.R2_URL || "http://127.0.0.1:2412";
+const out = process.env.R2_OUTPUT || path.join(os.tmpdir(), "r2-ocean");
 fs.mkdirSync(out, { recursive: true });
 
 /** GPU 查询只统计热身后的样本，不把浏览器回调上限当成渲染耗时。
@@ -20,11 +18,7 @@ function summarize(values) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-webgl", "--ignore-gpu-blocklist", "--use-angle=metal"],
-  });
+  const browser = await launch();
   const result = { errors: [], timing: [], checks: {} };
   try {
     const page = await browser.newPage({

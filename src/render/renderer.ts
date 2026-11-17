@@ -2,8 +2,6 @@ import { createTextures, type TextureSet } from "./textures.ts";
 import { createAccumulator } from "./accumulator.ts";
 import { WorldGPU } from "./world-gpu.ts";
 import { ObjectStore } from "../objects/store.ts";
-import { prepareRegion } from "../scene/prepare.ts";
-import { gridRegions } from "../scene/grid.ts";
 import type { Camera } from "../contracts.ts";
 
 import {
@@ -321,42 +319,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     for (const q of queries) gl.deleteQuery(q);
     queries.length = 0;
     times.length = 0;
-  }
-  // 准备器需要知道片段最远伸出多少格，才能收集相邻来源。
-  const preparation = {
-    ...catalog,
-    fragmentReach: Math.max(
-      0,
-      ...catalog.models.flatMap((m) =>
-        (m.fragments || []).flatMap((p) => p.offset.map(Math.abs)),
-      ),
-    ),
-  };
-  /** 验证页的固定场景：转换为来源区域后与存档走同一路径，已登记的特殊对象一并准备。
-   */
-  function setGrid(scene: { grid: { size: number[] } }, cells: Uint32Array): void {
-    gl.useProgram(program);
-    world?.dispose();
-    const size = scene.grid.size,
-      align = (v: number) => Math.ceil(v / 128) * 128;
-    world = new WorldGPU(gl, uniforms, { capacityWords: 4 * 1024 * 1024 });
-    generation++;
-    world.setWindow([0, -64, 0], [align(size[0]), 512, align(size[2])]);
-    const regions = gridRegions(size, cells),
-      references = objects.references();
-    for (const key of regions.keys()) {
-      const [x, z] = key.split("/").map(Number);
-      world!.install(
-        prepareRegion({
-          x,
-          z,
-          regions,
-          catalog: preparation,
-          objects: references,
-        }),
-      );
-    }
-    resetTiming();
   }
   function createWorld(options: { capacityWords?: number } = {}): WorldGPU {
     gl.useProgram(program);
@@ -778,7 +740,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     setTextures(set: TextureSet): void {
       gl.useProgram(program);
       textures.install(set);
-      preparation.models = catalog.models;
       generation++;
       resetTiming();
     },
@@ -791,7 +752,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       return objects;
     },
     createWorld,
-    setGrid,
     draw,
     compile,
     /** 这一档是否已经编译好、可以绘制。 */
