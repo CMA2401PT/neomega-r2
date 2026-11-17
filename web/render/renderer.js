@@ -15,8 +15,10 @@ import {
   PERSPECTIVE_SPAN as SPAN,
 } from "./camera.js";
 /** 创建射线绘制器；宿主负责相机、帧循环和数据来源，绘制器不读取 UI。
+ * 启动时只编译预览程序。静止累积与拍照用的程序更大，在 Windows 的 D3D 后端可能要编一两分钟，
+ * 宿主在第一次需要时调用 prepareAccumulation()，编译期间预览照常绘制。
  * @param {HTMLCanvasElement} canvas
- * @param {{assets?:string}} options
+ * @param {{assets?:string,onProgress?:(step:{index:number,total:number,label:string})=>void}} options
  */
 export async function createRenderer(canvas, { assets = "/r2/assets/", onProgress } = {}) {
   const gl = canvas.getContext("webgl2", {
@@ -78,15 +80,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     return program;
   }
-  // 两个程序逐个编译并报告进度：Windows 的 D3D 后端编一个大射线程序可能要几十秒，
-  // 让人对着空白页面等是最糟的体验。宿主把进度显示在页面顶部那行提示里。
-  const modules = ["预览射线程序", "累积射线程序"];
-  const programs = [];
-  for (const [index, label] of modules.entries()) {
-    onProgress?.({ index: index + 1, total: modules.length, label });
-    programs.push(await createRayProgram(index));
-  }
-  let program = programs[1];
+  // Windows 的 D3D 后端编射线程序可能要几十秒，让人对着空白页面等是最糟的体验；宿主把进度显示在页面顶部那行提示里。
+  onProgress?.({ index: 1, total: 1, label: "预览射线程序" });
+  /** 预览与累积程序；累积程序第一次需要时才编译。 @type {[WebGLProgram, WebGLProgram|null]} */
+  const programs = [await createRayProgram(0), null];
+  let program = programs[0];
   gl.useProgram(program);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -149,37 +147,44 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     return { unit, target, name, texture };
   });
   let objects = new ObjectStore(gl, uniforms);
-  const locations = programs.map(
-    (program) =>
-      new Map(
-        [...uniforms.keys()].map((name) => [
-          name,
-          gl.getUniformLocation(program, name),
-        ]),
-      ),
-  );
-  // 累积程序使用完整材质；预览沿用资源仓库分配的纹理单元，不另维护一份编号表。
+  /** @param {WebGLProgram} target */
+  const locationsOf = (target) =>
+    new Map([...uniforms.keys()].map((name) => [name, gl.getUniformLocation(target, name)]));
+  /** @type {[Map<string,WebGLUniformLocation|null>, Map<string,WebGLUniformLocation|null>|null]} */
+  const locations = [locationsOf(programs[0]), null];
+  // 两个程序的采样器都用全部贴图；累积程序沿用资源仓库给预览程序分配的纹理单元，不另维护一份编号表。
   const samplerTypes = [
     gl.SAMPLER_2D,
     gl.SAMPLER_2D_ARRAY,
     gl.UNSIGNED_INT_SAMPLER_2D,
     gl.UNSIGNED_INT_SAMPLER_3D,
   ];
-  gl.useProgram(programs[0]);
-  for (
-    let i = 0;
-    i < gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
-    i++
-  ) {
-    const { name, type } = gl.getActiveUniform(program, i);
-    if (samplerTypes.includes(type)) {
-      gl.uniform1i(
-        locations[0].get(name),
-        gl.getUniform(program, uniforms.get(name)),
-      );
-    }
+  /** @type {Promise<void>|null} */
+  let accumulation = null;
+  /** 编译累积与拍照用的程序；只编译一次，重复调用返回同一个 Promise。失败后可以再次调用重试。 */
+  function prepareAccumulation() {
+    accumulation ??= createRayProgram(1).then(
+      (compiled) => {
+        const own = locationsOf(compiled),
+          current = gl.getParameter(gl.CURRENT_PROGRAM);
+        gl.useProgram(compiled);
+        for (let i = 0; i < gl.getProgramParameter(compiled, gl.ACTIVE_UNIFORMS); i++) {
+          const { name, type } = gl.getActiveUniform(compiled, i),
+            from = locations[0].get(name);
+          if (samplerTypes.includes(type) && from)
+            gl.uniform1i(own.get(name), gl.getUniform(programs[0], from));
+        }
+        gl.useProgram(current);
+        locations[1] = own;
+        programs[1] = compiled;
+      },
+      (error) => {
+        accumulation = null;
+        throw error;
+      },
+    );
+    return accumulation;
   }
-  gl.useProgram(program);
   const accumulator = createAccumulator(gl, vertex);
   // 累积样本的随机种子；每帧不同，样本之间才互不相关。
   let frame = 0;
@@ -269,6 +274,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       objects: drawObjects = true,
     },
   ) {
+    if (!programs[pass]) throw Error("累积程序尚未编译，先调用 prepareAccumulation()");
     if (program !== programs[pass]) {
       program = programs[pass];
       for (const [name, location] of locations[pass])
@@ -331,7 +337,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   }
   /** 只绘制当前已发布的数据；每帧上传的实例变换也计入 GPU 时间。
    * accumulate 为真表示相机、设置与场景都和上一帧相同：这一帧作为累积样本加到画面上，
-   * 带抗锯齿、软阴影和一次漫反射反弹；为假时重新出一帧干净的预览。
+   * 带抗锯齿、软阴影和一次漫反射反弹；为假时重新出一帧干净的预览。累积程序尚未编译好时不画，返回 false。
    * ocean 指定无限海面的世界高度；省略时只绘制场景里的体素水。
    * sun 是指向太阳的方向，太阳在地平线下时由月亮照明；fog 是远景雾接近不透明的距离，默认为观察窗口半径。
    * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
@@ -355,6 +361,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       synchronize = false,
     },
   ) {
+    if (accumulate && !programs[1]) return false;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
@@ -399,21 +406,22 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     }
     if (synchronize)
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    return true;
   }
-  /** 离屏渲染一张高质量照片：每个像素累积 samples 个样本，光线最多反弹 bounces 次。
+  /** 拍一张高质量照片：相机固定，每个像素不停累积样本（抗锯齿、软阴影、光线最多反弹 bounces 次），没有样本上限。
    * 一个样本要跑很久，整张画面一次画完可能触发 Windows 的显卡超时重置，
    * 所以画面切成小块分批提交。GPU 上始终排着两批，一批画完时下一批已经在等，不必空等下一帧；
    * 批量按完成速度调整：每帧都把队列画空就加倍，一批拖过两帧就减半。
-   * 宿主在每个动画帧调用 step()，期间暂停交互绘制；完成后用 png() 取图，再 dispose()。
+   * 宿主在每个动画帧调用 step() 推进、present() 把当前结果显示到画布上，期间暂停交互绘制；
+   * 满意时用 png() 取图，再 dispose()。需要先 prepareAccumulation()。
    * @param {{position:number[],yaw:number,pitch:number,ortho?:number}} camera
-   * @param {{width:number,height:number,samples:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number,ocean?:number,objects?:boolean}} options
+   * @param {{width:number,height:number,bounces?:number,time?:number,shadows?:boolean,sun?:number[],fog?:number,ocean?:number,objects?:boolean}} options
    */
   function photograph(
     camera,
     {
       width,
       height,
-      samples,
       objects = true,
       bounces = 4,
       time = 0,
@@ -423,54 +431,59 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       ocean,
     },
   ) {
+    if (!programs[1]) throw Error("拍照需要先调用 prepareAccumulation()");
     const film = createAccumulator(gl, vertex),
       tiles = [];
     film.resize(width, height);
     film.clear();
     for (let y = 0; y < height; y += PHOTO_TILE)
       for (let x = 0; x < width; x += PHOTO_TILE) tiles.push([x, y]);
-    const total = samples * tiles.length,
-      view = { ...camera, position: [...camera.position] };
+    const view = { ...camera, position: [...camera.position] };
     let done = 0,
+      finished = 0,
       batch = 1,
       exposure = 1;
-    // 已提交、尚未完成的批次；age 是提交后经过的 step 次数。
-    /** @type {{sync:WebGLSync,age:number}[]} */
+    // 已提交、尚未完成的批次；end 是这一批画完后累计画完的小块数，age 是提交后经过的 step 次数。
+    /** @type {{sync:WebGLSync,end:number,age:number}[]} */
     const pending = [];
-    /** 把接下来的 batch 个小块提交给 GPU，末尾插一个栅栏。 */
+    /** 绑定照片缓冲并写入输入；每轮样本开始时也调用一次，换随机种子。 */
+    function begin() {
+      exposure = prepare(view, {
+        width,
+        height,
+        pass: film.begin(true),
+        bounces,
+        objects,
+        time,
+        debug: 0,
+        hierarchy: true,
+        fragments: true,
+        shadows,
+        sun,
+        fog,
+        ocean,
+      });
+    }
+    /** 把接下来的 batch 个小块提交给 GPU，末尾插一个栅栏。两次提交之间画布可能被显示用过，先重新绑定。 */
     function submit() {
+      begin();
       gl.enable(gl.SCISSOR_TEST);
-      for (const end = Math.min(total, done + batch); done < end; done++) {
+      for (const end = done + batch; done < end; done++) {
         const tile = done % tiles.length;
-        // 每轮样本开始时换一次随机种子，同一轮的各个小块共用相机和光照。
-        if (tile === 0)
-          exposure = prepare(view, {
-            width,
-            height,
-            pass: film.begin(true),
-            bounces,
-            objects,
-            time,
-            debug: 0,
-            hierarchy: true,
-            fragments: true,
-            shadows,
-            sun,
-            fog,
-            ocean,
-          });
+        if (tile === 0 && done > 0) begin();
         gl.scissor(...tiles[tile], PHOTO_TILE, PHOTO_TILE);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
       gl.disable(gl.SCISSOR_TEST);
       pending.push({
         sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
+        end: done,
         age: 0,
       });
       gl.flush();
     }
     return {
-      /** 收回已完成的批次，把队列补到两批。返回是否已全部画完。 */
+      /** 收回已完成的批次，把队列补到两批。 */
       step() {
         for (const item of pending) item.age++;
         if (pending[0]?.age > 2) {
@@ -480,17 +493,29 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         while (
           pending.length &&
           gl.getSyncParameter(pending[0].sync, gl.SYNC_STATUS) === gl.SIGNALED
-        )
-          gl.deleteSync(pending.shift().sync);
-        if (done === total) return pending.length === 0;
+        ) {
+          const item = pending.shift();
+          finished = item.end;
+          gl.deleteSync(item.sync);
+        }
         if (!pending.length && done > 0)
           batch = Math.min(batch * 2, tiles.length);
-        while (pending.length < 2 && done < total) submit();
-        return false;
+        while (pending.length < 2) submit();
       },
-      /** 已完成的比例，0 到 1。 */
-      get progress() {
-        return done / total;
+      /** 每个像素已画完的样本数（整张画面都画完的轮数）。 */
+      get samples() {
+        return Math.floor(finished / tiles.length);
+      },
+      /** 把当前累积结果显示到画布上；画布暂时改成照片尺寸，由页面样式缩放到窗口。
+       * 第一轮画完之前还有没有样本的像素，画布保留原来的画面。 */
+      present() {
+        if (finished < tiles.length) return;
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+          resetTiming();
+        }
+        film.present({ exposure, raw: false });
       },
       /** 把累积结果做色调映射后读回，编码成 PNG。 */
       png() {
@@ -639,6 +664,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     createWorld,
     setGrid,
     draw,
+    prepareAccumulation,
+    /** 累积程序是否已经可用。 */
+    get accumulationReady() {
+      return programs[1] !== null;
+    },
     pick,
     photograph,
     resetTiming,
@@ -687,7 +717,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       gl.deleteTexture(pickTexture);
       gl.deleteFramebuffer(pickFramebuffer);
       gl.deleteVertexArray(vao);
-      for (const program of programs) gl.deleteProgram(program);
+      for (const program of programs) if (program) gl.deleteProgram(program);
     },
   };
 }
