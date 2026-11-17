@@ -31,3 +31,15 @@ export type { WorkerRequest, WorkerResponse } from "./scene/worker.ts";
 
 import type { createRenderer } from "./render/renderer.ts";
 export type Renderer = Awaited<ReturnType<typeof createRenderer>>;
+export {
+  r2linkSource,
+  encodeMessage,
+  decodeMessage,
+  R2LINK_VERSION,
+  type R2LinkSource,
+  type R2LinkOptions,
+  type R2LinkState,
+  type R2LinkWelcome,
+  type R2LinkScene,
+  type R2LinkCamera,
+} from "./source/r2link.ts";

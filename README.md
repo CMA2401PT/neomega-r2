@@ -2,7 +2,7 @@
 
 R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部件。射线先穿过空间格子，再检查格内登记的表面：立方体直接求命中面，复杂模型检查登记到该格的四边形，活动部件把射线变换到局部坐标求交。所有命中共用排序、光照和透明合成。
 
-本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来（HTTP、内存、WebSocket）由宿主实现数据源决定。存档读取、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
+本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来由宿主实现数据源决定，核心自带内存数据源与 R2Link 数据源。存档读取、相机与界面由 [neomega-viewer-r2 应用](../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
 
 浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。宿主只从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
 
@@ -198,6 +198,21 @@ world.commit();
 
 `memorySource` 在下一个微任务交付需要的区域；`commit` 只重新提交方块或对象有变化、且仍被需要的区域。对象按近景圆心与半径筛选，规则与 Go 的 `worlddata.Objects` 相同。自己实现数据源时，可以用 `encodeRegion(sections)` 把每个 section 的 4096 个哈希编码成上面的格式。
 
+### R2Link 数据源
+
+数据源也可以是另一个进程：游戏机器人、服务器插件或存档服务监听 WebSocket，浏览器用 `r2linkSource` 连接。会话的每次 `want` 变成一条消息，数据源回送区域、对象和相机指令，协议见 [neomega-r2link](../neomega-r2link/README.md)：
+
+```ts
+const source = r2linkSource("ws://127.0.0.1:2414/r2link", {
+  onCamera: (camera) => moveCamera(camera),
+  onState: (state, message) => showConnection(state, message),
+});
+const { scene, camera } = await source.welcome; // 首次连接失败时拒绝
+const session = new WorldSession(renderer, source, { registry });
+```
+
+断线后保留已显示的内容，每 3 秒重连；重连握手后重新发送完整的订阅，数据源重发全部内容。`source.chunks()` 请求区块占用表，供地图显示世界分布；`source.clippedSections` 是数据源报告的超高 section 数。
+
 ## 模块边界
 
 为了让来源和绘制互不牵制，浏览器部分以纯数据为边界，公共数据类型见 [contracts.ts](src/contracts.ts)，公开入口为 [index.ts](src/index.ts)。
@@ -209,10 +224,9 @@ world.commit();
 | `src/scene/prepare.ts` | 接收压缩区域与候选对象，生成可上传数据；不读取 UI，不持有 WebGL。 |
 | `src/scene/worker.ts` | 在后台线程缓存来源区域并调用准备器；不决定加载范围。 |
 | `src/session/session.ts` | 由相机位置决定需要的区域和近景对象，向数据源订阅，排队准备并逐帧发布；不知道数据来自哪里。 |
-| `src/source/` | 方块状态哈希、区域编码和内存世界数据源。 |
+| `src/source/` | 方块状态哈希、区域编码、内存世界数据源和 R2Link 数据源。 |
 | `src/render/world-gpu.ts` | 管理循环区域目录、增量上传与地址回收。 |
 | `src/render/renderer.ts`、`ray.frag` | 接收相机和帧参数，执行统一射线绘制；不读取存档。 |
-| `object/`、`effector/`、`blockactor/` | Go 侧特殊对象描述、无 NBT 特效路由和需要 NBT 的外观处理器。 |
 | `src/objects/`、`src/effects/` | 通用实例资源管理及各类外观、动画实现。 |
 | `demo/` | 固定验证场景与最小宿主，经内存数据源走和存档相同的会话路径。 |
 
@@ -226,9 +240,9 @@ GPU 的目录覆盖容量为 4096×4096×512，宿主使用不超过这个容量
 
 添加实现需要连接两端：
 
-1. Go 端在 `effector/` 添加构造器，或在 `blockactor/` 实现 `Handler`，输出 `object.Descriptor`。描述包含稳定标识、类型、位置和该类型的数据。
+1. 数据源输出对象描述（稳定标识、类型、位置和该类型的数据）。Go 数据源可用 [neomega-r2link](../neomega-r2link/README.md) 的 `effector` 添加构造器，或在 `blockactor` 实现 `Handler`，得到 `object.Descriptor`。
 2. 浏览器端添加外观工厂，返回贴图、局部盒体、动画包围盒和逐帧变换。特效放在 `src/effects/`；NBT 外观可在 `src/blockactors/` 按类型增加文件。
-3. 应用在 Go 入口注册来源处理器，在浏览器入口通过 `ObjectRegistry` 注册同名工厂。绘制循环无需添加方块类型判断。
+3. 数据源注册处理器，浏览器入口通过 `ObjectRegistry` 注册同名工厂。绘制循环无需添加方块类型判断。
 
 [附魔书](src/effects/enchanting-book.ts) 是现有实例：七个盒体共享贴图，逐帧只更新变换。`ObjectStore` 管理实例槽、私有贴图和生命周期，场景准备器把包围盒覆盖的格子登记为候选，着色器在格内求交。句柄带代数，卸载后的旧格子引用不会误指向复用槽位的新对象。
 
