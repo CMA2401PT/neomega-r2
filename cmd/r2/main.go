@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	r2 "neomega-r2"
+	"neomega-view-utils/r2assets"
 	"net/http"
 	"os"
 )
@@ -17,7 +18,7 @@ func main() {
 	corePath := flag.String("core", "", "开发时直接读取渲染核心的构建目录（dist）")
 
 	flag.Parse()
-	catalog, err := r2.OpenCatalog()
+	catalog, err := r2assets.OpenCatalog()
 	if err != nil {
 		panic(err)
 	}
@@ -55,7 +56,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(catalog.Statistics)
 	})
-	assets, err := fs.Sub(r2.Files, "assets")
+	assets, err := fs.Sub(r2assets.Files, "assets")
 	if err != nil {
 		panic(err)
 	}

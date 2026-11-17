@@ -21,7 +21,7 @@ test("贴图上传保留六张图的格式、布局与 mip，并释放被替换�
   });
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    const data = await readFile(new URL("../assets/" + url, import.meta.url));
+    const data = await readFile(new URL("../../neomega-view-utils/r2assets/assets/" + url, import.meta.url));
     return { arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), json: async () => JSON.parse(data) };
   };
   try {

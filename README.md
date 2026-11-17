@@ -119,7 +119,7 @@ labPBR 是把材质属性编码到配套图片中的约定。同名 `_n.png` 保
 
 复杂模型的三张图集共用装箱区域，保留各张图片的宽高比，在同一上限内缩放。图集颜色使用未预乘的 RGBA8，由着色器转线性；法线和高光仍保留原值。完整方块的三张数组由 `uSurfaces`、`uSurfaceNormals`、`uSurfaceSpecular` 读取，复杂模型对应 `uAtlas`、`uAtlasNormals`、`uAtlasSpecular`。上传与释放集中在 [textures.ts](src/render/textures.ts)，纹理单元依次为数组 6／7／9、图集 5／0／14。
 
-宿主只需调用 `r2.BuildTextures(path, maxSize)` 得到 `TextureSet`；空路径表示原版，尺寸上限为零表示默认值。返回值包含图片和匹配的共享模型表，可以用 `set.WriteTo(writer)` 写成单个二进制响应。浏览器通过 `decodeTextures(buffer)` 解码，再交给 `renderer.setTextures(set)` 上传。应用的切换流程还会让后台准备器用新分类重建已显示区域，并在同一帧发布空间目录和贴图；准备期间继续显示旧场景。
+宿主只需调用 `neomega-view-utils/r2assets` 的 `BuildTextures(path, maxSize)` 得到 `TextureSet`；空路径表示原版，尺寸上限为零表示默认值。返回值包含图片和匹配的共享模型表，可以用 `set.WriteTo(writer)` 写成单个二进制响应。浏览器通过 `decodeTextures(buffer)` 解码，再交给 `renderer.setTextures(set)` 上传。应用的切换流程还会让后台准备器用新分类重建已显示区域，并在同一帧发布空间目录和贴图；准备期间继续显示旧场景。
 
 仅三张数组的显存为 `563 × 4 × 3 × (S² + (S/2)² + … + 1)` 字节，其中 `S` 是实际层边长。图集另占 `宽 × 高 × 4 × 3` 字节，共享模型表、实例贴图和场景池另计。
 
@@ -129,8 +129,7 @@ labPBR 是把材质属性编码到配套图片中的约定。同名 `_n.png` 保
 
 | 位置 | 责任 |
 |---|---|
-| `catalog.go`、`assets/` | 共享状态、模型、贴图与四边形资源。 |
-| `textures.go`、`internal/texturepack/` | 读取材质包、重建三通道贴图及透明度派生表。 |
+| `neomega-view-utils/r2assets` | 默认资源包（共享状态、模型、贴图与四边形资源）；读取材质包、重建三通道贴图及透明度派生表。核心只依赖资源包的文件格式。 |
 | `src/render/textures.ts` | 解码完整贴图集，上传和释放共享 GPU 纹理。 |
 | `src/scene/prepare.ts` | 接收压缩区域与候选对象，生成可上传数据；不读取 UI，不持有 WebGL。 |
 | `src/scene/worker.ts` | 在后台线程缓存来源区域并调用准备器；不决定加载范围。 |
@@ -160,7 +159,7 @@ GPU 的目录覆盖容量为 4096×4096×512，宿主使用不超过这个容量
 
 ## 资源与运行
 
-`cmd/build-models` 读取本模块保存的输入资源，生成共享表。模型、原始图集、材质表和附魔书资源来自 viewer-core `8afee71`，运行时不导入该模块。原始图集保存在 `sourceassets/atlas.png`；贴图名字直接取自 `sourceassets/geometry.nvtables` 中的 `Surface.Texture`，UV 与染色也来自同一份几何。生成器输出 `assets/textures.json` 的名字和合成配方，以及供每次合成使用的 `base-*` 原版基表；原版六张贴图由相同的合成器生成。许可证见 [LICENSE](LICENSE) 和 [资源说明](sourceassets/THIRD_PARTY_NOTICES.txt)。核心 Go 依赖仅为状态目录与 NBT 类型。
+资源包及其生成工具位于 [neomega-view-utils/r2assets](../neomega-view-utils/README.md)；渲染器通过 `assets` 选项给出的 URL 读取，`cmd/r2` 在 `/assets/` 提供默认资源包。
 
 先构建渲染核心（需要 Node.js 22.18 以上，首次执行 `npm ci`），再从工作区根目录启动验证页：
 
@@ -181,7 +180,7 @@ go run ./apps/neomega-viewer-r2/cmd/viewer -listen 127.0.0.1:2412
 资源重新生成与检查：
 
 ```sh
-go generate ./neomega-r2
+go generate ./neomega-view-utils/r2assets
 ./check.sh neomega-r2
 npm --prefix neomega-r2 run check
 npm --prefix neomega-r2 test

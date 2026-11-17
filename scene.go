@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"neomega-view-utils/r2assets"
 )
 
 // Grid 每格保存本格模型及附加片段列表的索引，射线只访问当前格。
@@ -22,7 +24,7 @@ func (g *Grid) index(p [3]int) int         { return (p[0] + g.Size[0]*(p[1]+g.Si
 func (g *Grid) Set(p [3]int, model uint32) { g.Cells[g.index(p)] = model }
 
 // PlaceFragments 将跨格片段的索引分发到各格，模型形状与 UV 不在加载时计算。
-func (g *Grid) PlaceFragments(catalog *Catalog) int {
+func (g *Grid) PlaceFragments(catalog *r2assets.Catalog) int {
 	lists := map[int][]uint32{}
 	refs := 0
 	for z := range g.Size[2] {
@@ -76,7 +78,7 @@ type Scene struct {
 }
 
 // BuildScene 建立可复现的独立输入；所有模式只查表填编号，模型表不随场景重新生成。
-func BuildScene(catalog *Catalog, name string) (*Scene, error) {
+func BuildScene(catalog *r2assets.Catalog, name string) (*Scene, error) {
 	start := time.Now()
 	scene := &Scene{Grid: NewGrid([3]int{64, 32, 64}), Camera: [3]float64{32, 16, 58}, Target: [3]float64{32, 3, 25}, Names: map[string]uint32{}}
 	states := make([]string, 0, len(catalog.States))
