@@ -240,7 +240,7 @@ go run ./apps/neomega-viewer-r2/cmd/viewer -listen 127.0.0.1:2412
 
 ```sh
 go generate ./neomega-view-utils/r2assets
-./check.sh neomega-r2
+go vet ./neomega-r2/... && go test ./neomega-r2/...
 npm --prefix neomega-r2 run check
 npm --prefix neomega-r2 test
 R2_URL=http://127.0.0.1:2415 node neomega-r2/experiment/check.cjs
@@ -250,4 +250,4 @@ R2_URL=http://127.0.0.1:2412 node neomega-r2/experiment/ocean.cjs
 
 浏览器回归验证玻璃厚度、跨格片段、活动部件、透明孔与遮挡。`ocean.cjs` 连接应用的 Möbius 场景，固定夜间光照与水面时刻，输出预览、128 样本累积、照片、水下和窗口外视图，并检查拾取与累积时刻。GPU 查询与单像素同步读回耗时一起写到 `/tmp/r2mobius/astra/results.json`，截图位于同一目录。
 
-Java 存档流式更新的验收见应用的 `experiment/`。固定版本的旧 brickmap 对照数据保留在 [实验报告](experiment/README.md)，不代表当前应用的加载行为。
+Java 存档流式更新与 GPU 对照见[应用的验收说明](../apps/neomega-viewer-r2/experiment/README.md)。早期固定窗口研究的报告与数据见提交 `4a37e99`。
