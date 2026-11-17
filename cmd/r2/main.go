@@ -22,10 +22,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	table, err := r2assets.OpenStates()
+	if err != nil {
+		panic(err)
+	}
+	models := r2.StateModels(table)
 	scenes := map[string]*r2.Scene{}
 	data := map[string][]byte{}
 	for _, name := range []string{"special", "showcase", "fences", "cutouts", "cubes", "glass8", "glass16", "spill"} {
-		scene, err := r2.BuildScene(catalog, name)
+		scene, err := r2.BuildScene(catalog, models, name)
 		if err != nil {
 			panic(err)
 		}

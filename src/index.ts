@@ -10,7 +10,7 @@ export { decodeTextures, type TextureSet, type TextureInfo } from "./render/text
 export { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./render/camera.ts";
 export { ObjectRegistry } from "./objects/registry.ts";
 export { enchantingBook } from "./effects/enchanting-book.ts";
-export { regionKey, decodeRegion, unpack } from "./scene/prepare.ts";
+export { regionKey, decodeRegion, modelOf, unpack } from "./scene/prepare.ts";
 export type * from "./contracts.ts";
 export type { WorkerRequest, WorkerResponse } from "./scene/worker.ts";
 

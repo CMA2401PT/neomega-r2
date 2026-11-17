@@ -9,7 +9,7 @@ import type {
 
 /** 主线程发给准备线程的消息。 */
 export type WorkerRequest =
-  | { type: "init"; catalog?: Catalog; catalogURL?: string }
+  | { type: "init"; catalog: Catalog; states: Uint32Array }
   | {
       type: "textures";
       catalog: Catalog;
@@ -34,6 +34,7 @@ const scope = self as unknown as {
   postMessage(message: WorkerResponse, transfer?: Transferable[]): void;
 };
 let catalogPromise: Promise<PreparationCatalog & Catalog>;
+let states: Uint32Array = new Uint32Array();
 const regions = new Map<string, SourceRegion>();
 const transfers = (result: PreparedRegion) => [
   result.words.buffer as ArrayBuffer,
@@ -43,10 +44,8 @@ const transfers = (result: PreparedRegion) => [
 scope.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
-      const loading: Promise<Catalog> = data.catalog
-        ? Promise.resolve(data.catalog)
-        : fetch(data.catalogURL!).then((r) => r.json());
-      catalogPromise = loading.then((catalog) => ({
+      states = data.states;
+      catalogPromise = Promise.resolve(data.catalog).then((catalog) => ({
         ...catalog,
         fragmentReach: Math.max(
           0,
@@ -70,7 +69,7 @@ scope.onmessage = async ({ data }) => {
       return;
     }
     if (data.type === "put") {
-      regions.set(data.key, decodeRegion(data.buffer));
+      regions.set(data.key, decodeRegion(data.buffer, states));
       scope.postMessage({ type: "stored", key: data.key, request: data.request });
       return;
     }

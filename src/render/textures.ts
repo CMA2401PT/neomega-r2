@@ -47,6 +47,8 @@ export async function createTextures(gl: WebGL2RenderingContext, uniforms: Unifo
   const [info, catalog] = (await Promise.all(
     ["textures-info.json", "catalog.json"].map(async (name) => (await fetch(assets + name)).json()),
   )) as [TextureInfo, Catalog];
+  // 方块哈希到模型的表与材质无关，换材质包时保留。
+  const states = new Uint32Array(await (await fetch(assets + "states.bin")).arrayBuffer());
   const handles = new Map<string, WebGLTexture>();
   let bytes = 0, referenceBytes = 0;
   function texture(unit: number, target: number, name: string): void {
@@ -119,7 +121,7 @@ export async function createTextures(gl: WebGL2RenderingContext, uniforms: Unifo
   referenceBytes = bytes;
   install({ info, files, catalog });
   return {
-    catalog, install,
+    catalog, states, install,
     get bytes() { return bytes; },
     dispose() { for (const handle of handles.values()) gl.deleteTexture(handle); },
   };

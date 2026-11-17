@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareRegion, unpack, decodeRegion } from "../src/scene/prepare.ts";
+import { prepareRegion, unpack, decodeRegion, modelOf } from "../src/scene/prepare.ts";
 import { WordAllocator } from "../src/render/allocator.ts";
 import { ObjectStore } from "../src/objects/store.ts";
 import { ObjectRegistry } from "../src/objects/registry.ts";
@@ -232,12 +232,19 @@ test("不同类型共用实例层，旧候选句柄不指向回收后新部件",
   assert(store.tiles.every((v) => v === 0));
 });
 
-// 传输表只保留一个模型编号；压缩索引不在浏览器解码阶段展开。
-test("单份静态调色板传输保留复杂模型编号", () => {
-  const buffer = new Uint32Array([0x33504c54, 1, 0, 7, 0, 0, 0, 1, 0, 2])
+// 传输调色板是方块哈希，解码时按状态表换成模型；表外哈希画成空气并计数。压缩索引不展开。
+test("调色板哈希按状态表解码为模型编号", () => {
+  const states = new Uint32Array([5, 0, 900, 2, 70000, 3]);
+  const buffer = new Uint32Array([0x34504c54, 1, 7, 0, 0, 0, 1, 0, 900])
     .buffer;
-  const region = decodeRegion(buffer);
+  const region = decodeRegion(buffer, states);
   assert.deepEqual([...region.sections[0].palette], [2]);
+  assert.equal(region.unknown, 0);
+  const unknown = decodeRegion(new Uint32Array([0x34504c54, 1, 0, 0, 0, 1, 2, 0, 5, 41]).buffer, states);
+  assert.deepEqual([...unknown.sections[0].palette], [0, 0]);
+  assert.equal(unknown.unknown, 1);
+  for (const [hash, model] of [[5, 0], [900, 2], [70000, 3], [6, undefined], [0xffffffff, undefined]])
+    assert.equal(modelOf(states, hash), model);
   const prepared = prepareRegion({
     x: 0,
     z: 0,

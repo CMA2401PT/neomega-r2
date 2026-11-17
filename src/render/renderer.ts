@@ -7,7 +7,6 @@ import { gridRegions } from "../scene/grid.ts";
 import type { Camera } from "../contracts.ts";
 
 // 水体按距离吸收光线，着色器需要知道哪个介质组是水。
-const WATER = 'minecraft:water ["level"="0"]';
 // 拍照时每次绘制覆盖的方块边长（像素）。
 const PHOTO_TILE = 256;
 import {
@@ -195,7 +194,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     uniforms.set(name, gl.getUniformLocation(program, name));
   await onProgress?.({ index: 2, total: 3, label: "正在加载材质与方块模型…" });
   const textures = await createTextures(gl, uniforms, assets),
-    catalog = textures.catalog;
+    catalog = textures.catalog,
+    states = textures.states;
   // 即使只画天空，WebGL 仍验证所有采样器；用最小的空纹理满足整数采样器绑定。
   const empty = [
     [1, gl.TEXTURE_3D, "uTree"],
@@ -372,7 +372,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform1ui(u("uFrame"), frame++);
     gl.uniform1ui(
       u("uWaterGroup"),
-      catalog.models[catalog.states[WATER]].group,
+      catalog.models[catalog.water].group,
     );
     gl.uniform1f(u("uFog"), fog);
     gl.uniform1f(u("uTime"), waterTime);
@@ -698,6 +698,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       return program;
     },
     catalog,
+    /** 方块哈希到模型的状态表，按哈希升序的 [hash, model] 对；数据源的调色板用它解释。 */
+    states,
     /** 贴图与派生表在同一帧替换；宿主同时发布按新分类准备的区域。 */
     setTextures(set: TextureSet): void {
       gl.useProgram(program);

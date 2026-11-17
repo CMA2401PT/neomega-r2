@@ -26,24 +26,41 @@ class Words {
     return at;
   }
 }
-/** 解码传输布局，压缩格子索引仍引用原始缓冲；不会展开整片世界。 */
-export function decodeRegion(buffer: ArrayBuffer): SourceRegion {
+/** 在按哈希升序的 [hash, model] 表中二分查找；表外的哈希返回 undefined。 */
+export function modelOf(states: Uint32Array, hash: number): number | undefined {
+  let lo = 0, hi = states.length / 2 - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1, value = states[mid * 2];
+    if (value === hash) return states[mid * 2 + 1];
+    if (value < hash) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return undefined;
+}
+/** 解码传输布局并把调色板的方块哈希换成模型；表外的哈希画成空气并计入 unknown。
+ * 压缩格子索引仍引用原始缓冲，不会展开整片世界。 */
+export function decodeRegion(buffer: ArrayBuffer, states: Uint32Array): SourceRegion {
   const data = new Uint32Array(buffer),
     sections: SourceSection[] = [];
-  let p = 3;
-  if (data[0] !== 0x33504c54) throw Error("无法识别区块数据格式");
+  let p = 2, unknown = 0;
+  if (data[0] !== 0x34504c54) throw Error("无法识别区块数据格式");
   for (let n = 0; n < data[1]; n++) {
     const position = [data[p++] | 0, data[p++] | 0, data[p++] | 0],
       bits = data[p++],
       count = data[p++],
       length = data[p++],
-      palette = data.subarray(p, p + count);
+      palette = new Uint32Array(count);
+    for (let i = 0; i < count; i++) {
+      const model = modelOf(states, data[p + i]);
+      if (model === undefined) unknown++;
+      palette[i] = model ?? 0;
+    }
     p += count;
     const words = data.subarray(p, p + length);
     p += length;
     sections.push({ position, bits, palette, words });
   }
-  return { sections, unknown: data[2], bytes: buffer.byteLength };
+  return { sections, unknown, bytes: buffer.byteLength };
 }
 export function unpack(section: SourceSection): Uint32Array {
   const cells = new Uint32Array(4096),

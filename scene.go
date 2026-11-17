@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	java "neomega-blocks/presets/java/v1"
 	"neomega-view-utils/r2assets"
 )
 
@@ -77,12 +78,23 @@ type Scene struct {
 	Names              map[string]uint32 `json:"names"`
 }
 
+// StateModels 按资源包的哈希表列出 Java 状态对应的模型，供场景按名字取方块。
+func StateModels(table map[uint32]uint32) map[string]uint32 {
+	models := map[string]uint32{}
+	for state := range java.JavaFullStates() {
+		if id, ok := table[state.Hash()]; ok {
+			models[string(state)] = id
+		}
+	}
+	return models
+}
+
 // BuildScene 建立可复现的独立输入；所有模式只查表填编号，模型表不随场景重新生成。
-func BuildScene(catalog *r2assets.Catalog, name string) (*Scene, error) {
+func BuildScene(catalog *r2assets.Catalog, models map[string]uint32, name string) (*Scene, error) {
 	start := time.Now()
 	scene := &Scene{Grid: NewGrid([3]int{64, 32, 64}), Camera: [3]float64{32, 16, 58}, Target: [3]float64{32, 3, 25}, Names: map[string]uint32{}}
-	states := make([]string, 0, len(catalog.States))
-	for state := range catalog.States {
+	states := make([]string, 0, len(models))
+	for state := range models {
 		states = append(states, state)
 	}
 	slices.Sort(states)
@@ -98,7 +110,7 @@ func BuildScene(catalog *r2assets.Catalog, name string) (*Scene, error) {
 				}
 			}
 			if match {
-				id := catalog.States[state]
+				id := models[state]
 				scene.Names[state] = id
 				return id
 			}
@@ -181,7 +193,7 @@ func BuildScene(catalog *r2assets.Catalog, name string) (*Scene, error) {
 	case "spill":
 		var id uint32
 		for _, state := range states {
-			candidate := catalog.States[state]
+			candidate := models[state]
 			if strings.HasPrefix(state, "minecraft:fire ") && len(catalog.Models[candidate].Fragments) > 0 {
 				id = candidate
 				scene.Names[state] = id

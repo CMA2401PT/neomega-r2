@@ -62,7 +62,7 @@ export interface ObjectReference {
   ids: number[];
 }
 
-/** 压缩 section；palette 保存唯一的静态模型编号，格子索引为 XZY。 */
+/** 压缩 section；解码后 palette 保存静态模型编号（传输时是方块哈希），格子索引为 XZY。 */
 export interface SourceSection {
   position: number[];
   bits: number;
@@ -107,10 +107,10 @@ export interface Model {
   fragments?: Array<{ offset: number[]; model: number }>;
 }
 
-/** 状态映射与共享模型表。 */
+/** 与贴图配套的共享模型表；water 是静止水源的模型。状态映射在单独的 states.bin。 */
 export interface Catalog {
   models: Model[];
-  states: Record<string, number>;
+  water: number;
   statistics: Record<string, number>;
   unsupported: string[];
 }
