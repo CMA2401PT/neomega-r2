@@ -5,7 +5,7 @@ const { execFileSync } = require("node:child_process");
 const root = path.join(__dirname, "..");
 function convert(name, output) {
   const picking = name.endsWith("-pick");
-  const tier = name === "photo" ? "accumulation" : name.replace("-pick", "");
+  const tier = name === "photo" ? "accumulation" : name.replace(/-(pick|retry)$/, "");
   const tierNumber = ["voxel", "basic", "shading", "accumulation"].indexOf(tier);
   if (tierNumber < 0) throw Error("Unknown render tier " + tier);
   const singleBounce = name === "accumulation";
@@ -35,6 +35,8 @@ function convert(name, output) {
       "#version 300 es",
       `#version 450
 #extension GL_EXT_samplerless_texture_functions : require
+#define R2_CUBE_PASS ${Number(name === "shading")}
+#define R2_DIRECT_LOOKUP ${Number(tier === "shading")}
 #define R2_COMPACT_CELLS 0
 #define RENDER_TIER ${tierNumber}
 #define R2_PICK ${Number(picking)}
@@ -92,9 +94,38 @@ layout(std140,binding=0) uniform Inputs { vec4 values[64]; } frame;`,
         "outColor=vec4(color*weight,weight); if(frame.values[63].x>0.0) outColor+=texelFetch(history,ivec2(gl_FragCoord.xy),0);",
       );
   }
+  // 光影在计算管线中逐像素写 HDR。照片的分块起点放在保留的 uniform 62。
+  const compute = tier === "shading";
+  if (compute) {
+    source = source
+      .replace("layout(location=0) out vec4 outColor;", `layout(local_size_x=8,local_size_y=4) in;
+layout(set=2,binding=0,rgba32f) uniform writeonly image2D outputHDR;
+layout(std430,set=2,binding=1) buffer RetryMask { uint retryMask[]; };
+vec4 outColor;
+vec4 pixelCoord;`)
+      .replaceAll("gl_FragCoord", "pixelCoord")
+      .replace("void main(){", "void shadePixel(){");
+    source += `
+void main(){
+  ivec2 pixel=ivec2(gl_GlobalInvocationID.xy)+ivec2(frame.values[62].xy);
+  if(any(greaterThanEqual(pixel,imageSize(outputHDR))))return;
+  // 一个工作组恰好 32 个像素，用一个字记录需要完整求交的像素。
+  uint word=gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x;
+  uint bit=1u<<gl_LocalInvocationIndex;
+#if !R2_CUBE_PASS
+  if((retryMask[word]&bit)==0u)return;
+#endif
+  pixelCoord=vec4(vec2(pixel)+0.5,0,1);
+  shadePixel();
+#if R2_CUBE_PASS
+  if(needsFullModel){atomicOr(retryMask[word],bit);return;}
+#endif
+  imageStore(outputHDR,pixel,outColor);
+}`;
+  }
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "r2-wgsl-"));
   try {
-    const spv = require("@webgpu/glslang")().compileGLSL(source, "fragment", false);
+    const spv = require("@webgpu/glslang")().compileGLSL(source, compute ? "compute" : "fragment", false);
     fs.writeFileSync(path.join(temp, "ray.spv"), Buffer.from(spv.buffer, spv.byteOffset, spv.byteLength));
     execFileSync(process.execPath, [require.resolve("naga-wasi-cli/bin/naga.mjs"), "ray.spv", "ray.wgsl"], {
       cwd: temp,
@@ -115,5 +146,5 @@ module.exports = {convert};
 if(require.main===module){
   const output = path.join(root, "dist/render");
   fs.mkdirSync(output, {recursive:true});
-  for(const name of ["voxel","basic","shading","accumulation","photo","voxel-pick","basic-pick"])convert(name,output);
+  for(const name of ["voxel","basic","shading","shading-retry","accumulation","photo","voxel-pick","basic-pick"])convert(name,output);
 }

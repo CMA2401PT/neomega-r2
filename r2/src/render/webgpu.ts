@@ -9,9 +9,23 @@ import { mod, SIZE } from "./region-directory.ts";
 import { displayPipelines, frameFilm, group, readTexture, vertex } from "./webgpu-film.ts";
 
 type Program = Tier | "photo" | "basic-pick" | "voxel-pick";
-type Ray = { pipeline: GPURenderPipeline; slots: string[] };
+type Ray = { slots: string[] } & (
+  | { kind: "render"; pipeline: GPURenderPipeline }
+  | {
+      kind: "compute";
+      pipeline: GPUComputePipeline;
+      retry: GPUComputePipeline;
+      groupWidth: number;
+      groupHeight: number;
+    }
+);
 type Film = ReturnType<typeof frameFilm>;
-type Frame = DrawOptions & { bounces?: number; jitter?: number[]; pickPixel?: number[] };
+type Frame = DrawOptions & {
+  bounces?: number;
+  jitter?: number[];
+  pickPixel?: number[];
+  tileOrigin?: [number, number];
+};
 export async function createWebGPURenderer(
   canvas: HTMLCanvasElement,
   { tier: initial = "shading", assets = "/r2/assets/", readResource, onProgress }: RendererOptions = {},
@@ -48,18 +62,18 @@ export async function createWebGPURenderer(
       fatal = e.error.message;
       console.error(fatal);
     });
-    const F = GPUShaderStage.FRAGMENT;
+    const rayStages = GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
     const layout: GPUBindGroupLayoutEntry[] = [
-      { binding: 0, visibility: F, buffer: { type: "uniform" } },
-      { binding: 3, visibility: F, buffer: { type: "read-only-storage" } },
-      { binding: 14, visibility: F, sampler: { type: "filtering" } },
+      { binding: 0, visibility: rayStages, buffer: { type: "uniform" } },
+      { binding: 3, visibility: rayStages, buffer: { type: "read-only-storage" } },
+      { binding: 14, visibility: rayStages, sampler: { type: "filtering" } },
     ];
     for (const binding of [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17]) {
       const integer = [1, 2, 4, 6].includes(binding),
         unfiltered = [5, 7, 15, 16].includes(binding);
       layout.push({
         binding,
-        visibility: F,
+        visibility: rayStages,
         texture: {
           viewDimension: binding <= 2 ? "3d" : [10, 11, 13].includes(binding) ? "2d-array" : "2d",
           sampleType: integer ? "uint" : unfiltered ? "unfilterable-float" : "float",
@@ -68,37 +82,81 @@ export async function createWebGPURenderer(
     }
     const sceneLayout = device.createBindGroupLayout({ entries: layout });
     const historyLayout = device.createBindGroupLayout({
-      entries: [{ binding: 0, visibility: F, texture: { sampleType: "unfilterable-float" } }],
+      entries: [{ binding: 0, visibility: rayStages, texture: { sampleType: "unfilterable-float" } }],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [sceneLayout, historyLayout] });
+    const outputLayout = device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { format: "rgba32float", access: "write-only" },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      ],
+    });
+    const computeLayout = device.createPipelineLayout({
+      bindGroupLayouts: [sceneLayout, historyLayout, outputLayout],
+    });
+    let outputs = new WeakMap<GPUTextureView, GPUBindGroup>();
+    let retryMask: GPUBuffer | undefined;
     const vert = device.createShaderModule({ code: vertex });
     const programs = new Map<Program, Ray>(),
       jobs = new Map<Program, Promise<void>>();
+    async function shaderSource(name: string): Promise<string> {
+      const r = await (readResource ? readResource(name) : fetch(new URL(name, import.meta.url)));
+      if (!r.ok) throw Error("无法加载 " + name);
+      return r.text();
+    }
     async function compileProgram(tier: Program): Promise<void> {
       if (programs.has(tier)) return;
       let job = jobs.get(tier);
       if (!job) {
         job = (async () => {
-          const name = tier + ".wgsl",
-            r = await (readResource ? readResource(name) : fetch(new URL(name, import.meta.url)));
-          if (!r.ok) throw Error("无法加载 " + name);
-          const code = await r.text(),
+          const name = tier + ".wgsl";
+          const code = await shaderSource(name),
             slots = code
               .match(/^\/\/ Uniform slots: (.*)$/m)?.[1]
               .trim()
               .split(",");
           if (!slots) throw Error("无效的 R2 着色器 " + name);
+          const module = device.createShaderModule({ code });
+          if (tier === "shading") {
+            const size = /@workgroup_size\((\d+),\s*(\d+),\s*1\)/.exec(code);
+            if (!size) throw Error("光影着色器缺少工作组尺寸");
+            const makePipeline = (module: GPUShaderModule, label: string) =>
+              device.createComputePipelineAsync({
+                label,
+                layout: computeLayout,
+                compute: { module, entryPoint: "main" },
+              });
+            const [pipeline, retry] = await Promise.all([
+              makePipeline(module, tier),
+              shaderSource("shading-retry.wgsl").then((code) =>
+                makePipeline(device.createShaderModule({ code }), "shading-retry"),
+              ),
+            ]);
+            programs.set(tier, {
+              kind: "compute",
+              pipeline,
+              retry,
+              slots,
+              groupWidth: Number(size[1]),
+              groupHeight: Number(size[2]),
+            });
+            return;
+          }
           const pipeline = await device.createRenderPipelineAsync({
             label: tier,
             layout: pipelineLayout,
             vertex: { module: vert, entryPoint: "vert" },
             fragment: {
-              module: device.createShaderModule({ code }),
+              module,
               entryPoint: "main",
               targets: [{ format: "rgba32float" }],
             },
           });
-          programs.set(tier, { pipeline, slots });
+          programs.set(tier, { kind: "render", pipeline, slots });
         })().finally(() => jobs.delete(tier));
         jobs.set(tier, job);
       }
@@ -164,7 +222,8 @@ export async function createWebGPURenderer(
       film: Film | undefined,
       samples = 0,
       keepPreview = false;
-    let pendingFrame = false, epoch = 0;
+    let pendingFrame = false,
+      epoch = 0;
     let frameDone: Promise<void> = Promise.resolve();
     const times: number[] = [];
     const queries = device.features.has("timestamp-query")
@@ -216,12 +275,50 @@ export async function createWebGPURenderer(
         const v = values[name] ?? 0;
         data.set(typeof v === "number" ? [v] : v, i * 4);
       });
+      if (o.tileOrigin) data.set(o.tileOrigin, 62 * 4);
       data[252] = +history;
       device.queue.writeBuffer(frame, 0, data);
       return 0.9 * (1 + 2.3 * (1 - Math.max(0, Math.min(1, (sun[1] / length + 0.1) / 0.3))));
     }
-    type Target = { hdr: GPUTextureView; history: GPUBindGroup };
+    type Target = { hdr: GPUTextureView; history: GPUBindGroup; width: number; height: number };
     function trace(enc: GPUCommandEncoder, tier: Program, target: Target, tile?: number[], timer = false) {
+      const ray = programs.get(tier)!;
+      const timestampWrites =
+        timer && queries ? { querySet: queries, beginningOfPassWriteIndex: 0 } : undefined;
+      if (ray.kind === "compute") {
+        const groupsX = Math.ceil((tile?.[2] ?? target.width) / ray.groupWidth);
+        const groupsY = Math.ceil((tile?.[3] ?? target.height) / ray.groupHeight);
+        const bytes = groupsX * groupsY * 4;
+        if (!retryMask || retryMask.size < bytes) {
+          retryMask?.destroy();
+          retryMask = device.createBuffer({
+            size: bytes,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+          });
+          outputs = new WeakMap();
+        }
+        enc.clearBuffer(retryMask, 0, bytes);
+        let output = outputs.get(target.hdr);
+        if (!output) {
+          output = group(device, outputLayout, [
+            [0, target.hdr],
+            [1, { buffer: retryMask }],
+          ]);
+          outputs.set(target.hdr, output);
+        }
+        for (const pipeline of [ray.pipeline, ray.retry]) {
+          const pass = enc.beginComputePass({
+            timestampWrites: pipeline === ray.pipeline ? timestampWrites : undefined,
+          });
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, scene);
+          pass.setBindGroup(1, target.history);
+          pass.setBindGroup(2, output);
+          pass.dispatchWorkgroups(groupsX, groupsY);
+          pass.end();
+        }
+        return;
+      }
       const p = enc.beginRenderPass({
         colorAttachments: [
           {
@@ -231,9 +328,9 @@ export async function createWebGPURenderer(
             storeOp: "store",
           },
         ],
-        ...(timer && queries ? { timestampWrites: { querySet: queries, beginningOfPassWriteIndex: 0 } } : {}),
+        timestampWrites,
       });
-      p.setPipeline(programs.get(tier)!.pipeline);
+      p.setPipeline(ray.pipeline);
       p.setBindGroup(0, scene);
       p.setBindGroup(1, target.history);
       if (tile) p.setScissorRect(tile[0], tile[1], tile[2], tile[3]);
@@ -288,8 +385,12 @@ export async function createWebGPURenderer(
       const stamp = epoch;
       frameDone = device.queue.onSubmittedWorkDone();
       frameDone.then(
-        () => { pendingFrame = false; },
-        () => { pendingFrame = false; },
+        () => {
+          pendingFrame = false;
+        },
+        () => {
+          pendingFrame = false;
+        },
       );
       if (read) {
         const buffer = read;
@@ -345,7 +446,7 @@ export async function createWebGPURenderer(
           false,
         );
         const enc = device.createCommandEncoder();
-        trace(enc, tier, { hdr: target.createView(), history: pickHistory });
+        trace(enc, tier, { hdr: target.createView(), history: pickHistory, width: 1, height: 1 });
         device.queue.submit([enc.finish()]);
         const ray = cameraRay(camera, { ...pixel, x: Math.floor(pixel.x), y: Math.floor(pixel.y) });
         const hit = new Float32Array((await readTexture(device, target, 16)).buffer);
@@ -400,15 +501,15 @@ export async function createWebGPURenderer(
             tier === "accumulation"
               ? [0, 0]
               : [((done % grid) + 0.5) / grid - 0.5, (Math.floor(done / grid) + 0.5) / grid - 0.5];
+          const x = (tile % columns) * 256,
+            y = Math.floor(tile / columns) * 256;
           exposure = prepare(
             view,
             program,
-            { ...o, tier: undefined, bounces: o.bounces ?? 4, jitter },
+            { ...o, tier: undefined, bounces: o.bounces ?? 4, jitter, tileOrigin: [x, y] },
             done > 0,
             seed,
           );
-          const x = (tile % columns) * 256,
-            y = Math.floor(tile / columns) * 256;
           const enc = device.createCommandEncoder();
           trace(enc, program, target, [x, y, Math.min(256, width - x), Math.min(256, height - y)]);
           const last = ++tile === tiles;
@@ -547,6 +648,7 @@ export async function createWebGPURenderer(
         objects.store.dispose();
         materials.dispose();
         film?.dispose();
+        retryMask?.destroy();
         ctx.unconfigure();
         device.destroy();
       },

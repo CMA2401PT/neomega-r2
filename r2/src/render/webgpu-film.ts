@@ -77,7 +77,11 @@ export function frameFilm(
       format,
       size,
       mipLevelCount: levels,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
+      usage:
+        GPUTextureUsage.RENDER_ATTACHMENT |
+        GPUTextureUsage.COPY_SRC |
+        GPUTextureUsage.TEXTURE_BINDING |
+        (format === "rgba32float" ? GPUTextureUsage.STORAGE_BINDING : 0),
     });
     textures.push(t);
     return t;
@@ -99,6 +103,8 @@ export function frameFilm(
   const images = [0, 1].map(() => target("rgba32float", [width, height]).createView());
   const frames = images.map((hdr, i) => ({
     hdr,
+    width,
+    height,
     history: group(device, historyLayout, [[0, images[1 - i]]]),
     pre: group(device, fx.pre.getBindGroupLayout(0), [[0, hdr]]),
     show: group(device, fx.show.getBindGroupLayout(0), [

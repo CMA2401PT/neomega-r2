@@ -17,6 +17,12 @@ uniform vec3 uSize,uCamera,uRight,uUp,uForward;
 uniform vec2 uViewport;
 uniform float uSpan;
 uniform bool uOrtho,uHasWorld;
+#ifndef R2_DIRECT_LOOKUP
+#define R2_DIRECT_LOOKUP 0
+#endif
+#ifndef R2_CUBE_PASS
+#define R2_CUBE_PASS 0
+#endif
 #ifndef R2_PICK
 #define R2_PICK 0
 #endif
@@ -343,6 +349,13 @@ vec3 octahedralNormal(uint packed){
 }
 // 每个面先只读一条引用求平面交点；交点不在本格射线区间内的面无需读取记录。
 // alpha 裁切失败的面不阻挡后方更远的命中。
+#if R2_CUBE_PASS
+// 命中候选来自格子本体或片段表。快路径标记像素，第二阶段从原始相机射线重画。
+bool needsFullModel=false;
+void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
+ if((id&0x80000000u)!=0u||model(id).x==2u)needsFullModel=true;
+}
+#else
 void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
  if((id&0x80000000u)!=0u){intersectObject(id&0x7fffffffu,begin,end,hit);return;}
  uvec4 description=model(id);if(description.x!=2u)return;
@@ -382,6 +395,7 @@ void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
 #endif
  }
 }
+#endif
 // 求射线离开轴对齐节点的时间；落在边界上的轴按整数跳到下一格，避免掠射时反复停在同一格。
 float leaveNode(ivec3 lowerCell,int width,out int side,out ivec3 nextCell){
  vec3 lower=max(vec3(lowerCell),vec3(0)),upper=min(vec3(lowerCell+width),uSize);
@@ -412,7 +426,11 @@ uint brickTag;
 uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  level=0;cellLevel=false;parts=0u;
  ivec3 directory=(cell+uDirectoryOffset)>>4;
- if(cell>>4!=cachedSection){
+ // WebGPU 光影直接重读目录和掩码，减少每条射线跨迭代保留的状态。
+#if !R2_DIRECT_LOOKUP
+ if(cell>>4!=cachedSection)
+#endif
+ {
   cachedSection=cell>>4;cachedBrick=-1;
   section=texelFetch(uSections,directory&ivec3(255,31,255),0);
   partsBase=section.x!=0u&&uFragments?worldWord(section.x+AUX_PARTS):0u;
@@ -429,7 +447,10 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
   ivec3 local=cell&15;
   int brick=((local.x>>2)*4+(local.z>>2))*4+(local.y>>2);
   if(maskBit(section.zw,brick)){
-   if(brick!=cachedBrick){
+#if !R2_DIRECT_LOOKUP
+   if(brick!=cachedBrick)
+#endif
+   {
     cachedBrick=brick;
     uint at=section.x+uint(brick*2);
     cellMask=uvec2(worldWord(at),worldWord(at+1u));
