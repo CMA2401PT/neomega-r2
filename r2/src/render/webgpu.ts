@@ -121,9 +121,9 @@ export async function createWebGPURenderer(
               .split(",");
           if (!slots) throw Error("无效的 R2 着色器 " + name);
           const module = device.createShaderModule({ code });
-          if (tier === "shading") {
+          if (tier === "shading" || tier === "accumulation" || tier === "photo") {
             const size = /@workgroup_size\((\d+),\s*(\d+),\s*1\)/.exec(code);
-            if (!size) throw Error("光影着色器缺少工作组尺寸");
+            if (!size) throw Error("着色器缺少工作组尺寸 " + tier);
             const makePipeline = (module: GPUShaderModule, label: string) =>
               device.createComputePipelineAsync({
                 label,
@@ -132,8 +132,8 @@ export async function createWebGPURenderer(
               });
             const [pipeline, retry] = await Promise.all([
               makePipeline(module, tier),
-              shaderSource("shading-retry.wgsl").then((code) =>
-                makePipeline(device.createShaderModule({ code }), "shading-retry"),
+              shaderSource(tier + "-retry.wgsl").then((code) =>
+                makePipeline(device.createShaderModule({ code }), tier + "-retry"),
               ),
             ]);
             programs.set(tier, {

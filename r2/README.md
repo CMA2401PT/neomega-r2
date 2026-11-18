@@ -6,7 +6,7 @@ R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部�
 
 浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。渲染器的宿主从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
 
-`createRenderer(canvas, options)` 默认使用 WebGPU。指定 `{ useWebGPU: false }` 可选择 WebGL 2。宿主可以读取 `renderer.backend`，使用 `await renderer.pick(...)` 和 `await renderer.pixels()` 在两个后端读回结果。显式要求等待 GPU 完成时，使用 `await renderer.draw(camera, { ...options, synchronize: true })`。WebGPU 需要安全上下文，在线页面使用 HTTPS 或 localhost。构建时 `webgl2gpu/convert.cjs` 从同一份 GLSL 射线程序生成四档 WGSL，各档在浏览器中按需创建管线。WebGPU 光影预览使用 8×4 像素的计算工作组，首先追踪方块、镂空面、水面和阴影。遇到复杂模型或格内片段时，在该工作组的 32 位掩码中标记像素；第二个计算阶段用完整着色器重新追踪这些像素。两个阶段写入同一张 HDR 纹理。用光影档导出照片时，分块复用同一条计算管线。两个后端都有独立的实时累积、照片和拾取程序。实时累积固定一次反弹，多次反弹照片按需编译。WebGL 与预览并行编译对应的拾取程序，让首次点击也能同步返回。光影与累积共用同一份射线循环，主射线、反射和反弹都从同一处调用体素遍历，以减少驱动内联时复制的代码。
+`createRenderer(canvas, options)` 默认使用 WebGPU。指定 `{ useWebGPU: false }` 可选择 WebGL 2。宿主可以读取 `renderer.backend`，使用 `await renderer.pick(...)` 和 `await renderer.pixels()` 在两个后端读回结果。显式要求等待 GPU 完成时，使用 `await renderer.draw(camera, { ...options, synchronize: true })`。WebGPU 需要安全上下文，在线页面使用 HTTPS 或 localhost。构建时 `webgl2gpu/convert.cjs` 从同一份 GLSL 射线程序生成四档 WGSL，各档在浏览器中按需创建管线。WebGPU 光影预览和累积使用 8×4 像素的计算工作组，首先追踪方块、镂空面、水面和阴影。遇到复杂模型或格内片段时，在该工作组的 32 位掩码中标记像素；第二个计算阶段用完整着色器重新追踪这些像素。两个阶段写入同一张 HDR 纹理。照片按分块复用相应档位的计算管线。两个后端都有独立的实时累积、照片和拾取程序。实时累积固定一次反弹，多次反弹照片按需编译。WebGL 与预览并行编译对应的拾取程序，让首次点击也能同步返回。光影与累积共用同一份射线循环，主射线、反射和反弹都从同一处调用体素遍历，以减少驱动内联时复制的代码。
 
 ## 共享查看界面
 

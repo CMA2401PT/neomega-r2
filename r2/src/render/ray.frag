@@ -79,6 +79,7 @@ vec3 radiance,directSum,throughput;
 // bounceAmbient 是反弹面已经计入的常量环境光，反弹时用实际看到的亮度把它换掉。
 vec3 shadePoint,shadeNormal,bouncePoint,bounceNormal,bounceAlbedo,bounceAmbient,bounceSpecular,bounceShading,bounceView;
 float bounceRoughness;
+bool captureBounce;
 float shadeWeight,bounceWeight;
 // 本像素的光照：光源方向与亮度（白天为太阳，夜间为月亮），以及来自天空的常量环境光。
 vec3 lightDir,lightColor,ambient;
@@ -253,7 +254,8 @@ void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit){
  directSum+=(diffuse*direct+weight*specularLight(m,ray,lightDir)*lit)*lightColor;
  float w=brightest(weight);
  if(lit>0.0&&w>shadeWeight){shadeWeight=w;shadePoint=eye+ray*t;shadeNormal=m.geometric;}
- if(w>bounceWeight){
+ // 反射和折射仍累加亮度，但要保留待处理的反弹面，不能覆盖它。
+ if(captureBounce&&w>bounceWeight){
   bounceWeight=w;bouncePoint=eye+ray*t;bounceNormal=m.geometric;bounceAlbedo=diffuse;bounceAmbient=sky;
   bounceSpecular=specular;bounceShading=m.normal;bounceView=ray;bounceRoughness=m.roughness;
  }
@@ -426,7 +428,7 @@ uint brickTag;
 uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  level=0;cellLevel=false;parts=0u;
  ivec3 directory=(cell+uDirectoryOffset)>>4;
- // WebGPU 光影直接重读目录和掩码，减少每条射线跨迭代保留的状态。
+ // WebGPU 光影和累积直接重读目录和掩码，减少每条射线跨迭代保留的状态。
 #if !R2_DIRECT_LOOKUP
  if(cell>>4!=cachedSection)
 #endif
@@ -702,27 +704,28 @@ vec3 background(vec3 d){
 // 反射、折射与反弹依次送回同一个遍历入口。驱动内联函数时，每份片元程序只展开一份 march 和一份阴影遍历。
 const int PRIMARY=0, BLOCK_REFLECT=1, SEA_REFLECT=2, SEA_TRANSMIT=3, SEA_EXIT=4, BOUNCE=5;
 struct PathRay { vec3 start, direction, gain; float limit; bool submerged; int kind; };
-struct BounceSurface { vec3 albedo, specular, point, normal, shading, incoming; float roughness; };
-BounceSurface bounceSurface(vec3 gain){
- return BounceSurface(gain*bounceAlbedo,gain*bounceSpecular,bouncePoint,bounceNormal,bounceShading,bounceView,bounceRoughness);
-}
 float seaLimit(vec3 p,vec3 d){
  return uOcean&&abs(d.y)>1e-8?(uOceanHeight-p.y)/d.y:-1.0;
 }
 vec3 tracePath(vec3 view,vec3 origin){
  float distance=seaLimit(origin,view);
  PathRay job=PathRay(origin,view,vec3(1),distance>0.0?distance:1e30,uOcean&&origin.y<uOceanHeight,PRIMARY);
- vec3 color=vec3(0),seaPoint,seaView,seaGain,blockPoint,blockWeight,blockFront;
- vec3 subtractAmbient=vec3(0);
+ vec3 color=vec3(0),seaPoint,seaView,seaGain,blockFront;
  float fog=0.0,seaDistance=0.0;
  bool sea=false,fromBelow=false,hasTransmission=false,block=false,bounce=false;
- PathRay transmission;
- BounceSurface surface;
+ vec3 transmitStart,transmitDir,transmitGain;
+#if !R2_ONE_BOUNCE
  int bounces=0;
+#endif
  // Each iteration consumes one ray. Only a diffuse/specular bounce can queue
  // another bounce, and the maximum depth matches the four-bounce GLSL path.
  for(;;){
   eye=job.start; ray=job.direction; primaryRay=job.kind==PRIMARY;
+#if R2_ONE_BOUNCE
+  captureBounce=primaryRay;
+#else
+  captureBounce=uPass==1&&(primaryRay||job.kind==BOUNCE);
+#endif
   bool finished=march(job.limit,job.submerged);
   if(primaryRay&&!finished)return vec3(1e4,0,1e4);
   vec3 visible=vec3(1);
@@ -743,10 +746,14 @@ vec3 tracePath(vec3 view,vec3 origin){
    }
    if(job.kind==PRIMARY){
     fog=touched&&!job.submerged?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
-    block=mirrored;blockPoint=mirrorPoint;blockWeight=mirrorWeight;blockFront=mirrorRadiance+mirrorDirect*visible;
+    block=mirrored;blockFront=mirrorRadiance+mirrorDirect*visible;
    }
+#if R2_ONE_BOUNCE
+   bounce=job.kind==PRIMARY&&bounceWeight>0.0;
+#else
    bounce=uPass==1&&bounceWeight>0.0&&(job.kind==PRIMARY||(!sea&&bounces<min(4,uBounces)));
-   if(bounce){surface=bounceSurface(job.gain);subtractAmbient=job.gain*bounceAmbient;}
+   if(bounce){bounceAlbedo*=job.gain;bounceSpecular*=job.gain;bounceAmbient*=job.gain;}
+#endif
   }else{
    if(job.kind==BLOCK_REFLECT||job.kind==SEA_EXIT||(job.kind==SEA_REFLECT&&brightest(throughput)>.001))
     lit+=throughput*background(job.direction);
@@ -766,35 +773,41 @@ vec3 tracePath(vec3 view,vec3 origin){
    vec3 micro=uPass==1?waterMicroNormal(n,seaView,rough):n;
    float f=fresnel(dot(-seaView,micro),.02);
    vec3 r=reflect(seaView,micro);if(uPass==0)r.y=abs(r.y);
-   transmission=PathRay(seaPoint-vec3(0,.001,0),refract(seaView,n,1.0/1.333),seaGain*(1.0-f),1e4,true,SEA_TRANSMIT);
+   transmitStart=seaPoint-vec3(0,.001,0);transmitDir=refract(seaView,n,1.0/1.333);transmitGain=seaGain*(1.0-f);
    hasTransmission=true;
    if(r.y>0.0){
     job=PathRay(seaPoint+vec3(0,.001,0),r,seaGain*f*(uPass==1?waterMask(dot(n,r),rough):1.0),1e30,false,SEA_REFLECT);
     continue;
    }
   }
-  if(hasTransmission){hasTransmission=false;job=transmission;continue;}
+  if(hasTransmission){hasTransmission=false;job=PathRay(transmitStart,transmitDir,transmitGain,1e4,true,SEA_TRANSMIT);continue;}
   if(block){
    block=false;
-   float rough;vec3 n=waveNormal((blockPoint+uWorldOrigin).xz,view,length(blockPoint-origin),rough);
+   float rough;vec3 n=waveNormal((mirrorPoint+uWorldOrigin).xz,view,length(mirrorPoint-origin),rough);
    if(uPass==1)n=waterMicroNormal(n,view,rough);
    vec3 r=reflect(view,n);r.y=abs(r.y);float f=fresnel(dot(-view,n),.02);
    color=blockFront+(1.0-f)*(color-blockFront);
-   job=PathRay(blockPoint+vec3(0,1e-3,0),r,f*blockWeight,1e30,false,BLOCK_REFLECT);
+   job=PathRay(mirrorPoint+vec3(0,1e-3,0),r,f*mirrorWeight,1e30,false,BLOCK_REFLECT);
    continue;
   }
   if(bounce){
-   bounce=false;color-=subtractAmbient;
+   bounce=false;
+   color-=bounceAmbient;
+#if R2_ONE_BOUNCE
+   vec3 incoming=view;
+#else
    if(bounces>=min(4,uBounces))break;
    bounces++;
-   float chance=brightest(surface.specular)/(brightest(surface.specular)+brightest(surface.albedo)+1e-6);
+   vec3 incoming=bounceView;
+#endif
+   float chance=brightest(bounceSpecular)/(brightest(bounceSpecular)+brightest(bounceAlbedo)+1e-6);
    vec3 d,gain;
    if(random()<chance){
-    d=reflect(surface.incoming,coneDirection(surface.shading,surface.roughness));
-    if(dot(d,surface.normal)<=0.0)d=reflect(surface.incoming,surface.normal);
-    gain=surface.specular/chance;
-   }else{d=cosineDirection(surface.normal);gain=surface.albedo/(1.0-chance);}
-   vec3 start=surface.point+surface.normal*1e-3;
+    d=reflect(incoming,coneDirection(bounceShading,bounceRoughness));
+    if(dot(d,bounceNormal)<=0.0)d=reflect(incoming,bounceNormal);
+    gain=bounceSpecular/chance;
+   }else{d=cosineDirection(bounceNormal);gain=bounceAlbedo/(1.0-chance);}
+   vec3 start=bouncePoint+bounceNormal*1e-3;
    float limit=seaLimit(start,d);
    job=PathRay(start,d,gain,limit>0.0?limit:1e30,uOcean&&start.y<uOceanHeight,BOUNCE);
    continue;

@@ -5,10 +5,12 @@ const { execFileSync } = require("node:child_process");
 const root = path.join(__dirname, "..");
 function convert(name, output) {
   const picking = name.endsWith("-pick");
-  const tier = name === "photo" ? "accumulation" : name.replace(/-(pick|retry)$/, "");
+  const program = name.replace(/-(pick|retry)$/, "");
+  const tier = program === "photo" ? "accumulation" : program;
+  const compute = tier === "shading" || tier === "accumulation";
   const tierNumber = ["voxel", "basic", "shading", "accumulation"].indexOf(tier);
   if (tierNumber < 0) throw Error("Unknown render tier " + tier);
-  const singleBounce = name === "accumulation";
+  const singleBounce = program === "accumulation";
   const uniforms = [];
   // Binding 0 contains uniforms, binding 3 the region pool, and binding 14 the sampler.
   const textures = {
@@ -35,8 +37,8 @@ function convert(name, output) {
       "#version 300 es",
       `#version 450
 #extension GL_EXT_samplerless_texture_functions : require
-#define R2_CUBE_PASS ${Number(name === "shading")}
-#define R2_DIRECT_LOOKUP ${Number(tier === "shading")}
+#define R2_CUBE_PASS ${Number(compute && !name.endsWith("-retry"))}
+#define R2_DIRECT_LOOKUP ${Number(compute)}
 #define R2_COMPACT_CELLS 0
 #define RENDER_TIER ${tierNumber}
 #define R2_PICK ${Number(picking)}
@@ -94,8 +96,7 @@ layout(std140,binding=0) uniform Inputs { vec4 values[64]; } frame;`,
         "outColor=vec4(color*weight,weight); if(frame.values[63].x>0.0) outColor+=texelFetch(history,ivec2(gl_FragCoord.xy),0);",
       );
   }
-  // 光影在计算管线中逐像素写 HDR。照片的分块起点放在保留的 uniform 62。
-  const compute = tier === "shading";
+  // 光影和累积在计算管线中逐像素写 HDR。照片的分块起点放在保留的 uniform 62。
   if (compute) {
     source = source
       .replace("layout(location=0) out vec4 outColor;", `layout(local_size_x=8,local_size_y=4) in;
@@ -146,5 +147,5 @@ module.exports = {convert};
 if(require.main===module){
   const output = path.join(root, "dist/render");
   fs.mkdirSync(output, {recursive:true});
-  for(const name of ["voxel","basic","shading","shading-retry","accumulation","photo","voxel-pick","basic-pick"])convert(name,output);
+  for(const name of ["voxel","basic","shading","shading-retry","accumulation","accumulation-retry","photo","photo-retry","voxel-pick","basic-pick"])convert(name,output);
 }

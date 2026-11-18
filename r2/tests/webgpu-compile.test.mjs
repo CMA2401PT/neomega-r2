@@ -11,14 +11,14 @@ test("各 WebGPU 射线路径共用一个格子遍历调用点", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "r2-compile-test-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   let fastSlots;
-  for (const name of ["shading", "shading-retry", "accumulation", "photo", "basic-pick", "voxel-pick"]) {
+  for (const name of ["shading", "shading-retry", "accumulation", "accumulation-retry", "photo", "photo-retry", "basic-pick", "voxel-pick"]) {
     converter.convert(name, dir);
     const wgsl = readFileSync(join(dir, name + ".wgsl"), "utf8");
-    if (name.startsWith("shading")) {
+    if (!name.endsWith("-pick")) {
       assert.match(wgsl, /@compute\s+@workgroup_size\(8, 4, 1\)/);
       assert.match(wgsl, /textureStore\(/);
-      assert.equal(wgsl.includes("atomicOr("), name === "shading");
-      assert.equal(/fn intersectObject/.test(wgsl), name === "shading-retry");
+      assert.equal(wgsl.includes("atomicOr("), !name.endsWith("-retry"));
+      assert.equal(/fn intersectObject/.test(wgsl), name.endsWith("-retry"));
     } else {
       assert.match(wgsl, /@fragment/);
     }
@@ -27,9 +27,9 @@ test("各 WebGPU 射线路径共用一个格子遍历调用点", (t) => {
     assert.equal(wgsl.match(/\bsunVisibility\w*\(/g)?.length ?? 0, name.endsWith("-pick") ? 0 : 2, name);
     const slots = wgsl.match(/^\/\/ Uniform slots: (.*)$/m)[1].split(",");
     // Both compute passes reuse the same frame uniform buffer and per-tile retry mask.
-    if (name === "shading") fastSlots = slots;
-    if (name === "shading-retry") assert.deepEqual(slots, fastSlots);
-    if (name === "photo" || name === "accumulation")
-      assert.equal(slots.includes("uBounces"), name === "photo");
+    if (!name.endsWith("-retry")) fastSlots = slots;
+    if (name.endsWith("-retry")) assert.deepEqual(slots, fastSlots);
+    if (name.startsWith("photo") || name.startsWith("accumulation"))
+      assert.equal(slots.includes("uBounces"), name.startsWith("photo"));
   }
 });
