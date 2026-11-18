@@ -38,7 +38,7 @@ export class FullscreenMap {
   private farRadius = 32;
   tiles: MapTile[] = [];
   private occupancy: (MapTile & {key: string}) | null = null;
-  selection: ReturnType<Renderer["pick"]> = null;
+  selection: Awaited<ReturnType<Renderer["pick"]>> = null;
   pending: {camera: Camera; pixel: {width:number; height:number; x:number; y:number}} | null = null;
   private gesture: Gesture | null = null;
   private session: WorldSession | null = null;
@@ -271,6 +271,7 @@ export class FullscreenMap {
   }
   /** 收起时保留主相机原来的位置与方向。 */
   hide() {
+    this.pickRequest++;
     this.open = false;
     this.isOverview = false;
     this.gesture = null;
@@ -320,11 +321,18 @@ export class FullscreenMap {
       element<HTMLOutputElement>("map-selection").textContent = "等待所选位置的 r2region 加载…";
       return;
     }
-    this.select(this.renderer.pick(camera, pixel));
+    this.pick(camera,pixel);
   }
 
+  private pickRequest=0;
+  private async pick(camera: Camera,pixel:{width:number;height:number;x:number;y:number}) {
+    const request=++this.pickRequest;
+    const value=await this.renderer.pick(camera,pixel);
+    if(request===this.pickRequest && this.open)this.select(value);
+  }
   /** 法线用主要分量命名，倾斜模型表面也有稳定的读数。 */
-  select(selection: ReturnType<Renderer["pick"]>) {
+  select(selection: Awaited<ReturnType<Renderer["pick"]>>) {
+    this.pickRequest++;
     this.selection = selection;
     element<HTMLButtonElement>("map-jump").disabled = !selection;
     if (!selection) {
@@ -370,7 +378,7 @@ export class FullscreenMap {
     if (this.pending && session && !session.stats.pending) {
       const { camera, pixel } = this.pending;
       this.pending = null;
-      this.select(this.renderer.pick(camera, pixel));
+      this.pick(camera,pixel);
     }
     this.drawOverlay();
   }

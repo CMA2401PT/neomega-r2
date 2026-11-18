@@ -18,6 +18,7 @@ for (const entry of readdirSync(src, { recursive: true, withFileTypes: true }))
     cpSync(from, join(dist, from.slice(src.length)));
   }
 execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "common_ui")], { stdio: "inherit" });
+execFileSync(process.execPath, [join(root, "webgl2gpu/convert.cjs")], { stdio: "inherit" });
 for (const name of ["layout.html", "style.css"]) cpSync(join(root, "common_ui", name), join(dist, "common_ui", name));
 rmSync(join(root, "demo/dist"), { recursive: true, force: true });
 execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "demo")], {

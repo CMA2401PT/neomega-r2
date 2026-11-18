@@ -1,3 +1,4 @@
+import { FrameRate } from "./frame-rate.js";
 import { createHUD, element } from "./hud.js";
 import { FullscreenMap } from "./map.js";
 import { FlightControls } from "./controls.js";
@@ -25,10 +26,11 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
   const hud = createHUD({ settings, jump, changed: refreshSettings });
-  const frames: number[] = [];
+  const rate = new FrameRate();
   let currentView: ReturnType<FullscreenMap["frame"]> | null = null;
   let shownTier = settings.tier, last = performance.now(), statusAt = 0;
-  let drawn = "", drawnAt = 0;
+  let drawn = "";
+  let wasOverview = false;
   let photo: Photo | null = null, photoWaiting = false;
   /** 渲染尺寸跟随原生屏幕像素或用户选择的固定倍数。 */
   function renderScale() {
@@ -44,22 +46,23 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
   // 预览之外的各档启动时不编译；第一次需要时在后台编译，期间画面继续使用已有的档。
   const taskStatus = element<HTMLOutputElement>("task-status");
   /** 正在编译的档与开始时间。 */
-  const compiling = new Map<Tier, { promise: Promise<void>; since: number }>();
+  const compiling = new Map<Tier | "photo", { promise: Promise<void>; since: number }>();
   // 程序链接完成后，驱动仍可能在第一次实际绘制时耗时数秒。
   let firstStillFrameReady = false;
   /** 首次静止累积绘制之后插入的 GPU 栅栏。 */
-  let firstStillFrameFence: WebGLSync | null = null;
+  let firstStillFrameFence: ReturnType<Renderer["fence"]> | null = null;
   /** 编译一档渲染器；已在编译或已经可用时不重复。失败时提示，之后再次需要时重试。
    * 提示先写进页面：渲染器会等它显示出来再开始编译，Windows 上编译期间页面可能停止刷新。 */
-  function compileTier(tier: Tier) {
-    if (renderer.ready(tier)) return Promise.resolve();
-    const existing = compiling.get(tier);
+  function compileTier(tier: Tier, purpose?:"photo") {
+    const key=purpose??tier;
+    if (renderer.ready(tier,purpose)) return Promise.resolve();
+    const existing = compiling.get(key);
     if (existing) return existing.promise;
     const since = performance.now(),
       seconds = () => +((performance.now() - since) / 1000).toFixed(1);
     report("compile-start", { tier });
     const promise = renderer
-      .compile(tier)
+      .compile(tier,purpose)
       .then(() => report("compile-ready", { tier, seconds: seconds() }))
       .catch((error) => {
         report("compile-failed", { tier, seconds: seconds(), message: String(error.stack || error) });
@@ -71,19 +74,19 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
         throw error;
       })
       .finally(() => {
-        compiling.delete(tier);
+        compiling.delete(key);
         drawn = "";
         showTaskStatus(performance.now());
       });
     promise.catch(() => {});
-    compiling.set(tier, { promise, since });
+    compiling.set(key, { promise, since });
     showTaskStatus(since);
     return promise;
   }
   /** 底部提示：渲染器编译进度，或拍照、导出时的操作说明。 */
   function showTaskStatus(now: number) {
     const preview = compiling.get(settings.tier),
-      accumulation = compiling.get("accumulation"),
+      accumulation = (photoWaiting && compiling.get("photo")) || compiling.get("accumulation"),
       elapsed = (job: {since:number}) => `已用 ${Math.floor((now - job.since) / 1000)} 秒`;
     const text = photo
       ? photo.kind === "export"
@@ -123,10 +126,10 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       photoWaiting = false;
       return setPhotoButton();
     }
-    if (renderer.ready("accumulation")) return startPhoto("photo");
+    if (renderer.ready("accumulation","photo")) return startPhoto("photo");
     photoWaiting = true;
     setPhotoButton();
-    compileTier("accumulation").then(() => {
+    compileTier("accumulation","photo").then(() => {
       if (photoWaiting) startPhoto("photo");
     }, () => {});
   };
@@ -150,14 +153,14 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       width = innerWidth * scale;
       height = innerHeight * scale;
     } else {
-      const gl = renderer.gl,
-        limit = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+      const limit=renderer.maxTextureSize;
       width = innerWidth * devicePixelRatio * EXPORT_SCALE;
       height = innerHeight * devicePixelRatio * EXPORT_SCALE;
       const shrink = Math.min(1, limit / Math.max(width, height), Math.sqrt(EXPORT_PIXELS / (width * height)));
       width *= shrink;
       height *= shrink;
     }
+    rate.reset();
     const film = renderer.photograph(currentView.camera, {
       width: Math.round(width),
       height: Math.round(height),
@@ -203,9 +206,8 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
     const world = scene();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    const gl = renderer.gl;
-    if (firstStillFrameFence && gl.getSyncParameter(firstStillFrameFence, gl.SYNC_STATUS) === gl.SIGNALED) {
-      gl.deleteSync(firstStillFrameFence);
+    if (firstStillFrameFence?.ready()) {
+      firstStillFrameFence.dispose();
       firstStillFrameFence = null;
       firstStillFrameReady = true;
       report("accumulation-first-frame-ready");
@@ -227,6 +229,8 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       return;
     }
     const view = map.frame(settings);
+    if (view.overview !== wasOverview) rate.reset();
+    wasOverview = view.overview;
     currentView = view;
     if (renderer.ready(settings.tier)) shownTier = settings.tier;
     controls.enabled = view.objects;
@@ -276,27 +280,25 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
         ...drawOptions,
       });
       if (rendered && !changed && !firstStillFrameReady) {
-        firstStillFrameFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-        gl.flush();
+        firstStillFrameFence = renderer.fence();
       }
       if (rendered && session && session.stats.loaded > 0) finishStartup();
     }
-    if (changed) {
-      if (now - drawnAt < 250) frames.push(now - drawnAt);
-      if (frames.length > 240) frames.shift();
+    if (changed && (rendered || view.overview)) {
+      if (rendered && renderer.backend === "webgpu") rate.track(renderer.frameDone);
+      else rate.complete(now);
       drawn = state;
-      drawnAt = now;
-    }
+    } else if (!changed) rate.idle();
     if (now - statusAt > 100) {
       hud.position(camera.position);
       drawAxes(element<HTMLCanvasElement>("axes"), camera);
       element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
-      const interval = frames.reduce((a, b) => a + b, 0) / frames.length;
-      element<HTMLOutputElement>("fps").textContent = !changed
+      const fps = rate.fps;
+      element<HTMLOutputElement>("fps").textContent = !changed && !rate.waiting
         ? rendered
           ? `累积 ${renderer.accumulated}`
           : "静止"
-        : `${Math.round(1000 / interval) || "—"} FPS`;
+        : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)} FPS`;
       if (session) {
         const stats = session.stats,
           times = renderer.times.sort((a, b) => a - b),
@@ -313,21 +315,24 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
     if (settings.stillAccumulation) compileTier("accumulation");
     hud.settings();
     renderer.resetTiming();
+    rate.reset();
     drawn = "";
     onSettings?.();
   }
   refreshSettings();
   return {
-    hud, map, frame, refreshSettings, cancelPhoto, frames,
+    hud, map, frame, refreshSettings, cancelPhoto, frames: rate.intervals,
+    get fps() { return rate.fps; },
     setWorld(loaded: boolean, readChunks?: () => ArrayBuffer | Promise<ArrayBuffer>) {
       drawn = "";
-      frames.length = 0;
+      rate.reset();
       currentView = null;
       hud.world({ loaded });
       return map.setWorld(readChunks);
     },
     dispose() {
-      if (firstStillFrameFence) renderer.gl.deleteSync(firstStillFrameFence);
+      rate.reset();
+      firstStillFrameFence?.dispose();
       cancelPhoto();
     },
   };

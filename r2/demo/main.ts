@@ -23,7 +23,7 @@ const settings: ViewSettings = {
 input("far-radius").min = "8";
 const { status, drawOptions } = mountRenderDebug(document.getElementById("render-debug")!);
 const renderer = await createRenderer(canvas, {
-  assets: "/assets/", tier: settings.tier,
+  assets: "/assets/", tier: settings.tier, useWebGPU: params.get("backend") !== "webgl",
   onProgress: ({ label }) => startupStage(label),
 });
 

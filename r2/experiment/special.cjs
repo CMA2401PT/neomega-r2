@@ -17,7 +17,7 @@ fs.mkdirSync(out, { recursive: true });
       errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-    await page.goto(base + "/?scene=special");
+    await page.goto(base + "/?scene=special&backend=webgl");
     await page.waitForFunction(
       () => globalThis.r2?.state.ready && r2.state.times.length >= 30,
       null,

@@ -2,9 +2,11 @@
 
 R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部件。射线先穿过空间格子，再检查格内登记的表面：立方体直接求命中面，复杂模型检查登记到该格的四边形，活动部件把射线变换到局部坐标求交。所有命中共用排序、光照和透明合成。
 
-本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来由宿主实现数据源决定，核心自带内存数据源与 R2Link 数据源。[neomega-viewer-r2 应用](../../apps/neomega-viewer-r2/README.md) 负责存档读取与来源选择。Viewer 和内存 demo 共用 `common_ui/` 的相机操作、地图、设置及绘制循环。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
+本模块提供共享模型、场景准备器、WebGPU 与 WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来由宿主实现数据源决定，核心自带内存数据源与 R2Link 数据源。[neomega-viewer-r2 应用](../../apps/neomega-viewer-r2/README.md) 负责存档读取与来源选择。Viewer 和内存 demo 共用 `common_ui/` 的相机操作、地图、设置及绘制循环。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
 
 浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。渲染器的宿主从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
+
+`createRenderer(canvas, options)` 默认使用 WebGPU。指定 `{ useWebGPU: false }` 可选择 WebGL 2。宿主可以读取 `renderer.backend`，使用 `await renderer.pick(...)` 和 `await renderer.pixels()` 在两个后端读回结果。显式要求等待 GPU 完成时，使用 `await renderer.draw(camera, { ...options, synchronize: true })`。WebGPU 需要安全上下文，在线页面使用 HTTPS 或 localhost。构建时 `webgl2gpu/convert.cjs` 从同一份 GLSL 射线程序生成四档 WGSL，各档在浏览器中按需创建管线。两个后端都有独立的实时累积、照片和拾取程序。实时累积固定一次反弹，多次反弹照片按需编译。WebGL 与预览并行编译对应的拾取程序，让首次点击也能同步返回。光影与累积共用同一份射线循环，主射线、反射和反弹都从同一处调用体素遍历，以减少驱动内联时复制的代码。
 
 ## 共享查看界面
 

@@ -29,7 +29,7 @@ function summarize(values) {
     page.on("console", (message) => {
       if (/GL_INVALID|WebGL:.*INVALID/.test(message.text())) result.errors.push(message.text());
     });
-    await page.goto(base);
+    await page.goto(new URL("?backend=webgl",base).href);
     await page.waitForFunction(() => {
       const s = globalThis.viewerR2?.state.stream;
       return s && s.loaded === s.wanted && !s.pending && !s.nearPending;

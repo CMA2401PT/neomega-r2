@@ -1,7 +1,7 @@
 import { regionKey } from "../scene/prepare.ts";
 import type { ObjectRegistry } from "../objects/registry.ts";
 import type { TextureSet } from "../render/textures.ts";
-import type { WorldGPU } from "../render/world-gpu.ts";
+import type { RegionDirectory } from "../render/region-directory.ts";
 import type { WorkerRequest, WorkerResponse } from "../scene/worker.ts";
 import type { ObjectDescriptor, PreparedR2Region } from "../contracts.ts";
 import type { createRenderer } from "../render/renderer.ts";
@@ -125,7 +125,7 @@ interface TextureChange {
 export class WorldSession {
   readonly renderer: Renderer;
   readonly source: DataSource;
-  readonly gpu: WorldGPU;
+  readonly gpu: RegionDirectory;
   private readonly registry: ObjectRegistry;
   private readonly onError: (message: string) => void;
   private readonly worker: Worker;

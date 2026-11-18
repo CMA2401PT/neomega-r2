@@ -24,7 +24,7 @@ for (const stage of ["before-completion", "during-completion", "during-link", "n
       getProgramInfoLog: () => null,
     };
     await assert.rejects(
-      createRenderer({ getContext: () => gl }),
+      createRenderer({ getContext: () => gl },{useWebGPU:false}),
       stage === "missing-log" ? /浏览器未提供编译日志/ : /WebGL 上下文丢失/,
     );
   });

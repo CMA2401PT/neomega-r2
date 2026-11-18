@@ -21,7 +21,7 @@ const read = (page) => page.evaluate(() => Array.from(r2.pixels()));
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-    await page.goto(base);
+    await page.goto(new URL("?backend=webgl",base).href);
     await page.waitForFunction(() => globalThis.r2, null, { timeout: 90000 });
     await settle(page, 60);
     // 编辑跨过多次 HUD 刷新，并在三个输入框间移动焦点，再跳转。
