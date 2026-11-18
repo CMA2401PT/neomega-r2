@@ -17,7 +17,7 @@ export class WordAllocator {
   allocate(length: number): WordBlock {
     const size = Math.ceil(length / 256) * 256,
       index = this.free.findIndex((span) => span.length >= size);
-    if (index < 0) throw Error("区域数据超过显存预算，请降低远景视距");
+    if (index < 0) throw Error("r2region 数据超过显存预算，请降低远景视距");
     const span = this.free[index],
       block = { start: span.start, length: size };
     span.start += size;

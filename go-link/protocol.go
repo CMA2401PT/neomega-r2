@@ -21,7 +21,7 @@ type Camera struct {
 	Pitch    *float64   `json:"pitch,omitempty"`
 }
 
-// RegionPos 是区域坐标：一个区域是 8×8 区块（128×128 方块）的整根柱子。
+// RegionPos 是 r2region 的水平坐标，每格横跨 8×8 个区块（128×128 方块）。
 type RegionPos struct {
 	X int `json:"x"`
 	Z int `json:"z"`
@@ -67,7 +67,7 @@ type Want struct {
 }
 
 // RegionData 提交一个区域的方块，压缩数据在消息尾部；尾部为空表示区域没有方块。
-// ClippedSections 是因超出可显示高度而省略的 section 数，用于诊断。
+// ClippedSections 是因超出可显示高度而省略的子区块数，用于诊断。
 type RegionData struct {
 	Type            string `json:"type"`
 	X               int    `json:"x"`

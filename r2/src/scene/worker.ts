@@ -3,8 +3,8 @@ import type {
   Catalog,
   ObjectReference,
   PreparationCatalog,
-  PreparedRegion,
-  SourceRegion,
+  PreparedR2Region,
+  SourceR2Region,
 } from "../contracts.ts";
 
 /** 主线程发给准备线程的消息。 */
@@ -23,9 +23,9 @@ export type WorkerRequest =
 /** 准备线程的回复。 */
 export type WorkerResponse =
   | { type: "initialized" }
-  | { type: "textures"; results: PreparedRegion[] }
+  | { type: "textures"; results: PreparedR2Region[] }
   | { type: "stored"; key: string; request: number }
-  | { type: "prepared"; request: number; result: PreparedRegion }
+  | { type: "prepared"; request: number; result: PreparedR2Region }
   | { type: "error"; request?: number; key?: string; error: string };
 
 // 只依赖 DOM 类型库；线程全局对象只用到这两项。
@@ -35,8 +35,8 @@ const scope = self as unknown as {
 };
 let catalogPromise: Promise<PreparationCatalog & Catalog>;
 let states: Uint32Array = new Uint32Array();
-const regions = new Map<string, SourceRegion>();
-const transfers = (result: PreparedRegion) => [
+const regions = new Map<string, SourceR2Region>();
+const transfers = (result: PreparedR2Region) => [
   result.words.buffer as ArrayBuffer,
   result.headers.buffer as ArrayBuffer,
   result.relocations.buffer as ArrayBuffer,

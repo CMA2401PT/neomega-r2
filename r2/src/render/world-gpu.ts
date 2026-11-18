@@ -1,5 +1,5 @@
 import { WordAllocator, type WordBlock } from "./allocator.ts";
-import type { PreparedRegion, RegionStatistics } from "../contracts.ts";
+import type { PreparedR2Region, RegionStatistics } from "../contracts.ts";
 
 type Uniforms = Map<string, WebGLUniformLocation | null>;
 interface InstalledRegion {
@@ -110,7 +110,7 @@ export class WorldGPU {
     ]);
   }
   /** 同一帧内先上传新地址，再发布目录，最后释放旧地址，避免看到一半的新区域。 */
-  install(region: PreparedRegion): void {
+  install(region: PreparedR2Region): void {
     const { gl } = this,
       key = region.key,
       old = this.regions.get(key),

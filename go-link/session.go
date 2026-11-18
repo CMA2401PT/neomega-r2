@@ -12,7 +12,7 @@ import (
 
 // Source 提供区域方块。Region 可能被并发调用；ctx 在区域不再需要或连接结束时取消。
 type Source interface {
-	Region(ctx context.Context, x, z int) (Region, error)
+	Region(ctx context.Context, x, z int) (R2Region, error)
 }
 
 // ObjectSource 是可选接口：提供区域内、以区块坐标 center 为圆心 radius 区块以内的特殊对象。

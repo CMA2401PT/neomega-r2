@@ -3,12 +3,12 @@ import type { ObjectRegistry } from "../objects/registry.ts";
 import type { TextureSet } from "../render/textures.ts";
 import type { WorldGPU } from "../render/world-gpu.ts";
 import type { WorkerRequest, WorkerResponse } from "../scene/worker.ts";
-import type { ObjectDescriptor, PreparedRegion } from "../contracts.ts";
+import type { ObjectDescriptor, PreparedR2Region } from "../contracts.ts";
 import type { createRenderer } from "../render/renderer.ts";
 
 type Renderer = Awaited<ReturnType<typeof createRenderer>>;
 
-/** 区域坐标：一个区域是 128×128 方块的柱子（8×8 区块），区域 (x, z) 覆盖方块 [128x, 128x+128)。 */
+/** r2region 坐标：每格横跨 8×8 个区块（chunk），r2region (x, z) 覆盖方块 [128x, 128x+128)。 */
 export interface RegionCoord {
   x: number;
   z: number;
@@ -68,7 +68,7 @@ export interface SessionOptions {
   workerURL?: string | URL;
 }
 
-/** 会话的统计。 */
+/** 空间计数以 r2region 为单位；sections 单独统计已发布的子区块（subchunk）。 */
 export interface SessionStats {
   /** 可见窗口内的区域数。 */
   wanted: number;
@@ -130,7 +130,7 @@ export class WorldSession {
   /** 模型最远伸出所在区域的距离，单位区域；窗口外要多保留这么多圈来源区域。 */
   private readonly fragmentRadius: number;
   private entries = new Map<string, Entry>();
-  private ready: Array<{ entry: Entry; version: number; result: PreparedRegion }> = [];
+  private ready: Array<{ entry: Entry; version: number; result: PreparedR2Region }> = [];
   private preparing: { request: number; entry: Entry; version: number } | null = null;
   private serial = 0;
   private bytes = 0;

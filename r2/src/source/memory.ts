@@ -2,14 +2,14 @@ import { AIR, blockHash } from "./hash.ts";
 import type { DataSource, WantChange, WorldSink } from "../session/session.ts";
 import type { ObjectDescriptor } from "../contracts.ts";
 
-/** 一个 section 的方块哈希：4096 项，第 i 项是格子 x = i >> 8, z = (i >> 4) & 15, y = i & 15。0 表示空气。 */
+/** 一个子区块（subchunk）的方块哈希：4096 项，第 i 项是格子 x = i >> 8, z = (i >> 4) & 15, y = i & 15。0 表示空气。 */
 export interface SectionBlocks {
   /** section 坐标，即方块坐标除以 16 向下取整。 */
   position: number[];
   blocks: Uint32Array;
 }
 
-/** 把若干 section 编码成会话接受的区域数据（格式见 README 的「区域编码」）。全是空气的 section 省略。 */
+/** 把同一 r2region 内的子区块编码成会话接受的数据（格式见 README 的「区域编码」）。全是空气的子区块省略。 */
 export function encodeRegion(sections: Iterable<SectionBlocks>): ArrayBuffer {
   const words: number[] = [0x34504c54, 0];
   for (const { position, blocks } of sections) {
@@ -116,7 +116,7 @@ export class MemoryWorld {
     return count;
   }
 
-  /** 区域 (x, z) 的编码；没有方块时为 null。 */
+  /** r2region (x, z) 的编码；没有方块时为 null。 */
   region(x: number, z: number): ArrayBuffer | null {
     const keys = this.regions.get(`${x}/${z}`);
     if (!keys) return null;

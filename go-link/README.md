@@ -4,6 +4,8 @@ R2Link 让游戏机器人、服务器插件或存档服务把方块世界交给 
 
 [neomega-viewer-r2](../../apps/neomega-viewer-r2/README.md) 自己的存档与内置场景也走这条路：Go 服务在 `/r2link` 上把当前世界作为数据源提供给同源页面。外部数据源在 HUD 的连接按钮里填写地址。
 
+协议中的 `region` 指 r2region，横向覆盖 8×8 个区块（chunk）。每个区块沿高度分成 16×16×16 方块的子区块（subchunk），一个 `region` 消息携带该范围内有数据的子区块。
+
 本模块是 Go 一侧的实现：消息与区域编码、连接、按订阅排队读取的会话，以及生成特殊对象描述的 `effector`、`blockactor`。浏览器一侧是 neomega-r2 的 `r2linkSource`。
 
 ## 消息

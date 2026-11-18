@@ -1,9 +1,9 @@
 import type {
   ObjectReference,
   PreparationCatalog,
-  PreparedRegion,
-  SourceRegion,
-  SourceSection,
+  PreparedR2Region,
+  SourceR2Region,
+  SourceSubchunk,
 } from "../contracts.ts";
 
 const MIXED = 0xffffffff;
@@ -39,9 +39,9 @@ export function modelOf(states: Uint32Array, hash: number): number | undefined {
 }
 /** 解码传输布局并把调色板的方块哈希换成模型；表外的哈希画成空气并计入 unknown。
  * 压缩格子索引仍引用原始缓冲，不会展开整片世界。 */
-export function decodeRegion(buffer: ArrayBuffer, states: Uint32Array): SourceRegion {
+export function decodeRegion(buffer: ArrayBuffer, states: Uint32Array): SourceR2Region {
   const data = new Uint32Array(buffer),
-    sections: SourceSection[] = [];
+    sections: SourceSubchunk[] = [];
   let p = 2, unknown = 0;
   if (data[0] !== 0x34504c54) throw Error("无法识别区块数据格式");
   for (let n = 0; n < data[1]; n++) {
@@ -62,7 +62,7 @@ export function decodeRegion(buffer: ArrayBuffer, states: Uint32Array): SourceRe
   }
   return { sections, unknown, bytes: buffer.byteLength };
 }
-export function unpack(section: SourceSection): Uint32Array {
+export function unpack(section: SourceSubchunk): Uint32Array {
   const cells = new Uint32Array(4096),
     { bits, palette, words } = section,
     per = Math.floor(32 / bits),
@@ -74,7 +74,7 @@ export function unpack(section: SourceSection): Uint32Array {
       ];
   return cells;
 }
-function empty(position: number[]): SourceSection {
+function empty(position: number[]): SourceSubchunk {
   return {
     position,
     bits: 0,
@@ -83,7 +83,7 @@ function empty(position: number[]): SourceSection {
   };
 }
 /** 只替换已准备好实例的本体；同 section 的其他方块保留原值。 */
-function replaceCells(section: SourceSection, indices: number[]): SourceSection {
+function replaceCells(section: SourceSubchunk, indices: number[]): SourceSubchunk {
   const cells = unpack(section);
   for (const i of indices) cells[i] = 0;
   const palette: number[] = [],
@@ -101,7 +101,7 @@ function replaceCells(section: SourceSection, indices: number[]): SourceSection 
       words[Math.floor(i / per)] |= lookup.get(cells[i])! << ((i % per) * bits);
   return { ...section, palette: new Uint32Array(palette), words, bits };
 }
-/** 把 section 分成 64 个 4×4×4 小块，供着色器用位运算跳过空格。
+/** 把子区块分成 64 个 4×4×4 小块，供着色器用位运算跳过空格。
  * 占用指非空气或带有附加片段；小块内全是同一完整立方体时记下其编号，射线可以整块穿过同一介质。
  * 小块和格子都按 XZY 顺序编号：小块 ((x>>2)*4+(z>>2))*4+(y>>2)，块内 ((x&3)*4+(z&3))*4+(y&3)。
  */
@@ -144,14 +144,14 @@ export function prepareRegion({
 }: {
   x: number;
   z: number;
-  regions: Map<string, SourceRegion>;
+  regions: Map<string, SourceR2Region>;
   catalog: PreparationCatalog;
   objects?: ObjectReference[];
-}): PreparedRegion {
+}): PreparedR2Region {
   const started = performance.now(),
     source = regions.get(regionKey(x, z));
-  if (!source) throw Error("没有来源区域 " + regionKey(x, z));
-  const sections = new Map<string, SourceSection>(),
+  if (!source) throw Error("缺少源 r2region " + regionKey(x, z));
+  const sections = new Map<string, SourceSubchunk>(),
     fragments = new Map<string, Map<number, number[]>>(),
     replacements = new Map<string, number[]>();
   for (const section of source.sections)

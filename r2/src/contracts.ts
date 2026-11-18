@@ -62,17 +62,17 @@ export interface ObjectReference {
   ids: number[];
 }
 
-/** 压缩 section；解码后 palette 保存静态模型编号（传输时是方块哈希），格子索引为 XZY。 */
-export interface SourceSection {
+/** 压缩子区块（subchunk，16×16×16 方块）；解码后 palette 保存静态模型编号（传输时是方块哈希），格子索引为 XZY。 */
+export interface SourceSubchunk {
   position: number[];
   bits: number;
   palette: Uint32Array;
   words: Uint32Array;
 }
 
-/** 8×8 区块区域的输入数据。 */
-export interface SourceRegion {
-  sections: SourceSection[];
+/** 一个 r2region（横向 8×8 个 chunk）的输入数据。 */
+export interface SourceR2Region {
+  sections: SourceSubchunk[];
   unknown: number;
   bytes: number;
 }
@@ -85,10 +85,10 @@ export interface RegionStatistics {
   prepareMS: number;
 }
 
-/** 可增量上传的区域。headers 每 7 项描述一个 section：
+/** 可增量上传的区域。headers 每 7 项描述一个子区块：
  * [区内编号, 附加块地址, 压缩字地址, 位宽, 小块掩码低 32 位, 高 32 位, 均匀编号]，
- * 附加块地址为 0 表示整个 section 是同一完整方块或空气；relocations 指出 words 内需要加上显存基址的地址项。 */
-export interface PreparedRegion {
+ * 附加块地址为 0 表示整个子区块是同一完整方块或空气；relocations 指出 words 内需要加上显存基址的地址项。 */
+export interface PreparedR2Region {
   key: string;
   x: number;
   z: number;
@@ -97,6 +97,11 @@ export interface PreparedRegion {
   relocations: Uint32Array;
   stats: RegionStatistics;
 }
+
+// 兼容已有宿主使用的类型名。
+export type SourceSection = SourceSubchunk;
+export type SourceRegion = SourceR2Region;
+export type PreparedRegion = PreparedR2Region;
 
 /** 共享模型；fragments 指向伸进相邻格子的部分。 */
 export interface Model {

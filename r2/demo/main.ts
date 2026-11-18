@@ -149,7 +149,7 @@ function render(now: number) {
       median = times[Math.floor(times.length / 2)];
     status.textContent =
       `${width}×${height} 实际像素 · GPU ${median?.toFixed(2) || "…"} ms\n` +
-      `${world.blockCount} 个方块 · ${fragmentReferences()} 个跨格片段引用 · 区域 ${stats.loaded}/${stats.wanted}\n` +
+      `${world.blockCount} 个方块 · ${fragmentReferences()} 个跨格片段引用 · r2region ${stats.loaded}/${stats.wanted}\n` +
       `GPU 纹理 ${(renderer.textureBytes / 1024 ** 2).toFixed(1)} MiB\n` +
       `位置 ${camera.position.map((v) => v.toFixed(1)).join(", ")}`;
     statusAt = now;

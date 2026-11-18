@@ -12,26 +12,29 @@ import (
 // RegionMagic 标识区域编码（"TLP4"）。
 const RegionMagic = 0x34504c54
 
-// Section 是一个 16×16×16 section 的压缩方块：调色板为方块哈希，索引低位在前、不跨字。
+// Subchunk 是 16×16×16 方块的子区块：调色板为方块哈希，索引低位在前、不跨字。
 // 第 i 个索引对应格子 x = i >> 8, z = (i >> 4) & 15, y = i & 15。Bits 为 0 时整块是 Palette[0]，Words 为空。
-type Section struct {
-	// Position 是 section 坐标，即方块坐标除以 16 向下取整。
+type Subchunk struct {
+	// Position 是子区块坐标，即方块坐标除以 16 向下取整。
 	Position [3]int
 	Bits     uint32
 	Palette  []uint32
 	Words    []uint32
 }
 
-// Region 是一个区域的内容。Sections 只放这个区域内、Y 在 -4～27 的 section；
-// 更高或更低的 section 不能显示，计入 Clipped 让浏览器提示。
-type Region struct {
-	Sections []Section
+// R2Region 汇集横向 8×8 个区块（chunk）的子区块。只发送 Y 索引 -4～27 的子区块，越界数量记入 Clipped。
+type R2Region struct {
+	Sections []Subchunk
 	Clipped  int
 }
 
-// EncodeRegion 把 section 写成小端 u32 数组：magic、section 数，再逐个写
+// Section 和 Region 保留已有 Go 调用方使用的类型名。
+type Section = Subchunk
+type Region = R2Region
+
+// EncodeRegion 将一个 r2region 的子区块写成小端 u32 数组：magic、子区块数，再逐个写
 // sx, sy, sz, bits, 调色板项数, 索引字数, 调色板, 索引。
-func EncodeRegion(sections []Section) []byte {
+func EncodeRegion(sections []Subchunk) []byte {
 	size := 2
 	for _, section := range sections {
 		size += 6 + len(section.Palette) + len(section.Words)
@@ -57,10 +60,10 @@ func EncodeRegion(sections []Section) []byte {
 	return data
 }
 
-// Pack 把 4096 个方块哈希压成 Section：调色板按首次出现排序，位宽取最小值。
-func Pack(position [3]int, blocks *[4096]uint32) Section {
+// Pack 把 4096 个方块哈希压成子区块：调色板按首次出现排序，位宽取最小值。
+func Pack(position [3]int, blocks *[4096]uint32) Subchunk {
 	index := map[uint32]uint32{}
-	section := Section{Position: position}
+	section := Subchunk{Position: position}
 	for _, hash := range blocks {
 		if _, ok := index[hash]; !ok {
 			index[hash] = uint32(len(section.Palette))
