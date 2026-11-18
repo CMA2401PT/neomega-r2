@@ -105,7 +105,7 @@
       <span id="startup-elapsed">首次启动可能需要较长时间，请稍候</span>
     </section>
     <aside id="toolbar" class="panel">
-      <div class="brand">neOmega <b>R2</b></div>
+      <div class="brand">neOmega <b>R2</b><span id="render-backend"></span></div>
       <!-- 第一排：前三个按钮三选一，决定预览用哪档绘制器；随后是静止时累积与隐藏 HUD。 -->
       <div class="tools" role="group" aria-label="预览绘制器">
         <button
@@ -335,7 +335,7 @@
           >拖动转向 · WASD 水平移动 · 空格上升 / Shift 下降 · 滚轮前后</span
         >
         <span data-input="touch"
-          >单指拖动转向 · 按住十字键水平移动 · 左侧按钮升降</span
+          >单指拖动转向 · 左侧十字键水平移动 · 右侧按钮升降</span
         >
       </p>
       <slot name="settings-extra"></slot>

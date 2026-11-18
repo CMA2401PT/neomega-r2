@@ -252,6 +252,10 @@ svg .shade {
   padding: 0 2px 5px;
   letter-spacing: 0.1px;
 }
+#render-backend {
+  float: right;
+  color: #46595d;
+}
 .brand b {
   color: #0b6b6b;
   font-weight: 800;
@@ -313,7 +317,7 @@ body.hud-hidden #action-row,
 body.hud-hidden #photo-progress {
   display: none;
 }
-/* 触屏按钮位于悬浮 HUD 上方，十字键顶端留在右上角面板下方。 */
+/* 触屏按钮位于悬浮 HUD 上方，左手控制平移，右手控制升降。 */
 #movepad {
   display: none;
   position: fixed;
@@ -335,11 +339,11 @@ body.hud-hidden #photo-progress {
   gap: 6px;
 }
 .pad-rise {
-  left: max(16px, env(safe-area-inset-left, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
   gap: 14px;
 }
 .pad-cross {
-  right: max(16px, env(safe-area-inset-right, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
   grid-template-columns: repeat(3, var(--pad-size));
   grid-template-areas: ". forward ." "left . right" ". back .";
 }

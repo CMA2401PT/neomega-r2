@@ -21,6 +21,7 @@ const EXPORT_SCALE = 2,
   EXPORT_SUPERSAMPLE = 4,
   EXPORT_PIXELS = 24e6;
 export function createView({ renderer, camera, settings, scene, onSettings, onStats, report = () => {} }: ViewOptions) {
+  element("render-backend").textContent = renderer.backend === "webgpu" ? "[webGPU]" : "[webGL]";
   const jump = (position: number[]) => { camera.position = position; };
   const map = new FullscreenMap({ renderer, camera, jump });
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
