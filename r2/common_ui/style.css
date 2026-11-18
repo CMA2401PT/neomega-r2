@@ -254,7 +254,13 @@ svg .shade {
 }
 #render-backend {
   float: right;
+  text-decoration: none;
   color: #46595d;
+}
+#render-backend[href]:hover,
+#render-backend[href]:focus-visible {
+  color: #0b6b6b;
+  text-decoration: underline;
 }
 .brand b {
   color: #0b6b6b;

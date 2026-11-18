@@ -20,8 +20,21 @@ export const TIER_NAMES = { voxel: "体素渲染器", basic: "基础渲染器", 
 const EXPORT_SCALE = 2,
   EXPORT_SUPERSAMPLE = 4,
   EXPORT_PIXELS = 24e6;
-export function createView({ renderer, camera, settings, scene, onSettings, onStats, report = () => {} }: ViewOptions) {
-  element("render-backend").textContent = renderer.backend === "webgpu" ? "[webGPU]" : "[webGL]";
+export function createView({ renderer, camera, settings, scene, switchBackend, onSettings, onStats, report = () => {} }: ViewOptions) {
+  const backend = element<HTMLAnchorElement>("render-backend");
+  backend.textContent = renderer.backend === "webgpu" ? "[webGPU]" : "[webGL]";
+  if (switchBackend) {
+    const next = renderer.backend === "webgpu" ? "webgl" : "webgpu";
+    if (next === "webgpu" && (!isSecureContext || !navigator.gpu)) {
+      backend.title = isSecureContext ? "当前浏览器未提供 WebGPU" : "使用本机地址或 HTTPS 可启用 WebGPU";
+    } else {
+      const url = new URL(location.href);
+      url.searchParams.set("backend", next);
+      backend.href = url.href;
+      backend.title = "切换到 " + (next === "webgpu" ? "WebGPU" : "WebGL") + " 并重新加载页面";
+      backend.setAttribute("aria-label", backend.title);
+    }
+  }
   const jump = (position: number[]) => { camera.position = position; };
   const map = new FullscreenMap({ renderer, camera, jump });
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
