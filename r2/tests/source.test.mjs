@@ -61,6 +61,24 @@ test("MemoryWorld 按区域编码，负坐标落在正确的 section", () => {
   assert.equal(world.region(-1, -1), null, "只剩空气的区域视为空");
 });
 
+test("区块占用表跨越原点，按列合并子区块，忽略已清空的列", () => {
+  const world = new MemoryWorld();
+  world.set(-1, 0, -1, "stone");
+  world.set(-1, 16, -1, "glass");
+  world.set(0, 0, 0, "stone");
+  const index = new DataView(world.chunkIndex());
+  assert.equal(index.byteLength, 2 * 136);
+  assert.equal(index.getInt32(0, true), -1);
+  assert.equal(index.getInt32(4, true), -1);
+  assert.equal(index.getUint8(135), 0x80);
+  assert.equal(index.getInt32(136, true), 0);
+  assert.equal(index.getInt32(140, true), 0);
+  assert.equal(index.getUint8(144), 1);
+  world.set(-1, 0, -1, 0);
+  world.set(-1, 16, -1, AIR);
+  assert.equal(world.chunkIndex().byteLength, 136);
+});
+
 test("memorySource 提交需要的区域与近景对象，commit 后重新提交变化", async () => {
   const world = new MemoryWorld();
   world.set(10, 2, 10, "minecraft:stone");

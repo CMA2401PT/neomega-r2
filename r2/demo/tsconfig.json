@@ -4,7 +4,7 @@
     "rootDir": ".",
     "outDir": "dist",
     "declaration": false,
-    "paths": { "neomega-r2": ["../dist/index.d.ts"] }
+    "paths": { "neomega-r2": ["../dist/index.d.ts"], "/r2/common_ui/*": ["../dist/common_ui/*"] }
   },
   "include": ["*.ts"]
 }

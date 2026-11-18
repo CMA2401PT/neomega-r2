@@ -24,6 +24,14 @@ const read = (page) => page.evaluate(() => Array.from(r2.pixels()));
     await page.goto(base);
     await page.waitForFunction(() => globalThis.r2, null, { timeout: 90000 });
     await settle(page, 60);
+    // 编辑跨过多次 HUD 刷新，并在三个输入框间移动焦点，再跳转。
+    await page.locator("#x").fill("-17.25");
+    await page.locator("#y").fill("42");
+    await page.locator("#z").fill("8");
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator("#x").inputValue(), "-17.25");
+    await page.locator("#z").press("Enter");
+    assert.deepEqual(await page.evaluate(() => r2.state.position), [-17.25, 42, 8]);
     for (const name of ["showcase", "fences", "cutouts", "cubes", "spill"]) {
       await page.evaluate(async (name) => {
         // 遍历方式只改变求交策略，比较时保持同一个波面时刻。

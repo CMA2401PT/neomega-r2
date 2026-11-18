@@ -109,6 +109,33 @@ export class MemoryWorld {
     this.descriptors.clear();
   }
 
+  /** 内存场景中有方块的区块占用表，供地图概览使用。布局与 R2Link ChunkIndex 一致。 */
+  chunkIndex(): ArrayBuffer {
+    const tiles = new Map<string, { x: number; z: number; bits: Uint8Array }>();
+    for (const [key, cells] of this.sections) {
+      if (!cells.some((hash) => hash !== 0 && hash !== AIR)) continue;
+      const [x, , z] = key.split("/").map(Number);
+      const tx = Math.floor(x / 32), tz = Math.floor(z / 32);
+      const tileKey = `${tx}/${tz}`;
+      let tile = tiles.get(tileKey);
+      if (!tile) {
+        tile = { x: tx, z: tz, bits: new Uint8Array(128) };
+        tiles.set(tileKey, tile);
+      }
+      const bit = (z & 31) * 32 + (x & 31);
+      tile.bits[bit >> 3] |= 1 << (bit & 7);
+    }
+    const buffer = new ArrayBuffer(tiles.size * 136), header = new DataView(buffer);
+    let offset = 0;
+    for (const tile of tiles.values()) {
+      header.setInt32(offset, tile.x, true);
+      header.setInt32(offset + 4, tile.z, true);
+      new Uint8Array(buffer, offset + 8, 128).set(tile.bits);
+      offset += 136;
+    }
+    return buffer;
+  }
+
   /** 非空气方块数。 */
   get blockCount(): number {
     let count = 0;

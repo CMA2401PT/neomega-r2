@@ -2,9 +2,15 @@
 
 R2 用同一条射线管线绘制完整方块、复杂静态方块和活动部件。射线先穿过空间格子，再检查格内登记的表面：立方体直接求命中面，复杂模型检查登记到该格的四边形，活动部件把射线变换到局部坐标求交。所有命中共用排序、光照和透明合成。
 
-本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来由宿主实现数据源决定，核心自带内存数据源与 R2Link 数据源。存档读取、相机与界面由 [neomega-viewer-r2 应用](../../apps/neomega-viewer-r2/README.md) 负责。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
+本模块提供共享模型、场景准备器、WebGL 2 绘制器、世界会话以及特殊对象接口。世界会话按相机位置决定需要哪些区域，向数据源订阅并把收到的数据准备、上传到 GPU；数据从哪里来由宿主实现数据源决定，核心自带内存数据源与 R2Link 数据源。[neomega-viewer-r2 应用](../../apps/neomega-viewer-r2/README.md) 负责存档读取与来源选择。Viewer 和内存 demo 共用 `common_ui/` 的相机操作、地图、设置及绘制循环。核心不依赖 `celler`、旧 viewer 或任何应用模块；`demo/` 是不需要后端的验证页，场景放在内存世界里。
 
-浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。宿主只从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
+浏览器部分用 TypeScript 编写，源码在 `src/`，`npm run build` 输出到 `dist/`，目录结构与 `src/` 相同，着色器按模块地址相对加载。渲染器的宿主从 `dist/index.js` 导入。`dist/` 不进入版本库；Go 程序嵌入它，所以 `go build` 之前要先构建一次。
+
+## 共享查看界面
+
+静态 demo 与 Go Viewer 都在页面中加载 `/r2/common_ui/style.css` 和 `boot.js`。启动脚本挂载 `layout.html`，再导入宿主通过 `data-entry` 指定的模块。宿主可用 `<template id="actions">` 添加底栏按钮，用 `<template id="settings-extra">` 添加专属设置。
+
+宿主把渲染器、相机和设置交给 `createView()`，在动画循环中调用 `view.frame(now, session)`。切换世界时调用 `view.setWorld()` 并提供区块占用表，地图就能缩放到区块概览。demo 从内存场景生成占用表，Viewer 通过 R2Link 请求。两个宿主的接入示例分别在 [demo/main.ts](demo/main.ts) 和 [Viewer 的 app.ts](../../apps/neomega-viewer-r2/web/app.ts)。
 
 ## 数据怎样到达屏幕
 
@@ -228,6 +234,7 @@ const session = new WorldSession(renderer, source, { registry });
 | `src/render/world-gpu.ts` | 管理循环区域目录、增量上传与地址回收。 |
 | `src/render/renderer.ts`、`ray.frag` | 接收相机和帧参数，执行统一射线绘制；不读取存档。 |
 | `src/objects/`、`src/effects/` | 通用实例资源管理及各类外观、动画实现。 |
+| `common_ui/` | 可选的 TypeScript 查看界面，两种宿主共用 HUD 布局、CSS、飞行控制、地图、拍照和渲染状态。 |
 | `demo/` | 固定验证场景与最小宿主，经内存数据源走和存档相同的会话路径。 |
 
 场景准备以 8×8 区块为一个区域，收集目标区域及相邻来源伸入的片段。整个可见窗口边缘保留邻接来源区域，以接收窗口外模型伸入的片段。来源加载卸载或活动对象候选变化时，宿主重新准备受影响的目标区域；近景半径本身不参与静态准备。准备结果包含相对地址及重定位位置，显存分配器在上传时转换地址。移动窗口使用循环目录，不搬动仍在范围内的数据；同一帧内先上传完成的区域，再切换目录，最后回收旧地址。
@@ -261,9 +268,10 @@ npm --prefix neomega-r2/r2 run demo
 
 `demo` 先构建核心与验证页，再用 `scripts/serve.mjs` 提供静态文件：`/r2/` 是 `dist/`，`/assets/` 是默认资源包，其余是 `demo/`。另选地址时运行 `node scripts/serve.mjs 127.0.0.1:端口`。验证页只是静态文件，不需要 Go。
 
-打开 <http://127.0.0.1:2415>，特殊对象场景为 `/?scene=special`。拖动转向，WASD 移动，Q/E 升降。页面可选择渲染档、原生分辨率，以及用于对照的逐格遍历。要浏览真实 Java 存档，运行应用：
+打开 <http://127.0.0.1:2415>，特殊对象场景为 `/?scene=special`。拖动转向，WASD 水平移动，空格上升、Shift 下降。底部坐标可直接编辑，Enter 或箭头按钮跳转，Esc 放弃。页面可选择渲染档、原生分辨率，以及用于对照的逐格遍历。要浏览真实 Java 存档，运行应用：
 
 ```sh
+node apps/neomega-viewer-r2/scripts/build-web.mjs
 go run ./apps/neomega-viewer-r2/cmd/viewer -listen 127.0.0.1:2412
 ```
 

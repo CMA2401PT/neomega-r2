@@ -1,0 +1,32 @@
+import type { Camera, Renderer, PreviewTier, SessionStats } from "/r2/index.js";
+
+export interface ViewSettings {
+  nearRadius: number;
+  farRadius: number;
+  resolution: string;
+  speed: number;
+  tier: PreviewTier;
+  time: number;
+  timeFlow: boolean;
+  fog: boolean;
+  stillAccumulation: boolean;
+  photoScale: number;
+}
+
+export interface ViewStats {
+  stats: SessionStats;
+  shownTier: PreviewTier;
+  median?: number;
+  width: number;
+  height: number;
+}
+
+export interface ViewOptions {
+  renderer: Renderer;
+  camera: Camera;
+  settings: ViewSettings;
+  scene(): { name?: string; ocean?: number; connection?: { state: string } };
+  onSettings?(): void;
+  onStats?(value: ViewStats): void;
+  report?(event: string, detail?: Record<string, unknown>): void;
+}

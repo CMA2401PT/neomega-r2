@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../dist/common_ui",
+    "paths": {
+      "/r2/index.js": [
+        "../dist/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "*.ts"
+  ]
+}

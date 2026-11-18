@@ -1,99 +1,29 @@
 <!doctype html>
 <html lang="zh-CN">
-  <meta charset="utf-8" /><meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  /><link rel="icon" href="data:," />
-  <title>neomega-r2 · 格子内模型射线</title>
-  <style>
-    body {
-      margin: 0;
-      background: #19222d;
-      color: #edf1f5;
-      font: 14px system-ui;
-    }
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-    }
-    aside {
-      position: fixed;
-      left: 16px;
-      top: 16px;
-      max-width: 560px;
-      background: #17212beb;
-      padding: 16px;
-      border-radius: 8px;
-    }
-    h1 {
-      margin: 0 0 12px;
-      font-size: 18px;
-    }
-    select,
-    button {
-      font: inherit;
-      margin-right: 8px;
-    }
-    p {
-      line-height: 1.5;
-      margin: 8px 0;
-    }
-    #status {
-      white-space: pre-line;
-      font: 12px monospace;
-    }
-    .hint {
-      opacity: 0.7;
-      font-size: 12px;
-    }
-    label {
-      margin-right: 12px;
-    }
-  </style>
-  <canvas id="view"></canvas>
-  <aside>
-    <h1>R2 · 一个格子，两种求交方式</h1>
-    <select id="scene"></select>
-    <select id="tier">
-      <option value="voxel">体素渲染器</option>
-      <option value="basic">基础渲染器</option>
-      <option value="shading" selected>光影渲染器</option>
-    </select>
-    <select id="debug">
-      <option value="0">正常画面</option>
-      <option value="1">遍历 / 求交热图</option>
-      <option value="2">求交路径（绿：立方体，红：模型）</option>
-    </select>
-    <p>
-      <label
-        ><input
-          id="hierarchy"
-          type="checkbox"
-          checked
-        />空域与均匀立方体跳跃</label
-      ><label><input id="fragments" type="checkbox" checked />跨格片段</label>
-    </p>
-    <p>
-      <label
-        >像素比例
-        <select id="resolution">
-          <option value="device">屏幕原生</option>
-          <option value="1">1×</option>
-          <option value="0.75">0.75×</option>
-          <option value="0.5">0.5×</option>
-          <option value="2">2×</option>
-        </select></label
-      >
-    </p>
-    <div id="status">正在加载共享模型表…</div>
-    <p class="hint">
-      拖动旋转视角，WASD 前后左右，Q/E
-      升降。场景放在内存世界里，与存档走同一条准备与绘制路径。
-    </p>
-  </aside>
-  <script type="importmap">
-    { "imports": { "neomega-r2": "/r2/index.js" } }
-  </script>
-  <script type="module" src="/dist/main.js"></script>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/r2/common_ui/style.css" />
+    <title>neOmega R2 · 内存场景</title>
+    <script type="importmap">{ "imports": { "neomega-r2": "/r2/index.js" } }</script>
+  </head>
+  <body>
+    <template id="actions">
+      <select id="scene" aria-label="选择演示场景" title="选择演示场景"></select>
+      <i class="divider"></i>
+    </template>
+    <template id="settings-extra">
+      <h3>场景调试</h3>
+      <label class="setting">求交显示<select id="debug">
+        <option value="0">正常画面</option>
+        <option value="1">遍历 / 求交热图</option>
+        <option value="2">求交路径</option>
+      </select></label>
+      <label class="setting">空域与均匀立方体跳跃<input id="hierarchy" class="switch" type="checkbox" checked /></label>
+      <label class="setting">跨格片段<input id="fragments" class="switch" type="checkbox" checked /></label>
+      <output id="status" class="hint"></output>
+    </template>
+    <script type="module" src="/r2/common_ui/boot.js" data-entry="/dist/main.js"></script>
+  </body>
 </html>
