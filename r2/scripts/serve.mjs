@@ -1,4 +1,4 @@
-// 验证页的静态文件服务：/ 是 demo，/r2/ 是核心的 dist，/assets/ 是 neomega-view-utils 的默认资源包。
+// 验证页的静态文件服务：/ 是 demo，/r2/ 是核心的 dist，/assets/ 是 assets-utils 的默认资源包。
 // 用法：node scripts/serve.mjs [地址]，默认 127.0.0.1:2415；先运行 npm run build。
 import { createReadStream, statSync } from "node:fs";
 import { createServer } from "node:http";
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const mounts = [
   ["/r2/", join(root, "dist")],
-  ["/assets/", join(root, "../neomega-view-utils/r2assets/assets")],
+  ["/assets/", join(root, "../assets-utils/assets")],
   ["/", join(root, "demo")],
 ];
 const types = {
