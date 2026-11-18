@@ -253,6 +253,9 @@
       <label class="setting"
         >渲染分辨率<select id="resolution">
           <option value="native">屏幕原生</option>
+          <option value="native-4">屏幕像素 4×</option>
+          <option value="native-3">屏幕像素 3×</option>
+          <option value="native-2">屏幕像素 2×</option>
           <option value="2">窗口尺寸 2×</option>
           <option value="1.5">窗口尺寸 1.5×</option>
           <option value="1">窗口尺寸 1×</option>
@@ -264,13 +267,15 @@
         >远景雾<input id="fog" class="switch" type="checkbox"
       /></label>
       <p class="hint">
-        远景雾只在光影渲染器中出现。开启静止时累积后，画面会逐渐清晰，移动时重新累积。时间流逝与静止时累积互斥。
+        远景雾只在光影渲染器中出现。
       </p>
       <h3>导出当前画面</h3>
       <label class="setting">输出尺寸
         <select id="export-scale" aria-label="导出当前画面输出尺寸">
           <option value="1">屏幕尺寸 1×</option>
           <option value="2">屏幕尺寸 2×</option>
+          <option value="3">屏幕尺寸 3×</option>
+          <option value="4">屏幕尺寸 4×</option>
         </select>
       </label>
       <label class="setting">超采样
@@ -280,12 +285,14 @@
           <option value="4">4×4</option>
         </select>
       </label>
-      <p class="hint">使用当前预览渲染器，采满后自动保存 PNG。</p>
+      <p class="hint">输出尺寸决定 PNG 宽高；超采样在每个输出像素内取样，平滑方块轮廓，不改变宽高。4×4 采满 16 轮后保存。</p>
       <h3>拍照</h3>
       <label class="setting">输出尺寸
         <select id="photo-scale" aria-label="拍照输出尺寸">
           <option value="1">屏幕尺寸 1×</option>
           <option value="2">屏幕尺寸 2×</option>
+          <option value="3">屏幕尺寸 3×</option>
+          <option value="4">屏幕尺寸 4×</option>
         </select>
       </label>
       <label class="setting">超采样
@@ -295,7 +302,7 @@
           <option value="4">4×4</option>
         </select>
       </label>
-      <p class="hint">依次在各子格内取样，持续累积。再按相机按钮保存 PNG，按 Esc 放弃。</p>
+      <p class="hint">每轮每像素取一个样本；4×4 需 16 轮才覆盖完整网格。高分辨率更耗显存。再按相机按钮保存 PNG，按 Esc 放弃。</p>
       <h3>移动</h3>
       <label class="setting"
         >移动速度<select id="speed">

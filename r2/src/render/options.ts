@@ -58,9 +58,14 @@ export interface PhotoOptions extends LightingOptions {
 }
 
 
-/** 每轮采一个子格，返回格心相对像素中心的偏移和格宽，供累积渲染在格内随机取样。 */
+/** 每轮采一个子格。偶数网格先交替访问四个象限，提前保存时样本不会集中在一排。 */
 export function sampleCell(round: number, grid: number): [number, number, number] {
-  const column = round % grid;
-  const row = Math.floor(round / grid) % grid;
+  let column = round % grid;
+  let row = Math.floor(round / grid) % grid;
+  if (grid % 2 === 0) {
+    const half = grid / 2, quadrant = [0, 3, 1, 2][round % 4], cell = Math.floor(round / 4);
+    column = cell % half + (quadrant % 2) * half;
+    row = Math.floor(cell / half) % half + Math.floor(quadrant / 2) * half;
+  }
   return [(column + 0.5) / grid - 0.5, (row + 0.5) / grid - 0.5, 1 / grid];
 }

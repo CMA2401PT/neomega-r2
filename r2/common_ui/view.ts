@@ -17,7 +17,7 @@ interface FrameOptions {
 
 type Photo = ReturnType<Renderer["photograph"]> & { kind: "photo" | "export"; name: string; supersample: number; finishing: boolean };
 export const TIER_NAMES = { voxel: "体素渲染器", basic: "基础渲染器", shading: "光影渲染器", accumulation: "累积渲染器" };
-const EXPORT_PIXELS = 24e6;
+const DEFAULT_EXPORT_PIXELS = 24e6;
 export function createView({ renderer, camera, settings, scene, switchBackend, onSettings, onStats, report = () => {} }: ViewOptions) {
   const backend = element<HTMLAnchorElement>("render-backend");
   backend.textContent = renderer.backend === "webgpu" ? "[webGPU]" : "[webGL]";
@@ -46,9 +46,18 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   let photo: Photo | null = null, photoWaiting = false;
   /** 渲染尺寸跟随原生屏幕像素或用户选择的固定倍数。 */
   function renderScale() {
+    if (settings.resolution.startsWith("native-")) return devicePixelRatio * Number(settings.resolution.slice(7));
     return settings.resolution === "native"
       ? devicePixelRatio
       : Number(settings.resolution);
+  }
+  function frameSize(scale: number, pixelLimit = Infinity) {
+    const factor = Math.min(
+      scale,
+      renderer.maxTextureSize / Math.max(innerWidth, innerHeight),
+      Math.sqrt(pixelLimit / (innerWidth * innerHeight)),
+    );
+    return { width: Math.max(1, Math.round(innerWidth * factor)), height: Math.max(1, Math.round(innerHeight * factor)) };
   }
   /** 太阳从东方升起，轨道略向南倾斜，使正午仍有可辨别的侧影。 */
   function sunDirection(hours: number) {
@@ -159,20 +168,17 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     const world = scene();
     photoWaiting = false;
     if (!currentView) return;
-    const scale = devicePixelRatio * (kind === "photo" ? settings.photoScale : settings.exportScale);
-    let width = innerWidth * scale;
-    let height = innerHeight * scale;
-    if (kind === "export") {
-      const limit = renderer.maxTextureSize;
-      const shrink = Math.min(1, limit / Math.max(width, height), Math.sqrt(EXPORT_PIXELS / (width * height)));
-      width *= shrink;
-      height *= shrink;
-    }
+    const scale = kind === "photo" ? settings.photoScale : settings.exportScale;
+    const { width, height } = frameSize(
+      devicePixelRatio * scale,
+      kind === "export" && scale <= 2 ? DEFAULT_EXPORT_PIXELS : Infinity,
+    );
+    element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
     rate.reset();
     const supersample = kind === "export" ? settings.exportSupersample : settings.photoSupersample;
     const film = renderer.photograph(currentView.camera, {
-      width: Math.round(width),
-      height: Math.round(height),
+      width,
+      height,
       supersample,
       ...(kind === "export" ? { tier: shownTier } : {}),
       time: performance.now() / 1000,
@@ -252,9 +258,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     session?.focus(view.center, { ...settings, nearPosition: camera.position });
     session?.publish();
     map.refresh(session);
-    const scale = renderScale(),
-      width = Math.round(innerWidth * scale),
-      height = Math.round(innerHeight * scale);
+    const { width, height } = frameSize(renderScale());
     const sun = sunDirection(settings.time),
       objects = view.objects;
     const state = JSON.stringify([
