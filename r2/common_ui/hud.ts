@@ -7,10 +7,23 @@ export function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return node as T;
 }
 
-/** 收起原生弹出面板，避免切换视图后留下顶层 UI。 */
+// 老 WebView 没有 Popover API：`:popover-open` 选择器在 JS 里直接抛错，
+// popovertarget 也不生效。这里统一记录打开状态，缺 API 时手动模拟开关。
+const openPanels = new Set<HTMLElement>();
+let manualPanels = false;
+
+function closePanel(panel: HTMLElement) {
+  if (manualPanels) {
+    openPanels.delete(panel);
+    delete panel.dataset.placed;
+    return;
+  }
+  panel.hidePopover(); // 原生模式下由 toggle 事件记账
+}
+
+/** 收起弹出面板，避免切换视图后留下顶层 UI。 */
 export function closePopovers() {
-  for (const panel of document.querySelectorAll<HTMLElement>(".popover:popover-open"))
-    panel.hidePopover();
+  for (const panel of [...openPanels]) closePanel(panel);
 }
 
 /** 让界面事件通过回调交给宿主，读数只在用户没有编辑时跟随相机。 */
@@ -59,15 +72,50 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
     panel.dataset.placed = "";
   }
+  manualPanels = typeof HTMLElement.prototype.showPopover !== "function";
   for (const panel of document.querySelectorAll<HTMLElement>(".popover")) {
     panel.addEventListener("toggle", (event) => {
-      if (event.newState === "open") place(panel);
-      else delete panel.dataset.placed;
+      if (event.newState === "open") {
+        openPanels.add(panel);
+        place(panel);
+      } else {
+        openPanels.delete(panel);
+        delete panel.dataset.placed;
+      }
+    });
+    if (manualPanels) {
+      // 没有 Popover API 时 popovertarget 是死属性，自己接管触发按钮。
+      const trigger = document.querySelector<HTMLElement>(`[popovertarget="${panel.id}"]`);
+      trigger?.addEventListener("click", () => {
+        if (openPanels.has(panel)) closePanel(panel);
+        else {
+          openPanels.add(panel);
+          place(panel);
+        }
+      });
+    }
+  }
+  if (manualPanels) {
+    // 原生弹出点在外部或按 Esc 会自动关闭，手动模式补上同样行为。
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        const origin = event.target as Node | null;
+        for (const panel of [...openPanels]) {
+          if (panel.contains(origin)) continue;
+          const trigger = document.querySelector(`[popovertarget="${panel.id}"]`);
+          if (trigger && trigger.contains(origin)) continue;
+          closePanel(panel);
+        }
+      },
+      true,
+    );
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closePopovers();
     });
   }
   window.addEventListener("resize", () => {
-    for (const panel of document.querySelectorAll<HTMLElement>(".popover:popover-open"))
-      place(panel);
+    for (const panel of openPanels) place(panel);
   });
   for (const [id, key] of [
     ["near-radius", "nearRadius"],
