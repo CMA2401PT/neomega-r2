@@ -42,8 +42,8 @@ uniform vec3 uSun;
 #define RENDER_TIER 2
 #endif
 const int uPass=RENDER_TIER==3?1:0;
-// 预览档的像素内偏移（像素）；导出时按网格超采样，单帧预览为零。累积档自己随机抖动。
-uniform vec2 uJitter;
+// xy 是采样子格中心相对像素中心的偏移，z 是子格宽度。累积时在子格内随机取样。
+uniform vec3 uJitter;
 uniform uint uFrame,uWaterGroup;
 // 静止水源的模型编号；低档把无限海面画成一层与它同色的透明平面。
 uniform uint uWater;
@@ -867,7 +867,8 @@ vec3 tracePixel(vec2 pixel){
 void main(){
  seed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u+uFrame*26699u);
  setupLight();steps=0;faceTests=0;
- vec2 jitter=uPass==1?vec2(random(),random())-.5:uJitter;
+ vec2 jitter=uJitter.xy;
+ if(uPass==1) jitter+=(vec2(random(),random())-.5)*uJitter.z;
  vec3 color=tracePixel(uPicking?uPickPixel:gl_FragCoord.xy+jitter);
  if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);

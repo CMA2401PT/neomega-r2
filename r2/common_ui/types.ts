@@ -11,6 +11,9 @@ export interface ViewSettings {
   fog: boolean;
   stillAccumulation: boolean;
   photoScale: number;
+  photoSupersample: number;
+  exportScale: number;
+  exportSupersample: number;
 }
 
 export interface ViewStats {

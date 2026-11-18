@@ -18,7 +18,8 @@ const canvas = document.querySelector<HTMLCanvasElement>("#view")!,
   params = new URLSearchParams(location.search);
 const settings: ViewSettings = {
   nearRadius: 4, farRadius: 8, speed: 32, resolution: "native", tier: "shading",
-  time: 10, timeFlow: false, fog: true, stillAccumulation: false, photoScale: 2,
+  time: 10, timeFlow: false, fog: true, stillAccumulation: false, photoScale: 2, photoSupersample: 1,
+  exportScale: 2, exportSupersample: 4,
 };
 input("far-radius").min = "8";
 const { status, drawOptions } = mountRenderDebug(document.getElementById("render-debug")!);

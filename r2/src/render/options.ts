@@ -51,9 +51,16 @@ export interface PhotoOptions extends LightingOptions {
   /** 用哪一档绘制，默认 accumulation：每个像素不停累积随机样本，没有上限。
    * 预览档用于导出当前画面：每个像素按 supersample×supersample 的网格取样，取满后完成。 */
   tier?: Tier;
-  /** 预览档每个像素每边的样本数，默认 4。 */
+  /** 像素采样网格的边长。预览默认 4，采满网格即完成；累积默认 1，循环遍历网格并在格内随机取样。 */
   supersample?: number;
   /** 累积档光线最多反弹次数。 */
   bounces?: number;
 }
 
+
+/** 每轮采一个子格，返回格心相对像素中心的偏移和格宽，供累积渲染在格内随机取样。 */
+export function sampleCell(round: number, grid: number): [number, number, number] {
+  const column = round % grid;
+  const row = Math.floor(round / grid) % grid;
+  return [(column + 0.5) / grid - 0.5, (row + 0.5) / grid - 0.5, 1 / grid];
+}

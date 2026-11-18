@@ -50,8 +50,7 @@ export class FullscreenMap {
     this.jump = jump;
     this.canvas = element<HTMLCanvasElement>("map-overlay");
     this.context = this.canvas.getContext("2d")!;
-    element<HTMLButtonElement>("map-open").onclick = () => this.show();
-    element<HTMLButtonElement>("map-close").onclick = () => this.hide();
+    element<HTMLButtonElement>("map-open").onclick = () => this.open ? this.hide() : this.show();
     element<HTMLButtonElement>("map-jump").onclick = () => {
       if (!this.selection) return;
       this.jump(this.selection.position.map((v, i) => v + (i === 1 ? 2 : 0.5)));
@@ -265,6 +264,7 @@ export class FullscreenMap {
     element<HTMLOutputElement>("map-selection").textContent = "单击方块选点";
     element<HTMLButtonElement>("map-jump").disabled = true;
     document.body.classList.add("map-open");
+    element("map-open").setAttribute("aria-pressed", "true");
     for (const id of ["map-overlay", "map-hud", "map-help"])
       element(id).hidden = false;
     this.canvas.focus();
@@ -277,6 +277,7 @@ export class FullscreenMap {
     this.gesture = null;
     this.pending = null;
     document.body.classList.remove("map-open");
+    element("map-open").setAttribute("aria-pressed", "false");
     for (const id of ["map-overlay", "map-hud", "map-help"])
       element(id).hidden = true;
   }

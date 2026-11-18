@@ -51,12 +51,18 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     stopEditing();
   };
-  /** 面板位于触发按钮上方，屏幕边缘向内收。 */
+  /** 设置贴近右上工具栏，场景信息贴近底部坐标栏。 */
   function place(panel: HTMLElement) {
     const trigger = document.querySelector(`[popovertarget="${panel.id}"]`);
     const rect = trigger!.getBoundingClientRect();
-    panel.style.left = `${Math.max(8, Math.min(innerWidth - panel.offsetWidth - 8, rect.left + rect.width / 2 - panel.offsetWidth / 2))}px`;
-    panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
+    if (panel.id === "settings") {
+      const toolbar = element("toolbar").getBoundingClientRect();
+      panel.style.left = `${Math.max(8, toolbar.left - panel.offsetWidth - 8)}px`;
+      panel.style.top = `${toolbar.top}px`;
+    } else {
+      panel.style.left = `${Math.max(8, Math.min(innerWidth - panel.offsetWidth - 8, rect.left + rect.width / 2 - panel.offsetWidth / 2))}px`;
+      panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
+    }
     panel.dataset.placed = "";
   }
   for (const panel of document.querySelectorAll<HTMLElement>(".popover")) {
@@ -76,6 +82,9 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     ["speed", "speed"],
     ["fog", "fog"],
     ["photo-scale", "photoScale"],
+    ["photo-supersample", "photoSupersample"],
+    ["export-scale", "exportScale"],
+    ["export-supersample", "exportSupersample"],
     ["time", "time"],
   ] as const) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
@@ -127,11 +136,15 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
         element(id).setAttribute("aria-pressed", String(settings[key]));
       for (const button of document.querySelectorAll<HTMLButtonElement>(".tier"))
         button.setAttribute("aria-pressed", String(button.dataset.tier === settings.tier));
-      // 面板不显示时刻文字，悬停滑块时仍能看到具体时间。
+      // 时间滑条仅向读屏软件报告具体时刻。
       const minutes = Math.floor(settings.time * 60) % 1440;
-      element<HTMLInputElement>("time").title =
+      const clock =
         `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-      element<HTMLInputElement>("time").value = String(settings.time);
+      const slider = element<HTMLInputElement>("time");
+      if (slider.getAttribute("aria-valuetext") !== clock) {
+        slider.setAttribute("aria-valuetext", clock);
+      }
+      slider.value = String(settings.time);
     },
     /** 存档切换只影响依赖存档的操作。 */
     world(world: { loaded: boolean }) {

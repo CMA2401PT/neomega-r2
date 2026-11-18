@@ -4,6 +4,7 @@
     system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --button-selected: #a9cbc8;
   --panel-border: 2px solid #111;
   /* 略透出底下的场景，配合背景模糊保证文字清晰。 */
   --panel-background: rgba(255, 255, 255, 0.86);
@@ -70,7 +71,7 @@ button:hover:not(:disabled) {
 }
 button:active:not(:disabled),
 button[aria-pressed="true"] {
-  background: #a9cbc8;
+  background: var(--button-selected);
 }
 button[aria-pressed="true"]:hover:not(:disabled) {
   background: #9cc2bf;
@@ -235,7 +236,7 @@ svg .shade {
   z-index: 6;
   top: 14px;
   right: 14px;
-  width: 176px;
+  width: 156px;
   padding: 6px;
 }
 #toolbar .icon-button {
@@ -266,27 +267,57 @@ svg .shade {
   color: #0b6b6b;
   font-weight: 800;
 }
-/* 两排各五格：第一排五个按钮，第二排三个按钮之后的时间滑块占满余下的两格。 */
+/* 四列共用按钮中心线，前三档共享轨道，淡青色滑块跟随当前档位。 */
 .tools {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 28px);
+  justify-content: center;
   align-items: center;
-  justify-content: space-between;
   gap: 5px;
 }
-#action-row {
-  margin-top: 4px;
+.tools + .tools { margin-top: 4px; }
+.tier-selector {
+  grid-column: span 3;
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  gap: 5px;
+  position: relative;
+  isolation: isolate;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, .08);
 }
-/* 正在编译的预览档：按钮已选中，画面仍用原来的档，直到编译完成。 */
-.tier[aria-busy="true"] {
-  animation: compiling 1s ease-in-out infinite alternate;
+.tier-selector::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 1px auto 1px 1px;
+  width: 26px;
+  border-radius: 4px;
+  background: var(--button-selected);
+  transition: transform .15s ease;
 }
-@keyframes compiling {
-  to {
-    opacity: 0.45;
-  }
+.tier-selector:has([data-tier="basic"][aria-pressed="true"])::before { transform: translateX(33px); }
+.tier-selector:has([data-tier="shading"][aria-pressed="true"])::before { transform: translateX(66px); }
+/* 所有指针状态都只显示轨道上的滑块，键盘焦点仍保留轮廓。 */
+#toolbar .tier-selector .tier {
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tier-selector::before { transition: none; }
+}
+.toolbar-divider {
+  border: 0;
+  height: 1px;
+  background: #c8cdcd;
+  margin: 4px;
 }
 #time {
-  flex: 1;
+  grid-column: span 2;
+  justify-self: center;
+  height: 14px;
+  margin: 0;
+  width: calc(100% - 4px);
   min-width: 0;
 }
 #photo-progress {
@@ -317,6 +348,9 @@ body.hud-hidden #eye {
 body.hud-hidden #toolbar:hover {
   opacity: 1;
 }
+body.hud-hidden .renderer-row { display: flex; }
+body.hud-hidden .toolbar-divider,
+body.hud-hidden #toolbar .tools:not(.renderer-row),
 body.hud-hidden #toolbar .brand,
 body.hud-hidden #toolbar .tools > :not(#eye),
 body.hud-hidden #action-row,
@@ -404,7 +438,7 @@ body.hud-hidden #photo-progress {
   position: fixed;
   margin: 0;
   inset: auto;
-  width: 400px;
+  width: min(400px, calc(100vw - 16px));
   max-height: calc(100dvh - 100px);
   padding: 16px;
   overflow: auto;

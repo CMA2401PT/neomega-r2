@@ -15,11 +15,9 @@ interface FrameOptions {
   drawOptions?: Partial<Pick<DrawOptions, "time" | "debug" | "hierarchy" | "fragments">>;
 }
 
-type Photo = ReturnType<Renderer["photograph"]> & { kind: "photo" | "export"; name: string; finishing: boolean };
+type Photo = ReturnType<Renderer["photograph"]> & { kind: "photo" | "export"; name: string; supersample: number; finishing: boolean };
 export const TIER_NAMES = { voxel: "体素渲染器", basic: "基础渲染器", shading: "光影渲染器", accumulation: "累积渲染器" };
-const EXPORT_SCALE = 2,
-  EXPORT_SUPERSAMPLE = 4,
-  EXPORT_PIXELS = 24e6;
+const EXPORT_PIXELS = 24e6;
 export function createView({ renderer, camera, settings, scene, switchBackend, onSettings, onStats, report = () => {} }: ViewOptions) {
   const backend = element<HTMLAnchorElement>("render-backend");
   backend.textContent = renderer.backend === "webgpu" ? "[webGPU]" : "[webGL]";
@@ -104,7 +102,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       elapsed = (job: {since:number}) => `已用 ${Math.floor((now - job.since) / 1000)} 秒`;
     const text = photo
       ? photo.kind === "export"
-        ? `正在导出 · ${photo.samples}/${EXPORT_SUPERSAMPLE ** 2} 轮超采样，完成后自动保存 · 再按导出按钮或 Esc 取消`
+        ? `正在导出 · ${photo.samples}/${photo.supersample ** 2} 轮超采样，完成后自动保存 · 再按导出按钮或 Esc 取消`
         : photo.samples === 0
           ? "正在绘制首个拍照样本 · 按 Esc 放弃"
           : `拍照中 · 已累积 ${photo.samples} 样本，画面会越来越干净 · 满意时再按相机按钮保存，按 Esc 放弃`
@@ -129,7 +127,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     element<HTMLButtonElement>("photo").disabled = kind === "export";
     element<HTMLButtonElement>("export").setAttribute("aria-pressed", String(kind === "export"));
     element<HTMLButtonElement>("export").title = element<HTMLButtonElement>("export").ariaLabel =
-      kind === "export" ? "取消导出" : "导出当前画面：用当前预览渲染器以 2 倍尺寸、4×4 超采样重新渲染";
+      kind === "export" ? "取消导出" : "导出当前画面";
     element<HTMLButtonElement>("export").disabled = kind === "photo";
     element<HTMLOutputElement>("photo-progress").hidden = !photo;
   }
@@ -155,30 +153,28 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   addEventListener("keydown", (event) => {
     if (event.key === "Escape" && (photo || photoWaiting)) cancelPhoto();
   });
-  /** 拍照总是用累积渲染器，尺寸为渲染画面乘照片倍数；导出用当前预览档，尺寸为屏幕实际像素的 2 倍。
+  /** 拍照用累积渲染器，导出用当前预览档。两者都按屏幕实际像素和各自的尺寸倍数取图。
    * 两者都拍最近一帧的视图，地图打开时就是俯视画面。 */
   function startPhoto(kind: Photo["kind"]) {
     const world = scene();
     photoWaiting = false;
     if (!currentView) return;
-    let width, height;
-    if (kind === "photo") {
-      const scale = renderScale() * settings.photoScale;
-      width = innerWidth * scale;
-      height = innerHeight * scale;
-    } else {
-      const limit=renderer.maxTextureSize;
-      width = innerWidth * devicePixelRatio * EXPORT_SCALE;
-      height = innerHeight * devicePixelRatio * EXPORT_SCALE;
+    const scale = devicePixelRatio * (kind === "photo" ? settings.photoScale : settings.exportScale);
+    let width = innerWidth * scale;
+    let height = innerHeight * scale;
+    if (kind === "export") {
+      const limit = renderer.maxTextureSize;
       const shrink = Math.min(1, limit / Math.max(width, height), Math.sqrt(EXPORT_PIXELS / (width * height)));
       width *= shrink;
       height *= shrink;
     }
     rate.reset();
+    const supersample = kind === "export" ? settings.exportSupersample : settings.photoSupersample;
     const film = renderer.photograph(currentView.camera, {
       width: Math.round(width),
       height: Math.round(height),
-      ...(kind === "export" ? { tier: shownTier, supersample: EXPORT_SUPERSAMPLE } : {}),
+      supersample,
+      ...(kind === "export" ? { tier: shownTier } : {}),
       time: performance.now() / 1000,
       sun: sunDirection(settings.time),
       ...(world.ocean == null ? {} : { ocean: world.ocean }),
@@ -186,7 +182,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       objects: currentView.objects,
     });
     const name = `${world.name || "天空"}-${new Date().toTimeString().slice(0, 8).replaceAll(":", "")}${kind === "export" ? `-${shownTier}` : ""}.png`;
-    photo = Object.assign(film, { name, kind, finishing: false });
+    photo = Object.assign(film, { name, kind, supersample, finishing: false });
     setPhotoButton();
     showTaskStatus(performance.now());
   }
@@ -232,7 +228,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       photo.step();
       photo.present();
       element<HTMLOutputElement>("photo-progress").textContent = photo.kind === "export"
-        ? `${photo.samples}/${EXPORT_SUPERSAMPLE ** 2}`
+        ? `${photo.samples}/${photo.supersample ** 2}`
         : `${photo.samples} 样本`;
       const kind = photo.kind;
       if (photo.complete) finishPhoto(true);

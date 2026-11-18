@@ -106,77 +106,45 @@
     </section>
     <aside id="toolbar" class="panel">
       <div class="brand">neOmega <b>R2</b><a id="render-backend"></a></div>
-      <!-- 第一排：前三个按钮三选一，决定预览用哪档绘制器；随后是静止时累积与隐藏 HUD。 -->
-      <div class="tools" role="group" aria-label="预览绘制器">
-        <button
-          class="icon-button tier"
-          data-tier="voxel"
-          title="体素渲染器：纯色方块，最省性能"
-          aria-label="体素渲染器"
-          aria-pressed="false"
-        >
-          <svg><use href="#i-voxel" /></svg></button
-        ><button
-          class="icon-button tier"
-          data-tier="basic"
-          title="基础渲染器：完整方块与贴图，无阴影、雾与水面效果"
-          aria-label="基础渲染器"
-          aria-pressed="false"
-        >
-          <svg><use href="#i-basic" /></svg></button
-        ><button
-          class="icon-button tier"
-          data-tier="shading"
-          title="光影渲染器：阴影、远景雾、水面波纹与反射"
-          aria-label="光影渲染器"
-          aria-pressed="true"
-        >
-          <svg><use href="#i-shading" /></svg></button
-        ><button
-          id="still-accumulation"
-          class="icon-button"
-          title="静止时累积"
-          aria-label="静止时累积"
-          aria-pressed="false"
-        >
-          <svg><use href="#i-accumulate" /></svg></button
-        ><button
-          id="eye"
-          class="icon-button"
-          title="隐藏 HUD"
-          aria-label="隐藏 HUD"
-        >
+      <div class="tools renderer-row">
+        <div class="tier-selector" role="group" aria-label="预览渲染器">
+          <button class="icon-button tier" data-tier="voxel" title="体素渲染器：纯色方块，最省性能" aria-label="体素渲染器" aria-pressed="false">
+            <svg><use href="#i-voxel" /></svg>
+          </button>
+          <button class="icon-button tier" data-tier="basic" title="基础渲染器：完整方块与贴图，无阴影、雾与水面效果" aria-label="基础渲染器" aria-pressed="false">
+            <svg><use href="#i-basic" /></svg>
+          </button>
+          <button class="icon-button tier" data-tier="shading" title="光影渲染器：阴影、远景雾、水面波纹与反射" aria-label="光影渲染器" aria-pressed="true">
+            <svg><use href="#i-shading" /></svg>
+          </button>
+        </div>
+        <button id="eye" class="icon-button" title="隐藏 HUD" aria-label="隐藏 HUD">
           <svg><use href="#i-eye" /></svg>
         </button>
       </div>
-      <!-- 第二排：导出当前画面、拍照、时间流逝，时间滑块占两格。 -->
+      <div class="tools">
+        <button id="still-accumulation" class="icon-button" title="静止时累积" aria-label="静止时累积" aria-pressed="false">
+          <svg><use href="#i-accumulate" /></svg>
+        </button>
+        <button id="time-flow" class="icon-button" title="时间流逝" aria-label="时间流逝" aria-pressed="true">
+          <svg><use href="#i-flow" /></svg>
+        </button>
+        <input id="time" type="range" min="0" max="24" step="0.05" aria-label="当前时刻" />
+      </div>
+      <hr class="toolbar-divider" />
       <div id="action-row" class="tools">
-        <button
-          id="export"
-          class="icon-button"
-          title="导出当前画面：用当前预览渲染器以 2 倍尺寸、4×4 超采样重新渲染"
-          aria-label="导出当前画面"
-          aria-pressed="false"
-        >
-          <svg><use href="#i-export" /></svg></button
-        ><button id="photo" class="icon-button" title="拍照" aria-label="拍照">
-          <svg><use href="#i-camera" /></svg></button
-        ><button
-          id="time-flow"
-          class="icon-button"
-          title="时间流逝"
-          aria-label="时间流逝"
-          aria-pressed="true"
-        >
-          <svg><use href="#i-flow" /></svg></button
-        ><input
-          id="time"
-          type="range"
-          min="0"
-          max="24"
-          step="0.05"
-          aria-label="时刻"
-        />
+        <button id="map-open" class="icon-button" title="切换全屏地图" aria-label="切换全屏地图" aria-pressed="false" disabled>
+          <svg><use href="#i-map" /></svg>
+        </button>
+        <button id="export" class="icon-button" title="导出当前画面" aria-label="导出当前画面" aria-pressed="false">
+          <svg><use href="#i-export" /></svg>
+        </button>
+        <button id="photo" class="icon-button" title="拍照" aria-label="拍照">
+          <svg><use href="#i-camera" /></svg>
+        </button>
+        <button id="settings-open" class="icon-button" title="设置" aria-label="设置" popovertarget="settings">
+          <svg><use href="#i-settings" /></svg>
+        </button>
       </div>
       <output id="photo-progress" hidden></output>
     </aside>
@@ -211,15 +179,7 @@
       </div>
     </div>
     <footer id="hud" class="dock panel chrome">
-      <button
-        id="map-open"
-        class="icon-button"
-        title="全屏地图"
-        aria-label="全屏地图"
-        disabled
-      >
-        <svg><use href="#i-map" /></svg></button
-      ><i class="divider"></i>
+      <slot name="leading-actions"></slot>
       <form id="teleport" title="点击编辑坐标，Enter 跳转，Esc 还原">
         <label
           >X<input
@@ -253,16 +213,8 @@
           <svg><use href="#i-arrow" /></svg>
         </button>
       </form>
-      <i class="divider"></i
-      ><slot name="actions"></slot><button
-        id="settings-open"
-        class="icon-button"
-        title="设置"
-        aria-label="设置"
-        popovertarget="settings"
-      >
-        <svg><use href="#i-settings" /></svg>
-      </button>
+      <i class="divider"></i>
+      <slot name="actions"></slot>
     </footer>
     <footer id="map-hud" class="dock panel" hidden>
       <output id="map-selection">单击方块选点</output><i class="divider"></i
@@ -275,8 +227,7 @@
           max="16"
           step="0.01"
           aria-label="地图跨度" /><svg><use href="#i-plus" /></svg></label
-      ><i class="divider"></i><button id="map-jump" disabled>跳转</button
-      ><button id="map-close">关闭</button>
+      ><i class="divider"></i><button id="map-jump" disabled>跳转</button>
     </footer>
     <output id="task-status" class="panel" role="status" hidden></output>
     <div id="notice" class="panel" role="status" hidden></div>
@@ -313,15 +264,39 @@
         >远景雾<input id="fog" class="switch" type="checkbox"
       /></label>
       <p class="hint">
-        远景雾淡化窗口边界，只在光影渲染器中出现。右上角第一排前三个按钮选择预览用的渲染器：体素、基础、光影，第一次切换到某一档时需要编译。之后是静止时累积：静止时用累积渲染器让画面持续变干净，移动后重新开始，第一次开启要准备一个较耗时的模块；它与时间流逝互斥。
+        远景雾只在光影渲染器中出现。开启静止时累积后，画面会逐渐清晰，移动时重新累积。时间流逝与静止时累积互斥。
       </p>
-      <label class="setting"
-        >照片尺寸<select id="photo-scale">
-          <option value="1">与渲染画面相同</option>
-          <option value="2">渲染画面 2×</option>
-        </select></label
-      >
-      <p class="hint">拍照总是使用累积渲染器：按相机按钮开始，画面逐渐变干净，满意时再按一次保存 PNG，按 Esc 放弃。导出按钮用当前预览渲染器以 2 倍屏幕尺寸、4×4 超采样重新渲染，完成后自动保存。</p>
+      <h3>导出当前画面</h3>
+      <label class="setting">输出尺寸
+        <select id="export-scale" aria-label="导出当前画面输出尺寸">
+          <option value="1">屏幕尺寸 1×</option>
+          <option value="2">屏幕尺寸 2×</option>
+        </select>
+      </label>
+      <label class="setting">超采样
+        <select id="export-supersample" aria-label="导出当前画面超采样">
+          <option value="1">1×1</option>
+          <option value="2">2×2</option>
+          <option value="4">4×4</option>
+        </select>
+      </label>
+      <p class="hint">使用当前预览渲染器，采满后自动保存 PNG。</p>
+      <h3>拍照</h3>
+      <label class="setting">输出尺寸
+        <select id="photo-scale" aria-label="拍照输出尺寸">
+          <option value="1">屏幕尺寸 1×</option>
+          <option value="2">屏幕尺寸 2×</option>
+        </select>
+      </label>
+      <label class="setting">超采样
+        <select id="photo-supersample" aria-label="拍照超采样">
+          <option value="1">1×1</option>
+          <option value="2">2×2</option>
+          <option value="4">4×4</option>
+        </select>
+      </label>
+      <p class="hint">依次在各子格内取样，持续累积。再按相机按钮保存 PNG，按 Esc 放弃。</p>
+      <h3>移动</h3>
       <label class="setting"
         >移动速度<select id="speed">
           <option value="16">16 方块 / 秒</option>

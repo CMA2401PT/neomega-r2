@@ -3,6 +3,7 @@ import { createTextures, type TextureSet } from "./textures.ts";
 import { createAccumulator } from "./accumulator.ts";
 import { WorldGPU } from "./world-gpu.ts";
 import { ObjectStore } from "../objects/store.ts";
+import { sampleCell } from "./options.ts";
 import type { Camera } from "../contracts.ts";
 
 import { cameraBasis as basis, cameraRay, PERSPECTIVE_SPAN as SPAN } from "./camera.ts";
@@ -303,7 +304,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       width,
       height,
       tier,
-      jitter = [0, 0],
+      jitter = [0, 0, 1],
       bounces,
       time,
       waterTime = time,
@@ -351,7 +352,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform1ui(u("uFrame"), frame++);
     gl.uniform1ui(u("uWaterGroup"), catalog.models[catalog.water].group);
     gl.uniform1ui(u("uWater"), catalog.water);
-    gl.uniform2fv(u("uJitter"), jitter);
+    gl.uniform3fv(u("uJitter"), jitter);
     gl.uniform1f(u("uFog"), fog);
     gl.uniform1f(u("uTime"), waterTime);
     gl.uniform1i(u("uOcean"), Number(ocean !== undefined));
@@ -460,7 +461,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       width,
       height,
       tier = "accumulation",
-      supersample = 4,
+      supersample = tier === "accumulation" ? 1 : 4,
       objects = true,
       bounces = 4,
       time = 0,
@@ -482,9 +483,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     for (let y = 0; y < height; y += PHOTO_TILE)
       for (let x = 0; x < width; x += PHOTO_TILE) tiles.push([x, y]);
     const view = { ...camera, position: [...camera.position] },
-      grid = tier === "accumulation" ? 0 : Math.max(1, Math.round(supersample)),
+      grid = Math.max(1, Math.round(supersample)),
       // 预览档取满网格后不再提交；累积档没有上限。
-      total = grid ? grid * grid * tiles.length : Infinity;
+      total = tier === "accumulation" ? Infinity : grid * grid * tiles.length;
     let done = 0,
       finished = 0,
       batch = 1,
@@ -499,9 +500,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         width,
         height,
         tier: photoProgram,
-        jitter: grid
-          ? [((round % grid) + 0.5) / grid - 0.5, (Math.floor(round / grid) + 0.5) / grid - 0.5]
-          : [0, 0],
+        jitter: sampleCell(round, grid),
         bounces,
         objects,
         time,

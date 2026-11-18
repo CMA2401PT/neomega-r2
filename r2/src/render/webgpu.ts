@@ -1,4 +1,5 @@
 /// <reference types="@webgpu/types" />
+import { sampleCell } from "./options.ts";
 import type { Camera } from "../contracts.ts";
 import type { DrawOptions, PhotoOptions, RendererOptions, Tier } from "./options.ts";
 import { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./camera.ts";
@@ -267,7 +268,7 @@ export async function createWebGPURenderer(
         uObjectsEnabled: +(o.objects !== false && objects.store.enabled !== false),
         uDebug: o.debug ?? 0,
         uBounces: o.bounces ?? 1,
-        uJitter: o.jitter ?? [0, 0],
+        uJitter: o.jitter ?? [0, 0, 1],
         uFog: o.fog ?? (world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9),
       };
       const data = new Float32Array(256);
@@ -470,7 +471,7 @@ export async function createWebGPURenderer(
         });
       const f = frameFilm(device, fx, historyLayout, width, height),
         view = { ...camera, position: camera.position.slice() },
-        grid = Math.max(1, Math.round(o.supersample ?? 4)),
+        grid = Math.max(1, Math.round(o.supersample ?? (tier === "accumulation" ? 1 : 4))),
         total = tier === "accumulation" ? Infinity : grid * grid;
       const columns = Math.ceil(width / 256),
         tiles = columns * Math.ceil(height / 256);
@@ -497,10 +498,7 @@ export async function createWebGPURenderer(
             seed = sequence++;
             objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
           }
-          const jitter =
-            tier === "accumulation"
-              ? [0, 0]
-              : [((done % grid) + 0.5) / grid - 0.5, (Math.floor(done / grid) + 0.5) / grid - 0.5];
+          const jitter = sampleCell(done, grid);
           const x = (tile % columns) * 256,
             y = Math.floor(tile / columns) * 256;
           exposure = prepare(
