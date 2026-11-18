@@ -66,6 +66,8 @@ export interface SessionOptions {
   onError?: (message: string) => void;
   /** 准备线程脚本的地址，默认与本模块同一构建目录下的 scene/worker.js。 */
   workerURL?: string | URL;
+  /** 文件页面可提供已打包的 classic Blob worker。默认使用模块 worker。 */
+  workerType?: WorkerType;
 }
 
 /** 空间计数以 r2region 为单位；sections 单独统计已发布的子区块（subchunk）。 */
@@ -163,7 +165,7 @@ export class WorldSession {
     );
     this.gpu = renderer.createWorld();
     this.worker = new Worker(options.workerURL ?? new URL("../scene/worker.js", import.meta.url), {
-      type: "module",
+      type: options.workerType ?? "module",
     });
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.message(event.data);
     this.worker.onerror = (event) => this.onError(event.message);

@@ -14,15 +14,7 @@
       <i class="divider"></i>
     </template>
     <template id="settings-extra">
-      <h3>场景调试</h3>
-      <label class="setting">求交显示<select id="debug">
-        <option value="0">正常画面</option>
-        <option value="1">遍历 / 求交热图</option>
-        <option value="2">求交路径</option>
-      </select></label>
-      <label class="setting">空域与均匀立方体跳跃<input id="hierarchy" class="switch" type="checkbox" checked /></label>
-      <label class="setting">跨格片段<input id="fragments" class="switch" type="checkbox" checked /></label>
-      <output id="status" class="hint"></output>
+      <div id="render-debug"></div>
     </template>
     <script type="module" src="/r2/common_ui/boot.js" data-entry="/dist/main.js"></script>
   </body>

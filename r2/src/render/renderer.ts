@@ -50,6 +50,8 @@ const SAMPLER_UNITS: Record<string, number> = {
 export interface RendererOptions {
   /** 资源目录的 URL，以 / 结尾。 */
   assets?: string;
+  /** 离线宿主按文件名提供着色器、模型与贴图。省略时从模块与 assets 目录读取。 */
+  readResource?: (name: string) => Promise<Response>;
   /** 启动时编译的预览档，默认 shading；其他档第一次需要时用 compile() 编译。 */
   tier?: PreviewTier;
   /** 每个启动阶段开始前调用；返回 Promise 时等它完成，宿主可先绘制状态提示。 */
@@ -131,7 +133,7 @@ function paint(): Promise<void> {
  */
 export async function createRenderer(
   canvas: HTMLCanvasElement,
-  { assets = "/r2/assets/", tier: initialTier = "shading", onProgress }: RendererOptions = {},
+  { assets = "/r2/assets/", tier: initialTier = "shading", readResource, onProgress }: RendererOptions = {},
 ) {
   const context = canvas.getContext("webgl2", {
     antialias: false,
@@ -141,7 +143,7 @@ export async function createRenderer(
   const gl: WebGL2RenderingContext = context;
   const [fragmentSource, objectSource] = await Promise.all(
     ["ray.frag", "objects.frag"].map((name) =>
-      fetch(new URL(name, import.meta.url)).then((r) => r.text()),
+      (readResource ? readResource(name) : fetch(new URL(name, import.meta.url))).then((r) => r.text()),
     ),
   );
   const fragment = fragmentSource.replace("#include <objects>", objectSource);
@@ -280,7 +282,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   const uniforms: Uniforms = new Map(programs.get(initialTier)!.locations);
   const u = (name: string) => uniforms.get(name) ?? null;
   await onProgress?.({ index: 2, total: 3, label: "正在加载材质与方块模型…" });
-  const textures = await createTextures(gl, uniforms, assets),
+  const textures = await createTextures(gl, uniforms, assets, readResource),
     catalog = textures.catalog,
     states = textures.states;
   // 即使只画天空，WebGL 仍验证所有采样器；用最小的空纹理满足整数采样器绑定。

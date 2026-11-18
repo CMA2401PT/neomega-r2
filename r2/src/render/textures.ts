@@ -36,20 +36,25 @@ export function decodeTextures(buffer: ArrayBuffer): TextureSet {
 }
 
 /** 共享表和三通道贴图使用固定纹理单元；所有上传集中在这里。 */
-export async function createTextures(gl: WebGL2RenderingContext, uniforms: Uniforms, assets: string) {
+export async function createTextures(
+  gl: WebGL2RenderingContext,
+  uniforms: Uniforms,
+  assets: string,
+  readResource = (name: string) => fetch(assets + name),
+) {
   const program = gl.getParameter(gl.CURRENT_PROGRAM);
   for (const name of ["uSurfaceNormals", "uSurfaceSpecular", "uAtlasNormals", "uAtlasSpecular"])
     uniforms.set(name, gl.getUniformLocation(program, name));
   const files = new Map(await Promise.all(
     [...binaryNames, "quad-references.bin"].map(async (name) =>
-      [name, await (await fetch(assets + name)).arrayBuffer()] as const,
+      [name, await (await readResource(name)).arrayBuffer()] as const,
     ),
   ));
   const [info, catalog] = (await Promise.all(
-    ["textures-info.json", "catalog.json"].map(async (name) => (await fetch(assets + name)).json()),
+    ["textures-info.json", "catalog.json"].map(async (name) => (await readResource(name)).json()),
   )) as [TextureInfo, Catalog];
   // 方块哈希到模型的表与材质无关，换材质包时保留。
-  const states = new Uint32Array(await (await fetch(assets + "states.bin")).arrayBuffer());
+  const states = new Uint32Array(await (await readResource("states.bin")).arrayBuffer());
   const handles = new Map<string, WebGLTexture>();
   let bytes = 0, referenceBytes = 0;
   function texture(unit: number, target: number, name: string): void {

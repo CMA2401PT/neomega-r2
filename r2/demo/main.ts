@@ -9,11 +9,11 @@ import {
   WorldSession,
 } from "neomega-r2";
 import { createView, startupStage, type ViewSettings } from "/r2/common_ui/view.js";
+import { mountRenderDebug } from "/r2/common_ui/render-debug.js";
 import { scenes } from "./scenes.ts";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#view")!,
   select = document.querySelector<HTMLSelectElement>("#scene")!,
-  status = document.querySelector<HTMLElement>("#status")!,
   input = (id: string) => document.querySelector<HTMLInputElement>("#" + id)!,
   params = new URLSearchParams(location.search);
 const settings: ViewSettings = {
@@ -21,8 +21,7 @@ const settings: ViewSettings = {
   time: 10, timeFlow: false, fog: true, stillAccumulation: false, photoScale: 2,
 };
 input("far-radius").min = "8";
-const debug = document.querySelector<HTMLSelectElement>("#debug")!;
-const hierarchy = input("hierarchy"), fragments = input("fragments");
+const { status, drawOptions } = mountRenderDebug(document.getElementById("render-debug")!);
 const renderer = await createRenderer(canvas, {
   assets: "/assets/", tier: settings.tier,
   onProgress: ({ label }) => startupStage(label),
@@ -121,9 +120,7 @@ function render(now: number) {
   view.frame(now, session, {
     continuous: !settings.stillAccumulation,
     drawOptions: {
-      debug: Number(debug.value),
-      hierarchy: hierarchy.checked,
-      fragments: fragments.checked,
+      ...drawOptions(),
       ...(r2.fixedTime == null ? {} : { time: r2.fixedTime }),
     },
   });
