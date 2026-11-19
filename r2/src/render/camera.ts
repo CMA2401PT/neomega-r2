@@ -3,6 +3,11 @@ import type { Camera } from "../contracts.ts";
 
 export const PERSPECTIVE_SPAN = 2 * Math.tan((65 * Math.PI) / 360);
 
+/** 相机平面覆盖的高度，透视镜头按离眼睛一格处计算。 */
+export function cameraSpan(camera: Camera): number {
+  return camera.ortho ?? (camera.fov === undefined ? PERSPECTIVE_SPAN : 2 * Math.tan(camera.fov * Math.PI / 360));
+}
+
 export interface CameraBasis {
   forward: number[];
   right: number[];
@@ -32,7 +37,7 @@ export function cameraRay(
   { width, height, x, y }: { width: number; height: number; x: number; y: number },
 ): { origin: number[]; direction: number[] } {
   const { forward, right, up } = cameraBasis(camera);
-  const span = camera.ortho ?? PERSPECTIVE_SPAN;
+  const span = cameraSpan(camera);
   const sx = ((x + 0.5) / width - 0.5) * (width / height) * span;
   const sy = (0.5 - (y + 0.5) / height) * span;
   const offset = right.map((v, i) => v * sx + up[i] * sy);

@@ -457,6 +457,18 @@ h3 {
   margin: 14px 0 10px;
   padding-top: 12px;
 }
+#appearance {
+  border-block: 1px solid #ced8d8;
+  margin-bottom: 10px;
+  padding: 8px 0;
+}
+#appearance summary { font-weight: 650; cursor: pointer; }
+#appearance fieldset { border: 0; padding: 3px 0; margin: 10px 0 0; min-width: 0; }
+#appearance legend { font-weight: 650; color: #24615e; }
+#appearance .setting { min-height: 31px; }
+#appearance output { width: 70px; }
+#appearance input[type="color"] { margin-left: auto; width: 54px; height: 26px; padding: 2px; cursor: pointer; }
+#appearance-reset { margin: 8px 0 3px; }
 .setting {
   display: flex;
   align-items: center;

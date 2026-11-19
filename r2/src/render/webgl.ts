@@ -4,9 +4,10 @@ import { createAccumulator } from "./accumulator.ts";
 import { WorldGPU } from "./world-gpu.ts";
 import { ObjectStore } from "../objects/store.ts";
 import { sampleCell } from "./options.ts";
+import { frameExposure } from "./options.ts";
 import type { Camera } from "../contracts.ts";
 
-import { cameraBasis as basis, cameraRay, PERSPECTIVE_SPAN as SPAN } from "./camera.ts";
+import { cameraBasis as basis, cameraRay, cameraSpan } from "./camera.ts";
 
 // 拍照时每次绘制覆盖的方块边长（像素）。
 const PHOTO_TILE = 256;
@@ -44,7 +45,7 @@ const SAMPLER_UNITS: Record<string, number> = {
 type ProgramName = Tier | "photo" | "basic-pick" | "voxel-pick";
 const programFor = (tier: Tier, purpose?: "photo"): ProgramName =>
   tier === "accumulation" && purpose === "photo" ? "photo" : tier;
-interface FrameInputs {
+interface FrameInputs extends Pick<DrawOptions, "directLight" | "skyLight" | "exposureEV" | "autoExposure"> {
   width: number;
   height: number;
   tier: ProgramName;
@@ -116,6 +117,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uHierarchy",
     "uFragments",
     "uSun",
+    "uDirectLight",
+    "uSkyLight",
     "uWorldData",
     "uSections",
     "uFrame",
@@ -311,7 +314,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug,
       hierarchy,
       fragments,
-      sun,
+      sun, directLight, skyLight, exposureEV, autoExposure,
       fog,
       ocean,
       objects: drawObjects = true,
@@ -348,7 +351,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform3fv(u("uForward"), forward);
     gl.uniform3fv(u("uRight"), right);
     gl.uniform3fv(u("uUp"), up);
-    gl.uniform1f(u("uSpan"), camera.ortho ?? SPAN);
+    gl.uniform1f(u("uSpan"), cameraSpan(camera));
     gl.uniform1ui(u("uFrame"), sampleIndex);
     gl.uniform1ui(u("uWaterGroup"), catalog.models[catalog.water].group);
     gl.uniform1ui(u("uWater"), catalog.water);
@@ -369,8 +372,9 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     );
     gl.uniform1i(u("uObjectsEnabled"), !drawObjects || objects.enabled === false ? 0 : 1);
     objects.update(time, origin);
-    const night = 1 - Math.min(1, Math.max(0, (sun[1] / length + 0.1) / 0.3));
-    return 0.9 * (1 + 2.3 * night);
+    gl.uniform3fv(u("uDirectLight"), directLight ?? [1, 1, 1]);
+    gl.uniform3fv(u("uSkyLight"), skyLight ?? [1, 1, 1]);
+    return frameExposure(sun[1] / length, exposureEV, autoExposure);
   }
   // 上一帧预览所用的档；累积从光影预览开始时保留预览帧作为起点，其他档的画面差别太大，先清空。
   let previewTier: PreviewTier = initialTier;
@@ -394,7 +398,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug = 0,
       hierarchy = true,
       fragments = true,
-      sun = [0.45, 0.62, 0.3],
+      sun = [0.45, 0.62, 0.3], directLight, skyLight, exposureEV, autoExposure,
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
       objects = true,
@@ -425,7 +429,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug,
       hierarchy,
       fragments,
-      sun,
+      sun, directLight, skyLight, exposureEV, autoExposure,
       fog,
       ocean,
     });
@@ -466,7 +470,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       objects = true,
       bounces = 4,
       time = 0,
-      sun = [0.45, 0.62, 0.3],
+      sun = [0.45, 0.62, 0.3], directLight, skyLight, exposureEV, autoExposure,
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
     }: PhotoOptions,
@@ -509,7 +513,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         debug: 0,
         hierarchy: true,
         fragments: true,
-        sun,
+        sun, directLight, skyLight, exposureEV, autoExposure,
         fog,
         ocean,
       });

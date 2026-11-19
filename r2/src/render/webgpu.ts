@@ -1,8 +1,9 @@
 /// <reference types="@webgpu/types" />
 import { sampleCell } from "./options.ts";
 import type { Camera } from "../contracts.ts";
+import { frameExposure } from "./options.ts";
 import type { DrawOptions, PhotoOptions, RendererOptions, Tier } from "./options.ts";
-import { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./camera.ts";
+import { cameraBasis, cameraRay, cameraSpan } from "./camera.ts";
 import { hasVisibleAnimation } from "./animation.ts";
 import { loadTextureSet, type TextureSet } from "./textures.ts";
 import { GPUWorld, materialTextures, objectTextures } from "./webgpu-resources.ts";
@@ -246,13 +247,15 @@ export async function createWebGPURenderer(
         uRight: right,
         uUp: up,
         uForward: forward,
-        uSpan: camera.ortho ?? PERSPECTIVE_SPAN,
+        uSpan: cameraSpan(camera),
         uOrtho: +(camera.ortho !== undefined),
         uSize: world?.size ?? [0, 0, 0],
         uHasWorld: +!!world,
         uViewport: [o.width, o.height],
         uFrame: sampleIndex,
         uSun: sun.map((v) => v / length),
+        uDirectLight: o.directLight ?? [1, 1, 1],
+        uSkyLight: o.skyLight ?? [1, 1, 1],
         uWorldOrigin: origin,
         uDirectoryOffset: [mod(origin[0], SIZE[0] * 16), 0, mod(origin[2], SIZE[2] * 16)],
         uOcean: +(o.ocean !== undefined),
@@ -278,7 +281,7 @@ export async function createWebGPURenderer(
       if (o.tileOrigin) data.set(o.tileOrigin, 62 * 4);
       data[252] = +history;
       device.queue.writeBuffer(frame, 0, data);
-      return 0.9 * (1 + 2.3 * (1 - Math.max(0, Math.min(1, (sun[1] / length + 0.1) / 0.3))));
+      return frameExposure(sun[1] / length, o.exposureEV, o.autoExposure);
     }
     type Target = { hdr: GPUTextureView; history: GPUBindGroup; width: number; height: number };
     function trace(enc: GPUCommandEncoder, tier: Program, target: Target, tile?: number[], timer = false) {

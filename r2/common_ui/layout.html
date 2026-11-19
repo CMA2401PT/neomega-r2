@@ -233,6 +233,30 @@
     <div id="notice" class="panel" role="status" hidden></div>
     <section id="settings" class="popover panel" popover>
       <h2>显示设置</h2>
+      <details id="appearance">
+        <summary>镜头与布光</summary>
+        <fieldset><legend>镜头</legend>
+          <label class="setting">垂直视场角<input id="fov" type="range" min="30" max="115" step="1"><output id="fov-value" for="fov"></output></label>
+          <label class="setting">镜头朝向<input id="yaw" type="range" min="0" max="359" step="1"><output id="yaw-value" for="yaw"></output></label>
+          <label class="setting">俯仰角<input id="pitch" type="range" min="-89" max="89" step="1"><output id="pitch-value" for="pitch"></output></label>
+          <label class="setting">曝光补偿<input id="exposureEV" type="range" min="-4" max="4" step="0.1"><output id="exposureEV-value" for="exposureEV"></output></label>
+          <label class="setting">夜间自动提亮<input id="autoExposure" class="switch" type="checkbox"></label>
+        </fieldset>
+        <fieldset><legend>日照</legend>
+          <label class="setting">手动放置太阳<input id="manualSun" class="switch" type="checkbox"></label>
+          <div id="sun-position" hidden>
+          <label class="setting">太阳方位<input id="azimuth" type="range" min="0" max="359" step="1"><output id="azimuth-value" for="azimuth"></output></label>
+          <label class="setting">太阳高度<input id="elevation" type="range" min="1" max="90" step="1"><output id="elevation-value" for="elevation"></output></label>
+          </div>
+          <label class="setting">直射色调<input id="directColor" type="color"></label>
+          <label class="setting">直射强度<input id="directStrength" type="range" min="0" max="8" step="0.05"><output id="directStrength-value" for="directStrength"></output></label>
+        </fieldset>
+        <fieldset><legend>天空补光</legend>
+          <label class="setting">天空色调<input id="skyColor" type="color"></label>
+          <label class="setting">补光强度<input id="skyStrength" type="range" min="0" max="8" step="0.05"><output id="skyStrength-value" for="skyStrength"></output></label>
+        </fieldset>
+        <button id="appearance-reset" type="button">恢复默认视场角与布光</button>
+      </details>
       <label class="setting"
         >近景视距<input
           id="near-radius"

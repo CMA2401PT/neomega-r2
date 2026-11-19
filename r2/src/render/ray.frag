@@ -32,7 +32,7 @@ vec3 firstNormal;
 uniform int uDebug;
 uniform bool uHierarchy,uFragments;
 // 指向太阳的单位向量；太阳落到地平线下以后由反方向的月亮照明。
-uniform vec3 uSun;
+uniform vec3 uSun,uDirectLight,uSkyLight;
 // 四档绘制器各自编译，低档用预处理去掉整段代码，弱设备只需编译、执行自己那一档：
 // 0 体素：每个非空格子都是纯色立方体，水与玻璃是透明纯色块；无阴影、无雾、无水面效果。
 // 1 基础：完整的方块形状与贴图，水只是像玻璃一样的透明面；无阴影、无雾、无水面效果与反射、无 PBR。
@@ -142,7 +142,7 @@ vec3 skyRadiance(vec3 d){
  // 以 Cinematic 预设的白天天空强度为参照，天空、环境光和反弹共用同一亮度。
  sky*=mix(1.0,1.5,day);
 #endif
- return sky;
+ return sky*uSkyLight;
 }
 #if RENDER_TIER>=2
 // 像素在水面上的两条射线微分包含距离和掠射拉伸；按每个波向过滤，而非只用距离选级。
@@ -203,8 +203,9 @@ void setupLight(){
  lightColor=sunUp
   ?daylight*smoothstep(0.0,.08,h)
   :vec3(.10,.12,.18)*smoothstep(0.0,.15,h);
+ lightColor*=uDirectLight;
  vec3 sky=.5*(skyRadiance(vec3(0,1,0))+skyRadiance(normalize(vec3(0,.15,1))));
- ambient=mix(sky,vec3(dot(sky,vec3(.2126,.7152,.0722))),.35)*1.3+vec3(.004,.005,.008);
+ ambient=mix(sky,vec3(dot(sky,vec3(.2126,.7152,.0722))),.35)*1.3+vec3(.004,.005,.008)*uSkyLight;
 }
 // 水每格的消光：红光衰减最快，深水因此偏蓝绿。散射比例决定水体自身透出的颜色。
 const vec3 WATER_EXTINCTION=vec3(.28,.075,.05),WATER_SCATTER=vec3(.03,.22,.30);
@@ -781,8 +782,8 @@ vec3 stars(vec3 d){
 vec3 background(vec3 d){
  vec3 sky=skyRadiance(d)+stars(d);
  float toward=dot(d,uSun);
- sky+=vec3(1.0,.9,.75)*30.0*smoothstep(.9996,.9997,toward)*smoothstep(-.05,.02,uSun.y);
- sky+=vec3(.8,.85,1.0)*2.0*smoothstep(.9997,.9998,-toward)*smoothstep(-.02,.05,-uSun.y);
+ sky+=uDirectLight*vec3(1.0,.9,.75)*30.0*smoothstep(.9996,.9997,toward)*smoothstep(-.05,.02,uSun.y);
+ sky+=uDirectLight*vec3(.8,.85,1.0)*2.0*smoothstep(.9997,.9998,-toward)*smoothstep(-.02,.05,-uSun.y);
  return sky;
 }
 #if RENDER_TIER>=2

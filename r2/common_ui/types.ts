@@ -1,6 +1,10 @@
 import type { Camera, Renderer, PreviewTier, SessionStats } from "/r2/index.js";
 
+import type { Appearance } from "./appearance.js";
+
 export interface ViewSettings {
+  /** 旧设置首次打开面板时沿用默认镜头与昼夜光照。 */
+  appearance?: Appearance;
   nearRadius: number;
   farRadius: number;
   resolution: string;

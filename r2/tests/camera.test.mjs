@@ -15,6 +15,15 @@ test("透视中心沿 forward，边缘射线从同一相机发散", () => {
   assert(Math.abs(Math.hypot(...edge.direction) - 1) < 1e-10);
 });
 
+test("拾取射线跟随垂直视场角，正交地图沿用自己的跨度", () => {
+  const wide = { position: [0, 0, 0], yaw: 0, pitch: 0, fov: 90 };
+  const pixel = { width: 3, height: 3, x: 1, y: 0 };
+  const ray = cameraRay(wide, pixel);
+  assert(Math.abs(ray.direction[1] / -ray.direction[2] - 2 / 3) < 1e-10);
+  const map = { ...wide, ortho: 30 };
+  assert.deepEqual(cameraRay(map, pixel), cameraRay({ ...map, fov: 30 }, pixel));
+});
+
 test("正交射线方向相同，像平面宽高与像素中心一致", () => {
   const camera = {
     position: [0, 1000, 0],

@@ -23,12 +23,24 @@ export interface LightingOptions {
   time?: number;
   /** 指向太阳的方向；太阳在地平线下时由月亮照明。 */
   sun?: number[];
+  /** 日月直射和天空辐射分别乘以这两个线性 RGB 系数，默认都是白色单位强度。 */
+  directLight?: number[];
+  skyLight?: number[];
+  /** 曝光补偿，以档为单位。关闭昼夜曝光适应后，零档固定为日间曝光。 */
+  exposureEV?: number;
+  autoExposure?: boolean;
   /** 远景雾接近不透明的距离，默认为观察窗口半径。 */
   fog?: number;
   /** 无限海面的世界高度；省略时只绘制场景里的体素水。 */
   ocean?: number;
   /** 为假时这次绘制隐藏特殊对象。 */
   objects?: boolean;
+}
+
+/** 合成画面时每增加一档曝光，进入色调映射的线性亮度加倍。 */
+export function frameExposure(sunHeight: number, ev = 0, adapt = true): number {
+  const night = adapt ? 1 - Math.max(0, Math.min(1, (sunHeight + 0.1) / 0.3)) : 0;
+  return 0.9 * (1 + 2.3 * night) * 2 ** ev;
 }
 
 export interface DrawOptions extends LightingOptions {

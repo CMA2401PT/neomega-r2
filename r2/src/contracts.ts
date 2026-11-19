@@ -10,6 +10,8 @@ export interface Camera {
   yaw: number;
   pitch: number;
   ortho?: number;
+  /** 透视镜头的垂直视场角，单位为度，默认 65°。 */
+  fov?: number;
 }
 
 /** 特殊对象描述；data 由同类型工厂解释。 */

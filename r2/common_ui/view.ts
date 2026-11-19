@@ -1,3 +1,4 @@
+import { appearanceDefaults, bindAppearance, lighting } from "./appearance.js";
 import { FrameRate } from "./frame-rate.js";
 import { createHUD, element } from "./hud.js";
 import { FullscreenMap } from "./map.js";
@@ -38,6 +39,8 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
   const hud = createHUD({ settings, jump, changed: refreshSettings });
+  const appearance = settings.appearance = { ...appearanceDefaults, ...settings.appearance };
+  const syncAngles = bindAppearance(appearance, camera, refreshSettings);
   const rate = new FrameRate();
   let currentView: ReturnType<FullscreenMap["frame"]> | null = null;
   let shownTier = settings.tier, last = performance.now(), statusAt = 0;
@@ -58,11 +61,6 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       Math.sqrt(pixelLimit / (innerWidth * innerHeight)),
     );
     return { width: Math.max(1, Math.round(innerWidth * factor)), height: Math.max(1, Math.round(innerHeight * factor)) };
-  }
-  /** 太阳从东方升起，轨道略向南倾斜，使正午仍有可辨别的侧影。 */
-  function sunDirection(hours: number) {
-    const angle = ((hours - 6) / 24) * 2 * Math.PI;
-    return [Math.cos(angle), Math.sin(angle), 0.3];
   }
   // 预览之外的各档启动时不编译；第一次需要时在后台编译，期间画面继续使用已有的档。
   const taskStatus = element<HTMLOutputElement>("task-status");
@@ -182,7 +180,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       supersample,
       ...(kind === "export" ? { tier: shownTier } : {}),
       time: performance.now() / 1000,
-      sun: sunDirection(settings.time),
+      ...lighting(appearance, settings.time),
       ...(world.ocean == null ? {} : { ocean: world.ocean }),
       fog: currentView.fog,
       objects: currentView.objects,
@@ -259,7 +257,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     session?.publish();
     map.refresh(session);
     const { width, height } = frameSize(renderScale());
-    const sun = sunDirection(settings.time),
+    const light = lighting(appearance, settings.time),
       objects = view.objects;
     const state = JSON.stringify([
       view,
@@ -267,7 +265,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       height,
       shownTier,
       settings.fog,
-      sun,
+      light,
       renderer.version,
       objects,
       drawOptions,
@@ -287,7 +285,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         tier: shownTier,
         accumulate: !changed,
         time: now / 1000,
-        sun,
+        ...light,
         ...(world.ocean == null ? {} : { ocean: world.ocean }),
         fog: view.fog,
         objects,
@@ -304,6 +302,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       drawn = state;
     } else if (!changed) rate.idle();
     if (now - statusAt > 100) {
+      syncAngles();
       hud.position(camera.position);
       drawAxes(element<HTMLCanvasElement>("axes"), camera);
       element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
