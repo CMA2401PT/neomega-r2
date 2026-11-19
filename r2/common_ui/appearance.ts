@@ -5,7 +5,7 @@ import { element } from "./hud.js";
 export const appearanceDefaults = {
   fov: 65, exposureEV: 0, autoExposure: true,
   manualSun: false, azimuth: 210, elevation: 24,
-  directColor: "#ffffff", directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 15,
+  directColor: "#ffffff", directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 15, cloudShadows: false,
 };
 export type Appearance = typeof appearanceDefaults;
 const radians = Math.PI / 180;
@@ -30,6 +30,7 @@ export function lighting(settings: Appearance, hours: number): LightingOptions {
     skyLight: lightGain(settings.skyColor, settings.skyStrength),
     exposureEV: settings.exposureEV,
     autoExposure: settings.autoExposure,
+    cloudShadows: settings.cloudShadows,
     airExtinction: -Math.log1p(-settings.airOpacity / 100) / 100,
   };
 }
@@ -43,7 +44,7 @@ function compass(degrees: number): string {
 export function bindAppearance(settings: Appearance, camera: Camera, changed: () => void) {
   const panel = element<HTMLDetailsElement>("appearance");
   const ranges = ["fov", "exposureEV", "azimuth", "elevation", "directStrength", "skyStrength", "airOpacity"] as const;
-  const switches = ["manualSun", "autoExposure"] as const;
+  const switches = ["manualSun", "autoExposure", "cloudShadows"] as const;
   const colors = ["directColor", "skyColor"] as const;
   function refresh() {
     camera.fov = settings.fov;

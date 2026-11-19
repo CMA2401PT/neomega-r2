@@ -28,6 +28,8 @@ export interface LightingOptions {
   skyLight?: number[];
   /** 累积档的均匀薄雾消光系数，单位为每格。零或省略时关闭。 */
   airExtinction?: number;
+  /** 累积时让高空的固定云层遮挡照到薄雾和表面的日月直射光。默认关闭。 */
+  cloudShadows?: boolean;
   /** 曝光补偿，以档为单位。关闭昼夜曝光适应后，零档固定为日间曝光。 */
   exposureEV?: number;
   autoExposure?: boolean;

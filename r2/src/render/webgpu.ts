@@ -257,6 +257,7 @@ export async function createWebGPURenderer(
         uDirectLight: o.directLight ?? [1, 1, 1],
         uSkyLight: o.skyLight ?? [1, 1, 1],
         uAirExtinction: o.airExtinction ?? 0,
+        uCloudShadows: +(o.cloudShadows ?? false),
         uWorldOrigin: origin,
         uDirectoryOffset: [mod(origin[0], SIZE[0] * 16), 0, mod(origin[2], SIZE[2] * 16)],
         uOcean: +(o.ocean !== undefined),
@@ -362,7 +363,7 @@ export async function createWebGPURenderer(
         samples = 0;
         keepPreview = false;
       }
-      const add = !!o.accumulate && (samples > 0 || (keepPreview && !(o.airExtinction ?? 0)));
+      const add = !!o.accumulate && (samples > 0 || (keepPreview && !o.cloudShadows && !(o.airExtinction ?? 0)));
       if (!o.accumulate) {
         waterTime = o.time ?? 0;
         samples = 0;

@@ -27,6 +27,7 @@ test("各 WebGPU 射线路径共用一个格子遍历调用点", (t) => {
     assert.equal(wgsl.match(/\bsunVisibility\w*\(/g)?.length ?? 0, name.endsWith("-pick") ? 0 : 2, name);
     // 硬光影和拾取档不承担雾中采样的开销。
     assert.equal(/fn airSampleDistance/.test(wgsl), /^(photo|accumulation)/.test(name), name);
+    assert.equal(/fn cloudTransmission/.test(wgsl), /^(photo|accumulation)/.test(name), name);
     const slots = wgsl.match(/^\/\/ Uniform slots: (.*)$/m)[1].split(",");
     // Both compute passes reuse the same frame uniform buffer and per-tile retry mask.
     if (!name.endsWith("-retry")) fastSlots = slots;

@@ -56,6 +56,7 @@ uniform float uFog;
 #if RENDER_TIER==3
 // 每格空气的消光系数。只计算相机到首个界面之间的单次散射。
 uniform float uAirExtinction;
+uniform bool uCloudShadows;
 bool cameraInWater;
 #endif
 // 秒；宿主固定时间后累积同一个波面，动画时重开预览。
@@ -593,6 +594,21 @@ vec2 airInterval(float localY,float dy,float limit){
  vec2 ends=(vec2(floorY,topY)-localY)/dy;
  return clamp(vec2(min(ends.x,ends.y),max(ends.x,ends.y)),0.0,limit);
 }
+
+// 将受光点沿日月方向投到世界高度 160 的云层。每个 16×16 格的方块取同一遮光量，
+// 再用间隔 80 格的噪声控制云团大小。云层固定在世界坐标中。
+float cloudTransmission(vec3 point,vec3 direction){
+ float height=160.0-point.y;
+ if(height<=0.0||direction.y<=0.0)return 1.0;
+ vec2 projected=point.xz+direction.xz*(height/direction.y);
+ vec2 grid=(floor(projected/16.0)+.5)/5.0;
+ ivec2 cell=ivec2(floor(grid));
+ uint key=uint(cell.x)*1973u+uint(cell.y)*9277u+1u;
+ vec2 f=smoothstep(vec2(0),vec2(1),fract(grid));
+ vec4 corners=vec4(pcg(key),pcg(key+1973u),pcg(key+9277u),pcg(key+11250u))/4294967296.0;
+ float density=mix(mix(corners.x,corners.y,f.x),mix(corners.z,corners.w,f.x),f.y);
+ return mix(1.0,.10,smoothstep(.50,.56,density));
+}
 #endif
 #if RENDER_TIER>=2
 // 阴影射线：从命中点走向光源，只关心沿途透过了多少光，不着色。
@@ -654,6 +670,7 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
   previous=current;t=end;cell=nextCell;side=exitSide^1;
  }
 #if RENDER_TIER==3
+ if(uCloudShadows)light*=cloudTransmission(origin+uWorldOrigin,direction);
  if(uAirExtinction>0.0){
   vec2 air=airInterval(origin.y,direction.y,1e30);
   light*=exp(-uAirExtinction*(air.y-air.x));
