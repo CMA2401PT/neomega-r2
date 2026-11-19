@@ -1,5 +1,6 @@
 // HUD 负责坐标编辑、面板锚定、时间按钮与临时提示；不持有渲染器或存档请求。
 import type { ViewSettings } from "./types.js";
+import { bindSettingsSheet } from "./settings-sheet.js";
 /** 页面元素由固定 HTML 提供，各界面模块使用同一套 ID。 */
 export function element<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -21,9 +22,9 @@ export const settingInputs = [
   ["time", "time"],
 ] as const;
 
-/** 收起原生弹出面板，避免切换视图后留下顶层 UI。 */
+/** 收起原生弹出面板（含设置面板），避免切换视图后留下顶层 UI。 */
 export function closePopovers() {
-  for (const panel of document.querySelectorAll<HTMLElement>(".popover:popover-open"))
+  for (const panel of document.querySelectorAll<HTMLElement>("[popover]:popover-open"))
     panel.hidePopover();
 }
 
@@ -65,18 +66,12 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     stopEditing();
   };
-  /** 设置贴近右上工具栏，场景信息贴近底部坐标栏。 */
+  /** 场景信息之类的小弹窗对准触发按钮，贴在底部坐标栏上方。设置面板由 bindSettingsSheet 自行布局。 */
   function place(panel: HTMLElement) {
     const trigger = document.querySelector(`[popovertarget="${panel.id}"]`);
     const rect = trigger!.getBoundingClientRect();
-    if (panel.id === "settings") {
-      const toolbar = element("toolbar").getBoundingClientRect();
-      panel.style.left = `${Math.max(8, toolbar.left - panel.offsetWidth - 8)}px`;
-      panel.style.top = `${toolbar.top}px`;
-    } else {
-      panel.style.left = `${Math.max(8, Math.min(innerWidth - panel.offsetWidth - 8, rect.left + rect.width / 2 - panel.offsetWidth / 2))}px`;
-      panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
-    }
+    panel.style.left = `${Math.max(8, Math.min(innerWidth - panel.offsetWidth - 8, rect.left + rect.width / 2 - panel.offsetWidth / 2))}px`;
+    panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
     panel.dataset.placed = "";
   }
   for (const panel of document.querySelectorAll<HTMLElement>(".popover")) {
@@ -89,6 +84,7 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     for (const panel of document.querySelectorAll<HTMLElement>(".popover:popover-open"))
       place(panel);
   });
+  bindSettingsSheet();
   for (const [id, key] of settingInputs) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
     input.addEventListener(id === "time" ? "input" : "change", () => {
@@ -126,12 +122,12 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     };
   element<HTMLSelectElement>("resolution").options[0].textContent =
     `屏幕原生（${+devicePixelRatio.toFixed(2)}×）`;
-  element<HTMLButtonElement>("eye").onclick = () => {
+  // 隐藏后按钮换成划掉的眼睛，表示 HUD 当前收起；按钮本身不显示按下态。
+  const eye = element<HTMLButtonElement>("eye");
+  eye.onclick = () => {
     const hidden = document.body.classList.toggle("hud-hidden");
-    element<HTMLButtonElement>("eye").setAttribute("aria-pressed", String(hidden));
-    element<HTMLButtonElement>("eye").title = element<HTMLButtonElement>("eye").ariaLabel = hidden
-      ? "显示 HUD"
-      : "隐藏 HUD";
+    eye.querySelector("use")!.setAttribute("href", hidden ? "#i-eye-off" : "#i-eye");
+    eye.title = eye.ariaLabel = hidden ? "显示 HUD" : "隐藏 HUD";
     closePopovers();
   };
   return {
@@ -167,12 +163,12 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
       wasLoading = false;
       element<HTMLOutputElement>("loading").textContent = "";
     },
-    /** 坐标字段按数字长度展开，不为较大的世界坐标预留固定空白。 */
+    /** 坐标字段至少容纳 -100.0 这样的六位读数，移动时底栏不随位数抖动；更大的坐标再展开。 */
     position(position: number[]) {
       if (dirty || form.contains(document.activeElement)) return;
       fields.forEach((field, i) => {
         field.value = position[i].toFixed(1);
-        field.style.width = `${Math.max(3, field.value.length) + 0.8}ch`;
+        field.style.width = `${Math.max(6, field.value.length)}ch`;
       });
     },
     /** 重连提示与加载进度共用位置，恢复连接后继续显示加载进度并正常淡出。 */

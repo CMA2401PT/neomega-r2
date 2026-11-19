@@ -43,7 +43,8 @@ function compass(degrees: number): string {
 
 /** 拖动控件即时更新画面；飞行转头时方位读数也跟着当前镜头。 */
 export function bindAppearance(settings: Appearance, camera: Camera, changed: () => void) {
-  const panel = element<HTMLDetailsElement>("appearance");
+  // 朝向与俯仰在飞行中不断变化，只在相机页签可见时回写滑条。
+  const panel = element("settings-camera");
   const ranges = ["fov", "exposureEV", "azimuth", "elevation", "directStrength", "skyStrength", "airOpacity"] as const;
   const switches = ["manualSun", "autoExposure", "solarHaze", "cloudShadows"] as const;
   const colors = ["directColor", "skyColor"] as const;
@@ -86,7 +87,7 @@ export function bindAppearance(settings: Appearance, camera: Camera, changed: ()
     input.oninput = () => { camera[key] = input.valueAsNumber * radians; syncAngles(); changed(); };
   }
   function syncAngles() {
-    if (!panel.open) return;
+    if (!panel.checkVisibility()) return;
     for (const key of angles) {
       const value = Math.round(camera[key] / radians);
       const degrees = key === "yaw" ? ((value % 360) + 360) % 360 : value;
@@ -97,7 +98,6 @@ export function bindAppearance(settings: Appearance, camera: Camera, changed: ()
       element(key + "-value").textContent = label;
     }
   }
-  panel.ontoggle = syncAngles;
   element("appearance-reset").onclick = () => { Object.assign(settings, appearanceDefaults); apply(); };
   refresh();
   return { refresh, syncAngles };
