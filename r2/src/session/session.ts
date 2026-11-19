@@ -79,6 +79,8 @@ export interface SessionStats {
   /** 还在等待数据、准备或发布的区域数。 */
   pending: number;
   failed: number;
+  /** 当前仍失败的一个区域及原因；移出范围或重新收到数据后自动消失。 */
+  failure?: string;
   /** 近景范围内还没显示完的区域数（方块或对象）。 */
   nearPending: number;
   sections: number;
@@ -108,7 +110,7 @@ interface Entry extends RegionCoord {
   /** 当前要的近景对象；空串表示不需要。 */
   objectSignature: string;
   objectsLoaded: string;
-  failed: boolean;
+  failed: string | null;
 }
 
 interface TextureChange {
@@ -193,7 +195,7 @@ export class WorldSession {
   }
   private dirty(entry: Entry): void {
     entry.version++;
-    entry.failed = false;
+    // 邻区变化只使模型过期，不能把读取失败误当成恢复；收到本区数据时才清除错误。
   }
   /** 模型会伸进邻区，来源变化时附近显示中的区域都要重新准备。 */
   private dirtyNeighbors(x: number, z: number): void {
@@ -277,7 +279,7 @@ export class WorldSession {
           published: 0,
           objectSignature: "",
           objectsLoaded: "",
-          failed: false,
+          failed: null,
         };
         this.entries.set(key, entry);
         change.regions.add.push({ x: value.x, z: value.z });
@@ -319,7 +321,7 @@ export class WorldSession {
     this.bytes += buffer.byteLength;
     entry.request = ++this.serial;
     entry.state = "storing";
-    entry.failed = false;
+    entry.failed = null;
     this.post({ type: "put", key: entry.key, request: entry.request, buffer }, [buffer]);
   }
 
@@ -341,8 +343,7 @@ export class WorldSession {
       if (changed) this.dirtyNeighbors(entry.x, entry.z);
     } catch (error) {
       if ((error as Error)?.name !== "AbortError" && !this.disposed) {
-        entry.failed = true;
-        this.onError(String(error));
+        this.receiveError(x, z, error);
       }
     } finally {
       this.pump();
@@ -352,9 +353,9 @@ export class WorldSession {
   private receiveError(x: number, z: number, error: unknown): void {
     const entry = this.entries.get(regionKey(x, z));
     if (this.disposed || !entry) return;
-    entry.failed = true;
+    entry.failed = String((error as Error)?.message ?? error);
     if (entry.state === "waiting") entry.state = "failed";
-    this.onError(String((error as Error)?.message ?? error));
+    this.onError(`区域 (${x}, ${z}) 加载失败：${entry.failed}`);
   }
 
   /** 准备线程一次只做一个区域，按离相机由近到远。 */
@@ -365,7 +366,7 @@ export class WorldSession {
       if (
         entry.visible &&
         entry.state === "stored" &&
-        !entry.failed &&
+        entry.failed === null &&
         entry.prepared < entry.version &&
         (!best || this.priority(entry) < this.priority(best))
       )
@@ -417,9 +418,9 @@ export class WorldSession {
         return;
       }
       const entry = this.preparing?.entry ?? (data.key ? this.entries.get(data.key) : undefined);
-      if (entry) entry.failed = true;
+      if (entry) this.receiveError(entry.x, entry.z, data.error);
+      else this.onError(data.error);
       this.preparing = null;
-      this.onError(data.error);
     }
     this.pump();
   }
@@ -435,8 +436,7 @@ export class WorldSession {
         this.uploadMS += performance.now() - start;
         next.entry.published = next.version;
       } catch (error) {
-        next.entry.failed = true;
-        this.onError(String(error));
+        this.receiveError(next.entry.x, next.entry.z, error);
       }
     }
     this.pump();
@@ -476,17 +476,19 @@ export class WorldSession {
 
   get stats(): SessionStats {
     const all = [...this.entries.values()],
-      installed = [...this.gpu.regions.values()];
+      installed = [...this.gpu.regions.values()],
+      failed = all.filter((e) => e.failed !== null);
     return {
       wanted: all.filter((e) => e.visible).length,
       loaded: this.gpu.regions.size,
       pending: all.filter(
-        (e) => !e.failed && (e.state !== "stored" || (e.visible && e.published !== e.version)),
+        (e) => e.failed === null && (e.state !== "stored" || (e.visible && e.published !== e.version)),
       ).length,
-      failed: all.filter((e) => e.failed).length,
+      failed: failed.length,
+      failure: failed.length ? `区域 (${failed[0].x}, ${failed[0].z}) 加载失败：${failed[0].failed}` : undefined,
       nearPending: all.filter(
         (e) =>
-          e.near &&
+          e.failed === null && e.near &&
           ((e.visible && e.published !== e.version) || e.objectsLoaded !== e.objectSignature),
       ).length,
       sections: installed.reduce((n, e) => n + e.stats.sections, 0),

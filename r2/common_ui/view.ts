@@ -323,6 +323,8 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         const stats = session.stats,
           times = renderer.times.sort((a, b) => a - b),
           median = times[Math.floor(times.length / 2)];
+        // 首批区域全部失败时没有可绘制的第一帧，仍需退出启动等待并显示 HUD 错误。
+        if (stats.failed > 0) finishStartup();
         hud.loading(stats, world.connection);
         onStats?.({ stats, shownTier, median, width, height });
       }

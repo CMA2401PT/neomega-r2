@@ -36,7 +36,8 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     dirty = false,
     toastTimer: number | undefined,
     loadingTimer: number | undefined,
-    wasLoading = false;
+    wasLoading = false,
+    hadRegionFailure = false;
   /** 放弃编辑时恢复实时坐标，跳转按钮不再接收旧值。 */
   function stopEditing() {
     dirty = false;
@@ -160,7 +161,10 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
       for (const field of [...fields, element<HTMLButtonElement>("map-open")]) field.disabled = !loaded;
       stopEditing();
       clearTimeout(loadingTimer);
+      clearTimeout(toastTimer);
       wasLoading = false;
+      hadRegionFailure = false;
+      element("notice").hidden = true;
       element<HTMLOutputElement>("loading").textContent = "";
     },
     /** 坐标字段至少容纳 -100.0 这样的六位读数，移动时底栏不随位数抖动；更大的坐标再展开。 */
@@ -171,18 +175,28 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
         field.style.width = `${Math.max(6, field.value.length)}ch`;
       });
     },
-    /** 重连提示与加载进度共用位置，恢复连接后继续显示加载进度并正常淡出。 */
+    /** 失败区域不再算等待；错误持续可见，直到数据恢复或离开这些区域。 */
     loading(stats: import("/r2/index.js").SessionStats, connection?: {state: string}) {
       const waiting = connection && connection.state !== "connected";
       const busy = waiting || stats.pending > 0 || stats.nearPending > 0;
-      if (busy) {
+      if (stats.failed > 0) {
+        clearTimeout(toastTimer);
+        element("notice").textContent = stats.failure ?? "部分区域读取失败，请检查存档格式或数据是否完整。";
+        element("notice").hidden = false;
+      } else if (hadRegionFailure) {
+        element("notice").hidden = true;
+      }
+      hadRegionFailure = stats.failed > 0;
+      if (busy || hadRegionFailure) {
         clearTimeout(loadingTimer);
         element<HTMLOutputElement>("loading").classList.remove("faded");
         element<HTMLOutputElement>("loading").textContent = waiting
           ? connection.state === "reconnecting"
             ? "连接已断开，保留最后画面；每 3 秒重试"
             : "数据源已断开"
-          : `近景对象准备 ${stats.nearPending} 个 r2region · 远景覆盖 ${stats.loaded}/${stats.wanted} 个 r2region`;
+          : hadRegionFailure
+            ? `${stats.failed} 个区域加载失败，存档显示不完整${busy ? ` · 其余区域仍在加载` : ""}`
+            : `近景对象准备 ${stats.nearPending} 个 r2region · 远景覆盖 ${stats.loaded}/${stats.wanted} 个 r2region`;
       } else if (wasLoading) {
         element<HTMLOutputElement>("loading").textContent = "已加载";
         loadingTimer = setTimeout(
@@ -190,7 +204,7 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
           1500,
         );
       }
-      wasLoading = busy;
+      wasLoading = busy || hadRegionFailure;
     },
     /** 错误保持可读的短时提示，后来的错误替换先前内容。 */
     error(message: string) {
