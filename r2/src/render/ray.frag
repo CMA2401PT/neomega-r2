@@ -163,8 +163,9 @@ float aerosolDepth(float zenithCosine){
 vec3 skyRadiance(vec3 d){
  vec3 sky=baseSkyRadiance(d);
 #if RENDER_TIER==3
- if(uSolarHaze&&uSun.y>0.0&&d.y>=0.0){
-  float viewDepth=aerosolDepth(d.y),sunDepth=aerosolDepth(uSun.y);
+ if(uSolarHaze&&uSun.y>0.0){
+  // 下半球背景延续地平线光程，由场景遮住地面；在水平线关闭辉光会留下硬边。
+  float viewDepth=aerosolDepth(max(d.y,0.0)),sunDepth=aerosolDepth(uSun.y);
   // 按层高线性分配两条光路的消光，解析积分太阳到散射点、再到观察者的透射率。
   // 两光程接近时用中点极限，避免相近的指数相减。
   float delta=viewDepth-sunDepth;
@@ -613,14 +614,27 @@ void windowInterval(out vec3 entry,out vec3 leave){
  leave=mix(leave,vec3(1e30),parallel);
 }
 #if RENDER_TIER==3
-// 求射线穿过近地薄雾的区间。雾顶使用固定世界高度，移动加载窗口不会改变照明。
+// Y=0 以下密度不变，向上到 256 格线性降为零，竖直光学厚度仍等于 128 格均匀雾。
+// 世界底部不是空气边界；只有实际海面截断薄雾，避免低机位向下看时突然露出背景色。
+const float AIR_TOP=256.0;
 vec2 airInterval(float localY,float dy,float limit){
- float floorY=max(-64.0-uWorldOrigin.y,uOcean?uOceanHeight:-1e30);
- float topY=128.0-uWorldOrigin.y;
+ float floorY=uOcean?uOceanHeight:-1e30;
+ float topY=AIR_TOP-uWorldOrigin.y;
  if(floorY>=topY)return vec2(0);
  if(abs(dy)<1e-8)return vec2(0,localY>=floorY&&localY<topY?limit:0.0);
  vec2 ends=(vec2(floorY,topY)-localY)/dy;
  return clamp(vec2(min(ends.x,ends.y),max(ends.x,ends.y)),0.0,limit);
+}
+
+float airOpticalDepth(float localY,float dy,vec2 interval){
+ // 在线性密度段用梯形积分，跨过 Y=0 时单独计入均匀段；水平和短光路不做相近数相减。
+ float startY=localY+uWorldOrigin.y+dy*interval.x,length=interval.y-interval.x;
+ float below=dy==0.0?(startY<0.0?length:0.0):clamp(-startY/dy,0.0,length);
+ if(dy<0.0)below=length-below;
+ float above=length-below;
+ float firstY=startY+dy*(dy>0.0?below:0.0),lastY=firstY+dy*above;
+ float densitySum=clamp(1.0-firstY/AIR_TOP,0.0,1.0)+clamp(1.0-lastY/AIR_TOP,0.0,1.0);
+ return uAirExtinction*(below+.5*densitySum*above);
 }
 
 // 将受光点沿日月方向投到世界高度 160 的云层。每个 16×16 格的方块取同一遮光量，
@@ -701,7 +715,7 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
  if(uCloudShadows)light*=cloudTransmission(origin+uWorldOrigin,direction);
  if(uAirExtinction>0.0){
   vec2 air=airInterval(origin.y,direction.y,1e30);
-  light*=exp(-uAirExtinction*(air.y-air.x));
+  light*=exp(-airOpticalDepth(origin.y,direction.y,air));
  }
 #endif
  return light;
@@ -877,11 +891,27 @@ float seaLimit(vec3 p,vec3 d){
  return uOcean&&abs(d.y)>1e-8?(uOceanHeight-p.y)/d.y:-1.0;
 }
 #if RENDER_TIER==3
-// 截断指数分布的逆函数：按到相机的透射率分配样本。逐像素错开的 Sobol 第一维
-// 依次覆盖近处和远处。积分权重化简为 1-T，每个像素每轮只需一次雾中遮挡查询。
-float airSampleDistance(float extinction,float opacity){
+float airSampleDistance(float localY,float dy,vec2 interval,float opacity){
+ // 先按透射率抽光学距离，再反解均匀段和线性密度段的位置，权重仍为 1-T。
+ // 二次方程用有理化的根，近水平的短光路也能稳定求解。
  float u=fract(pathSample.x+float(pcg(pixelSeed+19u)>>8u)/16777216.0);
- return -log(max(1.0-u*opacity,1e-7))/extinction;
+ float optical=-log(max(1.0-u*opacity,1e-7))/uAirExtinction;
+ // 雾顶密度为零，零距离样本直接取入口，避免二次方程出现 0/0。
+ if(optical==0.0)return interval.x;
+ float startY=localY+uWorldOrigin.y+dy*interval.x;
+ float density=clamp(1.0-startY/AIR_TOP,0.0,1.0);
+ if(dy==0.0)return interval.x+optical/density;
+ if(startY<0.0){
+  float below=dy>0.0?-startY/dy:1e30;
+  if(optical<=below)return interval.x+optical;
+  optical-=below;
+  return interval.x+below+2.0*optical/(1.0+sqrt(max(0.0,1.0-2.0*dy*optical/AIR_TOP)));
+ }
+ if(dy<0.0){
+  float above=startY/-dy,column=.5*(density+1.0)*above;
+  if(optical>=column)return interval.x+above+(optical-column);
+ }
+ return interval.x+2.0*optical/(density+sqrt(max(0.0,density*density-2.0*dy*optical/AIR_TOP)));
 }
 #endif
 vec3 tracePath(vec3 view,vec3 origin){
@@ -896,7 +926,7 @@ vec3 tracePath(vec3 view,vec3 origin){
  if(uAirExtinction>0.0&&uSun.y>0.0){
   vec2 airColumn=airInterval(-uWorldOrigin.y,uSun.y,1e30);
   // 雾顶入射日光最多提高三倍，避免浓雾或接近日落时反推出过强的光源。
-  incidentSunGain=exp(min(log(3.0),uAirExtinction*(airColumn.y-airColumn.x)));
+  incidentSunGain=exp(min(log(3.0),airOpticalDepth(-uWorldOrigin.y,uSun.y,airColumn)));
  }
  float airTransmission=1.0;
  vec3 airRadiance=vec3(0);
@@ -929,11 +959,11 @@ vec3 tracePath(vec3 view,vec3 origin){
   if(primaryRay&&!cameraInWater&&uAirExtinction>0.0)
    air=airInterval(origin.y,view.y,touched?min(firstDepth,job.limit):job.limit);
   bool sampleAir=air.y>air.x;
-  if(sampleAir)airTransmission=exp(-uAirExtinction*(air.y-air.x));
+  if(sampleAir)airTransmission=exp(-airOpticalDepth(origin.y,view.y,air));
   // 表面及雾中遮挡走同一个遍历调用点，避免驱动内联两份完整的世界查询。
   for(int query=surfaceShadow?0:1;query<(sampleAir&&brightest(lightColor)>0.0?2:1);query++){
    if(query==1){
-    shadowOrigin=origin+view*(air.x+airSampleDistance(uAirExtinction,1.0-airTransmission));
+    shadowOrigin=origin+view*airSampleDistance(origin.y,view.y,air,1.0-airTransmission);
     shadowDirection=lightDir;
    }
    vec3 transmittedLight=incidentSunGain*sunVisibility(shadowOrigin,shadowDirection);

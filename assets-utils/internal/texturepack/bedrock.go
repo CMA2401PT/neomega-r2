@@ -106,29 +106,22 @@ func readBedrockTile(blocks fs.FS, texture string) tile {
 	} else if heights := bedrockLayer(blocks, def.Set.Heightmap); heights != nil {
 		w, h := heights.Rect.Dx(), heights.Rect.Dy()
 		t.normal = image.NewNRGBA(heights.Rect)
-		// 方块面位于高度场顶端。把最高点放在面上，按同一比例保留纹素间的起伏；
-		// 常量高度图因此仍是平面，绘制时能直接跳过视差步进。
-		var peak uint8
-		for i := 0; i < len(heights.Pix); i += 4 {
-			peak = max(peak, heights.Pix[i])
-		}
 		height := func(x, y int) float64 {
 			return float64(heights.NRGBAAt((x+w)%w, (y+h)%h).R) / 255
 		}
-		// 基岩高度量程取原版一个纹素宽（1/16 格），而目标通道的量程为 1/4 格。
-		// 坡度跨两个纹素取中心差分，法线与视差使用同一物理尺度。
-		const reliefRange = 1.0 / 16.0
-		const heightScale = reliefRange / 0.25
+		// 基岩高度图表示受光凹凸；1/16 仅作为生成斜率的强度，不写入 labPBR 视差深度。
+		// A 固定为 255，让轮廓和颜色纹素留在原表面，避免把像素边界拉成阶梯侧壁。
+		const normalStrength = 1.0 / 16.0
 		for y := range h {
 			for x := range w {
-				dx := (height(x-1, y) - height(x+1, y)) * float64(w) * reliefRange / 2
-				dy := (height(x, y-1) - height(x, y+1)) * float64(h) * reliefRange / 2
+				dx := (height(x-1, y) - height(x+1, y)) * float64(w) * normalStrength / 2
+				dy := (height(x, y-1) - height(x, y+1)) * float64(h) * normalStrength / 2
 				scale := 127.5 / math.Sqrt(1+dx*dx+dy*dy)
 				t.normal.SetNRGBA(x, y, color.NRGBA{
 					R: byte(math.Round(127.5 + dx*scale)),
 					G: byte(math.Round(127.5 + dy*scale)),
 					B: 255,
-					A: 255 - byte(math.Round(float64(peak-heights.NRGBAAt(x, y).R)*heightScale)),
+					A: 255,
 				})
 			}
 		}

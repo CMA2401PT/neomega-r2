@@ -26,7 +26,7 @@ export interface LightingOptions {
   /** 日月直射和天空辐射分别乘以这两个线性 RGB 系数，默认都是白色单位强度。 */
   directLight?: number[];
   skyLight?: number[];
-  /** 累积档的均匀薄雾消光系数，单位为每格。零或省略时关闭。 */
+  /** 累积档在世界 Y≤0 处的薄雾消光系数，单位为每格；向上到 Y=256 线性降为零。零或省略时关闭。 */
   airExtinction?: number;
   /** 累积时把朝向太阳的气溶胶散射计入天空亮度与表面反弹。默认关闭。 */
   solarHaze?: boolean;
