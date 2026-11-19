@@ -28,6 +28,8 @@ test("各 WebGPU 射线路径共用一个格子遍历调用点", (t) => {
     // 硬光影和拾取档不承担雾中采样的开销。
     assert.equal(/fn airSampleDistance/.test(wgsl), /^(photo|accumulation)/.test(name), name);
     assert.equal(/fn cloudTransmission/.test(wgsl), /^(photo|accumulation)/.test(name), name);
+    // 太阳周围的散射只在累积和拍照时计算，硬光影不承担这项开销。
+    assert.equal(/fn aerosolDepth/.test(wgsl), /^(photo|accumulation)/.test(name), name);
     const slots = wgsl.match(/^\/\/ Uniform slots: (.*)$/m)[1].split(",");
     // Both compute passes reuse the same frame uniform buffer and per-tile retry mask.
     if (!name.endsWith("-retry")) fastSlots = slots;

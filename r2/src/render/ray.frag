@@ -56,7 +56,7 @@ uniform float uFog;
 #if RENDER_TIER==3
 // 每格空气的消光系数。只计算相机到首个界面之间的单次散射。
 uniform float uAirExtinction;
-uniform bool uCloudShadows;
+uniform bool uCloudShadows,uSolarHaze;
 bool cameraInWater;
 #endif
 // 秒；宿主固定时间后累积同一个波面，动画时重开预览。
@@ -137,7 +137,7 @@ vec3 cosineDirection(vec3 n,vec2 sampleUV){
  return normalize((t*cos(a)+b*sin(a))*r+n*sqrt(max(0.0,1.0-r*r)));
 }
 // 天空亮度：白天天顶深蓝、地平线浅；太阳接近地平线时，朝太阳一侧偏橙；夜间只剩暗蓝。
-vec3 skyRadiance(vec3 d){
+vec3 baseSkyRadiance(vec3 d){
  float day=smoothstep(-.15,.3,uSun.y),up=clamp(d.y,0.0,1.0);
  vec3 zenith=mix(vec3(.002,.003,.008),vec3(.08,.16,.34),day);
  vec3 horizon=mix(vec3(.006,.008,.014),vec3(.42,.55,.72),day);
@@ -149,6 +149,34 @@ vec3 skyRadiance(vec3 d){
  sky*=mix(1.0,1.5,day);
 #endif
  return sky*uSkyLight;
+}
+#if RENDER_TIER==3
+// 球面薄层里从地面到层顶的距离，以层厚为单位。近地平线的光程有限。
+// 取 2 公里的等效气溶胶层与 6371 公里的地球半径；场景的竖直轴就是当地的地表法线。
+float aerosolDepth(float zenithCosine){
+ const float thickness=2.0/6371.0;
+ // .12 是竖直穿过整层的光学厚度，决定单次散射的量级。
+ return .12*(2.0+thickness)/(sqrt(zenithCosine*zenithCosine+thickness*(2.0+thickness))+zenithCosine);
+}
+#endif
+// 逃逸的表面反弹和相机看见同一片天空，太阳圆盘的直射由阴影射线另算。
+vec3 skyRadiance(vec3 d){
+ vec3 sky=baseSkyRadiance(d);
+#if RENDER_TIER==3
+ if(uSolarHaze&&uSun.y>0.0&&d.y>=0.0){
+  float viewDepth=aerosolDepth(d.y),sunDepth=aerosolDepth(uSun.y);
+  // 按层高线性分配两条光路的消光，解析积分太阳到散射点、再到观察者的透射率。
+  // 两光程接近时用中点极限，避免相近的指数相减。
+  float delta=viewDepth-sunDepth;
+  float transmission=abs(delta)<.01?exp(-.5*(viewDepth+sunDepth)):(exp(-sunDepth)-exp(-viewDepth))/delta;
+  // HG 相函数描述粒子偏向前方的散射；着色器的太阳亮度以辐照度除以 π 为单位。
+  const float g=.7;
+  float phase=.25*(1.0-g*g)/pow(1.0+g*g-2.0*g*clamp(dot(d,uSun),-1.0,1.0),1.5);
+  // 沿用场景的太阳色调与强度作为层顶光源，让天空辉光也服从同一套布光设置。
+  sky+=lightColor*(phase*viewDepth*transmission);
+ }
+#endif
+ return sky;
 }
 #if RENDER_TIER>=2
 // 像素在水面上的两条射线微分包含距离和掠射拉伸；按每个波向过滤，而非只用距离选级。
@@ -210,7 +238,7 @@ void setupLight(){
   ?daylight*smoothstep(0.0,.08,h)
   :vec3(.10,.12,.18)*smoothstep(0.0,.15,h);
  lightColor*=uDirectLight;
- vec3 sky=.5*(skyRadiance(vec3(0,1,0))+skyRadiance(normalize(vec3(0,.15,1))));
+ vec3 sky=.5*(baseSkyRadiance(vec3(0,1,0))+baseSkyRadiance(normalize(vec3(0,.15,1))));
  ambient=mix(sky,vec3(dot(sky,vec3(.2126,.7152,.0722))),.35)*1.3+vec3(.004,.005,.008)*uSkyLight;
 }
 // 水每格的消光：红光衰减最快，深水因此偏蓝绿。散射比例决定水体自身透出的颜色。
@@ -1007,7 +1035,8 @@ vec3 tracePath(vec3 view,vec3 origin){
   }
   break;
  }
- color=mix(color,skyRadiance(view),fog);
+ // 视距边缘的淡出使用基础天空色，避免把太阳辉光直接叠到遮住天空的山体上。
+ color=mix(color,baseSkyRadiance(view),fog);
 #if RENDER_TIER==3
  color=color*airTransmission+airRadiance;
 #endif
