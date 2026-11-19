@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createTextures, decodeTextures } from "../src/render/textures.ts";
+import { createTextures, decodeTextures, readTextureStream } from "../src/render/textures.ts";
 import { prepareRegion } from "../src/scene/prepare.ts";
 
 test("贴图上传保留六张图的格式、布局与 mip，并释放被替换的纹理", async () => {
@@ -49,7 +49,7 @@ test("贴图上传保留六张图的格式、布局与 mip，并释放被替换�
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test("二进制快照按四字节边界解码，目录与图片来自同一响应", () => {
+test("二进制快照按四字节边界解码，目录与图片来自同一响应", async () => {
   const encoder = new TextEncoder();
   const catalog = encoder.encode(JSON.stringify({ models: [{ kind: 3 }] }));
   const entries = [{ name: "catalog.json", length: catalog.length }, { name: "surface-normals.bin", length: 4 }];
@@ -63,6 +63,14 @@ test("二进制快照按四字节边界解码，目录与图片来自同一响�
   assert.equal(set.info.levels, 7);
   assert.equal(set.catalog.models[0].kind, 3);
   assert.deepEqual([...new Uint8Array(set.files.get("surface-normals.bin"))], [32, 192, 77, 19]);
+  // 刻意跨越长度字段、文件边界和填充字节，覆盖网络分段与快照边界不同的情况。
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < bytes.length; i += 3) controller.enqueue(bytes.subarray(i, i + 3));
+      controller.close();
+    },
+  });
+  assert.deepEqual(await readTextureStream(stream), set);
 });
 
 test("同一份存档缓存遇到新透明孔时解除均匀合并，恢复原版后重新合并", () => {

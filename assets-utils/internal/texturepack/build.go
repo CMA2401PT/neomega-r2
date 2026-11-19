@@ -93,7 +93,16 @@ func readTextures(source fs.FS, pack fs.FS, limit int) (textureInputs, error) {
 		return textureInputs{}, err
 	}
 	tiles := map[string]tile{}
+	// 完整方块共享定长的表面数组；复杂模型在图集里独立分配空间。
+	// 只用确实进入数组的替换图确定层边长，否则一张箱子贴图就会放大全部层。
+	surfaceNames := make(map[string]bool)
+	for _, parts := range manifest.Layers {
+		for _, part := range parts {
+			surfaceNames[part.Texture] = true
+		}
+	}
 	side := 16
+	blocks := bedrockBlocks(pack)
 	names := slices.Sorted(maps.Keys(manifest.Textures))
 	for _, name := range names {
 		region := manifest.Textures[name]
@@ -110,18 +119,27 @@ func readTextures(source fs.FS, pack fs.FS, limit int) (textureInputs, error) {
 			normal:   solid(color.NRGBA{128, 128, 255, 255}),
 			specular: solid(color.NRGBA{A: vanillaEmission[name]}),
 		}
-		for channel, suffix := range []string{"", "_n", "_s"} {
-			if replacement := readTile(pack, name, suffix); replacement != nil {
-				side = max(side, replacement.Rect.Dx(), replacement.Rect.Dy())
-				switch channel {
-				case 0:
-					t.color = replacement
-				case 1:
-					t.normal = replacement
-				case 2:
-					t.specular = replacement
+		var replacement tile
+		if blocks != nil {
+			replacement = readBedrockTile(blocks, name)
+		} else {
+			replacement = tile{color: readTile(pack, name, ""), normal: readTile(pack, name, "_n"), specular: readTile(pack, name, "_s")}
+		}
+		if surfaceNames[name] {
+			for _, img := range []*image.NRGBA{replacement.color, replacement.normal, replacement.specular} {
+				if img != nil {
+					side = max(side, img.Rect.Dx(), img.Rect.Dy())
 				}
 			}
+		}
+		if replacement.color != nil {
+			t.color = replacement.color
+		}
+		if replacement.normal != nil {
+			t.normal = replacement.normal
+		}
+		if replacement.specular != nil {
+			t.specular = replacement.specular
 		}
 		tiles[name] = t
 	}

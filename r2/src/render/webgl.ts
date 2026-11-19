@@ -50,6 +50,7 @@ interface FrameInputs {
   tier: ProgramName;
   /** 预览档的像素内偏移，单位为像素。 */
   jitter?: number[];
+  sampleIndex?: number;
   bounces: number;
   time: number;
   waterTime?: number;
@@ -269,8 +270,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   let objects = new ObjectStore(gl, uniforms);
   await onProgress?.({ index: 3, total: 3, label: "正在准备绘制缓冲区…" });
   const accumulator = createAccumulator(gl, vertex);
-  // 累积样本的随机种子；每帧不同，样本之间才互不相关。
-  let frame = 0;
   // 一个累积序列固定水面时刻，否则样本会把移动波纹平均成模糊镜面。
   let waterTime = 0;
   const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2"),
@@ -305,6 +304,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       height,
       tier,
       jitter = [0, 0, 1],
+      sampleIndex = 0,
       bounces,
       time,
       waterTime = time,
@@ -349,7 +349,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform3fv(u("uRight"), right);
     gl.uniform3fv(u("uUp"), up);
     gl.uniform1f(u("uSpan"), camera.ortho ?? SPAN);
-    gl.uniform1ui(u("uFrame"), frame++);
+    gl.uniform1ui(u("uFrame"), sampleIndex);
     gl.uniform1ui(u("uWaterGroup"), catalog.models[catalog.water].group);
     gl.uniform1ui(u("uWater"), catalog.water);
     gl.uniform3fv(u("uJitter"), jitter);
@@ -418,6 +418,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       height,
       objects,
       tier: accumulate ? "accumulation" : tier,
+      sampleIndex: Math.max(0, accumulator.samples - 1),
       bounces: 1,
       time,
       waterTime,
@@ -501,6 +502,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         height,
         tier: photoProgram,
         jitter: sampleCell(round, grid),
+        sampleIndex: round,
         bounces,
         objects,
         time,

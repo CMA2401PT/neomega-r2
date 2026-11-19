@@ -8,7 +8,7 @@ export {
   type Tier,
   type PreviewTier,
 } from "./render/renderer.ts";
-export { decodeTextures, type TextureSet, type TextureInfo } from "./render/textures.ts";
+export { decodeTextures, readTextureStream, type TextureSet, type TextureInfo } from "./render/textures.ts";
 export { cameraBasis, cameraRay, PERSPECTIVE_SPAN } from "./render/camera.ts";
 export { ObjectRegistry } from "./objects/registry.ts";
 export { enchantingBook } from "./effects/enchanting-book.ts";

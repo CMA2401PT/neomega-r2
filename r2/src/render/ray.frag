@@ -95,11 +95,29 @@ bool mirrored;
 float foliage;
 int steps,faceTests;
 bool touched;
-uint seed;
+uint seed,pixelSeed;
 vec3 linearColor(vec3 c){return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),greaterThan(c,vec3(0.04045)));}
 float brightest(vec3 v){return max(v.r,max(v.g,v.b));}
 uint pcg(uint v){uint s=v*747796405u+2891336453u;uint w=((s>>((s>>28u)+4u))^s)*277803737u;return (w>>22u)^w;}
 float random(){seed=pcg(seed);return float(seed)/4294967296.0;}
+// 四维 Sobol 序列的前两维取首次漫反射方向，后两维取像素位置。
+// 每个像素独立异或平移，各处的采样误差不会拼成同一幅图案。
+vec4 pathSample;
+vec4 samplePath(uint index,uint pixel){
+ uvec4 bits=uvec4(pcg(pixel),pcg(pixel+1u),pcg(pixel+2u),pcg(pixel+3u));
+ // 方向数按本原多项式递推，第三维从 1、3 开始，第四维从 1、3、1 开始。
+ uvec4 v=uvec4(0x80000000u);
+ uvec2 next=uvec2(0xc0000000u);
+ uint last=0x20000000u;
+ while(index!=0u){
+  if((index&1u)!=0u)bits^=v;
+  index>>=1u;
+  uint z=v.z^(v.z>>2u)^next.x,w=v.w^(v.w>>3u)^next.y;
+  v=uvec4(v.x>>1u,v.y^(v.y>>1u),next.x,next.y);
+  next=uvec2(z,last);last=w;
+ }
+ return vec4(bits>>8u)/16777216.0;
+}
 // 以 d 为轴的锥内均匀方向；半径是锥角的正切。
 vec3 coneDirection(vec3 d,float radius){
  vec3 t=normalize(cross(d,abs(d.y)<.99?vec3(0,1,0):vec3(1,0,0))),b=cross(d,t);
@@ -107,9 +125,9 @@ vec3 coneDirection(vec3 d,float radius){
  return normalize(d+(t*cos(a)+b*sin(a))*r);
 }
 // 余弦加权的半球方向：漫反射表面的反弹按它取样，估计值就是 反照率×来向亮度。
-vec3 cosineDirection(vec3 n){
+vec3 cosineDirection(vec3 n,vec2 sampleUV){
  vec3 t=normalize(cross(n,abs(n.y)<.99?vec3(0,1,0):vec3(1,0,0))),b=cross(n,t);
- float r=sqrt(random()),a=6.2831853*random();
+ float r=sqrt(sampleUV.x),a=6.2831853*sampleUV.y;
  return normalize((t*cos(a)+b*sin(a))*r+n*sqrt(max(0.0,1.0-r*r)));
 }
 // 天空亮度：白天天顶深蓝、地平线浅；太阳接近地平线时，朝太阳一侧偏橙；夜间只剩暗蓝。
@@ -119,7 +137,12 @@ vec3 skyRadiance(vec3 d){
  vec3 horizon=mix(vec3(.006,.008,.014),vec3(.42,.55,.72),day);
  vec3 toward=normalize(vec3(uSun.x,0,uSun.z)+vec3(1e-4));
  float dusk=day*(1.0-smoothstep(0.0,.35,uSun.y))*pow(max(dot(d,toward),0.0),4.0)*(1.0-up)*(1.0-up);
- return mix(horizon,zenith,sqrt(up))+dusk*vec3(.6,.25,.08);
+ vec3 sky=mix(horizon,zenith,sqrt(up))+dusk*vec3(.6,.25,.08);
+#if RENDER_TIER>=2
+ // 以 Cinematic 预设的白天天空强度为参照，天空、环境光和反弹共用同一亮度。
+ sky*=mix(1.0,1.5,day);
+#endif
+ return sky;
 }
 #if RENDER_TIER>=2
 // 像素在水面上的两条射线微分包含距离和掠射拉伸；按每个波向过滤，而非只用距离选级。
@@ -171,8 +194,14 @@ void setupLight(){
  bool sunUp=uSun.y>=0.0;
  lightDir=sunUp?uSun:-uSun;
  float h=lightDir.y;
+ #if RENDER_TIER>=2
+ // Cinematic 预设的日出与正午色度；亮度沿用本渲染器的曝光尺度。
+ vec3 daylight=mix(vec3(.726,.371,.146)*.9,vec3(1.0,.874,.653)*1.1,smoothstep(0.0,.75,h));
+#else
+ vec3 daylight=mix(vec3(1.0,.5,.22)*.9,vec3(1.0,.95,.88)*1.1,smoothstep(0.0,.45,h));
+#endif
  lightColor=sunUp
-  ?mix(vec3(1.0,.5,.22)*.9,vec3(1.0,.95,.88)*1.1,smoothstep(0.0,.45,h))*smoothstep(0.0,.08,h)
+  ?daylight*smoothstep(0.0,.08,h)
   :vec3(.10,.12,.18)*smoothstep(0.0,.15,h);
  vec3 sky=.5*(skyRadiance(vec3(0,1,0))+skyRadiance(normalize(vec3(0,.15,1))));
  ambient=mix(sky,vec3(dot(sky,vec3(.2126,.7152,.0722))),.35)*1.3+vec3(.004,.005,.008);
@@ -235,7 +264,7 @@ vec3 specularLight(Material m,vec3 view,vec3 light){
 }
 // 模型头的 w 是介质组，同组的玻璃或水之间不画接缝；调用方传入已读取的模型头，避免重复查表。
 bool sameMedium(uint a,uint groupA,uint b,uint groupB){return a==b||(a!=0u&&b!=0u&&groupA!=0u&&groupA==groupB);}
-void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit){
+void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit,float surfaceSun){
  if(alpha<=0.0)return;
  absorbWater(t);
  if(!touched){touched=true;firstDepth=t+primaryTravel;firstNormal=m.geometric;}
@@ -244,12 +273,13 @@ void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit){
  if(unlit){radiance+=weight*rgb;throughput*=1.0-alpha;return;}
  // 环境光直接计入；光源直射单独累计，最后乘阴影射线的可见度。几何上背光的面不受直射，法线贴图不能让它发亮。
  vec3 diffuse=weight*rgb*m.diffuse*m.occlusion;
- float lit=dot(m.geometric,lightDir)>0.0?1.0:0.0;
+ float lit=dot(m.geometric,lightDir)>0.0?surfaceSun:0.0;
  float direct=max(dot(m.normal,lightDir),0.0)*lit;
  vec3 specular=weight*fresnel3(dot(m.normal,-ray),m.f0,m.roughness)*m.occlusion;
  // 常量环境光按朝向打折：朝上的面看到整片天空，侧面和朝下的面有一半以上被地面与周围遮住。
  // 累积反弹会把它换成实际看到的亮度，这里只让预览的明暗接近收敛后的画面。
- vec3 sky=diffuse*ambient*(.7+.3*m.normal.y);
+ // 石材在斜视时也会反射环境光，强度由贴图给出的反射率和粗糙度决定。
+ vec3 sky=(diffuse+specular)*ambient*(.7+.3*m.normal.y);
  radiance+=sky+weight*rgb*m.emission*EMISSION;
  directSum+=(diffuse*direct+weight*specularLight(m,ray,lightDir)*lit)*lightColor;
  float w=brightest(weight);
@@ -264,13 +294,15 @@ void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit){
 // 方块面贴图：每级 mip 内取最近纹素，保持与游戏一致的像素硬边，级间线性混合避免闪烁。
 // 斜看时沿足迹长轴取至多 4 个点平均，代替硬件各向异性过滤（后者在 D3D 上总带双线性模糊）。
 // lod 返回所用的 mip 级，法线与高光贴图按同一级取样。
-vec4 surfaceTexel(vec2 tile,float layer,vec2 gx,vec2 gy,out float lod){
+float surfaceFootprint(vec2 gx,vec2 gy,out vec2 major,out int taps){
  bool alongX=dot(gx,gx)>=dot(gy,gy);
- vec2 major=alongX?gx:gy,minor=alongX?gy:gx;
+ major=alongX?gx:gy;vec2 minor=alongX?gy:gx;
  float side=float(textureSize(uSurfaces,0).x);
  float majorTexels=length(major)*side,minorTexels=length(minor)*side;
- int taps=int(clamp(ceil(majorTexels/max(minorTexels,1e-6)),1.0,4.0));
- lod=log2(max(max(minorTexels,majorTexels/float(taps)),1e-6));
+ taps=int(clamp(ceil(majorTexels/max(minorTexels,1e-6)),1.0,4.0));
+ return log2(max(max(minorTexels,majorTexels/float(taps)),1e-6));
+}
+vec4 surfaceTexel(vec2 tile,float layer,vec2 major,int taps,float lod){
  vec4 sum=vec4(0);
  for(int i=0;i<4;i++){
   if(i>=taps)break;
@@ -278,6 +310,33 @@ vec4 surfaceTexel(vec2 tile,float layer,vec2 gx,vec2 gy,out float lod){
  }
  return sum/float(taps);
 }
+#if RENDER_TIER>=2
+// labPBR 高度 255 在表面，0 在四分之一格深处。在面内沿视线前进，找到第一个被砖面挡住的位置。
+// 深度以完整高度量程为单位；短步长让窄砖沿仍有机会挡住后面的砖缝。
+float reliefIntersection(vec2 tile,float layer,float lod,vec2 travel,float surfaceDepth){
+ float depth=0.0,gap=surfaceDepth;
+ const int steps=RENDER_TIER==3?24:8;
+ for(int i=0;i<steps;i++){
+  float advance=min(gap,1.0/float(steps));
+  float next=depth+advance;
+  float nextGap=1.0-textureLod(uSurfaceNormals,vec3(tile+travel*next,layer),lod).a-next;
+  if(nextGap<=0.0)return depth+advance*(gap/(gap-nextGap));
+  depth=next;gap=nextGap;
+ }
+ return depth;
+}
+#if RENDER_TIER==3
+// 从凹处向太阳走到方块表面，遇到更高的纹素便挡住直射光。
+float reliefSun(vec2 tile,float layer,float lod,vec2 travel,float depth){
+ for(int i=1;i<=6;i++){
+  float rise=depth*float(i)/6.0;
+  float blocker=1.0-textureLod(uSurfaceNormals,vec3(tile+travel*rise,layer),lod).a;
+  if(blocker+1.5/255.0<depth-rise)return 0.0;
+ }
+ return 1.0;
+}
+#endif
+#endif
 // 完整方块只需面方向与命中位置，不访问模型表面。透明度仍只在介质边界累计。
 // 面表每面 4 项：贴图空间原点与 u 方向、v 方向与层号（负数为纯色）与标志、线性色调与不透明度系数、代表色。
 // cutout 为真时按 alpha 裁切：透明处不留下任何颜色，射线继续前进。
@@ -286,28 +345,54 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
  vec4 f0=table(uFast,offset),f1=table(uFast,offset+1),f2=table(uFast,offset+2);
  vec3 normal=axisNormal(side);
  if(dot(normal,ray)>0.0)normal=-normal;
- vec3 color;float alpha;Material m;
+ vec3 color;float alpha,surfaceSun=1.0;Material m;
  if(f1.z<0.0){
   vec4 flatColor=table(uFast,offset+3);color=linearColor(flatColor.rgb);alpha=flatColor.a;m=plainMaterial(normal);
 #if !R2_COMPACT_CELLS
-  contribute(color,alpha,t,m,false);return true;
+  contribute(color,alpha,t,m,false,1.0);return true;
 #endif
  }else{
   int axis=side/2;
   vec2 uv=across(fract(eye+ray*t),axis);
   vec2 tile=f0.xy+f0.zw*uv.x+f1.xy*uv.y;
   // 射线微分：相邻像素的射线在这个面上相距多远，决定 mip 级与长轴方向。
-  vec4 texel;float lod;
+  vec4 texel,normalTexel;float lod;
   if(primaryRay){
    float pixel=uSpan/uViewport.y,scale=uOrtho?1.0:(t+primaryTravel)/rayLength,facing=pick(ray,axis);
    vec3 dx=scale*pixel*(uRight-ray*pick(uRight,axis)/facing),dy=scale*pixel*(uUp-ray*pick(uUp,axis)/facing);
    vec2 sx=across(dx,axis),sy=across(dy,axis);
-   texel=surfaceTexel(tile,f1.z,f0.zw*sx.x+f1.xy*sx.y,f0.zw*sy.x+f1.xy*sy.y,lod);
+   vec2 major;int taps;
+   lod=surfaceFootprint(f0.zw*sx.x+f1.xy*sx.y,f0.zw*sy.x+f1.xy*sy.y,major,taps);
+#if RENDER_TIER>=2
+   normalTexel=textureLod(uSurfaceNormals,vec3(tile,f1.z),lod);
+   // major 是一个屏幕像素沿贴图跨度最大的采样方向。砖块仍占足够像素时，远墙也能看见砖缝。
+   // 一张贴图在这个方向由约 24 像素缩到 8 像素时淡出起伏，极斜的视角另行淡出以免步进闪烁。
+   float relief=.25*(1.0-smoothstep(1.0/24.0,1.0/8.0,length(major)))*smoothstep(.035,.18,abs(facing));
+   if(relief>0.0&&normalTexel.a<1.0&&!cutout&&f1.w==0.0&&f2.w==1.0){
+    vec2 inPlane=across(ray,axis);
+    vec2 travel=(f0.zw*inPlane.x+f1.xy*inPlane.y)*(relief/abs(facing));
+    float depth=reliefIntersection(tile,f1.z,lod,travel,1.0-normalTexel.a);
+    tile+=travel*depth;
+    normalTexel=textureLod(uSurfaceNormals,vec3(tile,f1.z),lod);
+#if RENDER_TIER==3
+    float sunFacing=dot(normal,lightDir);
+    if(sunFacing>0.0){
+     vec2 alongLight=across(lightDir,axis);
+     vec2 towardSun=(f0.zw*alongLight.x+f1.xy*alongLight.y)*(relief/max(.1,sunFacing));
+     surfaceSun=reliefSun(tile,f1.z,lod,towardSun,min(depth,1.0-normalTexel.a));
+    }
+#endif
+   }
+#endif
+   texel=surfaceTexel(tile,f1.z,major,taps,lod);
   }else{
    // 次级射线没有像素足迹，按距离粗略选级：原版 16 像素的贴图在 4 格外开始缩小。
    float side=float(textureSize(uSurfaces,0).x);
    lod=clamp(log2(t*.25*side/16.0),0.0,log2(side));
    texel=textureLod(uSurfaces,vec3(tile,f1.z),lod);
+#if RENDER_TIER>=2
+   normalTexel=textureLod(uSurfaceNormals,vec3(tile,f1.z),lod);
+#endif
   }
   if(cutout&&texel.a<0.5)return false;
   color=texel.rgb/max(texel.a,1e-4)*f2.rgb;
@@ -317,12 +402,12 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
   float det=f0.z*f1.y-f1.x*f0.w;
   vec3 tangentS=normalize(fromAcross(vec2(f1.y,-f0.w)/det,axis)),tangentT=normalize(fromAcross(vec2(-f1.x,f0.z)/det,axis));
   m=decodeMaterial(normal,tangentS,tangentT,
-   textureLod(uSurfaceNormals,vec3(tile,f1.z),lod),textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod),color);
+   normalTexel,textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod),color);
 #else
   m=glowMaterial(normal,textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod));
 #endif
  }
- contribute(color,alpha,t,m,f1.z>=0.0&&f1.w>=2.0);
+ contribute(color,alpha,t,m,f1.z>=0.0&&f1.w>=2.0,surfaceSun);
  return true;
 }
 // 介质边界上的面：体素档画模型代表色的纯色面，其余各档按完整方块面表着色。
@@ -338,7 +423,7 @@ bool boundarySurface(uint id,uvec4 description,int side,float t,bool cutout){
  vec3 normal=axisNormal(side);
  if(dot(normal,ray)>0.0)normal=-normal;
  Material m=plainMaterial(normal);m.emission=table(uVoxels,at+1).x;
- contribute(color.rgb,color.a,t,m,false);return true;
+ contribute(color.rgb,color.a,t,m,false,1.0);return true;
 #else
  return cubeSurface(description.y,side,t,cutout);
 #endif
@@ -615,7 +700,7 @@ bool march(float limit,bool submerged){
     Hit hit;hit.t=end+1.0;hit.alpha=0.0;
     if(cellLevel)intersectCell(current,parts,cell,max(t,afterHit),end,hit);
     if(hit.alpha>0.0){
-     contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit);
+     contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);
      if(brightest(throughput)<=.001){finished=true;break;}
      afterHit=hit.t+EPS;t=afterHit;
      if(t<end-EPS){retry=true;break;}
@@ -663,7 +748,7 @@ bool march(float limit,bool submerged){
 #if RENDER_TIER>0
   if(cellLevel)intersectCell(current,parts,cell,max(t,afterHit),end,hit);
 #endif
-  if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
+  if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
   t=end;cell=nextCell;side=exitSide^1;entering=true;
   if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)boundarySurface(previous,previousModel,exitSide,t,false);finished=true;break;}
 #endif
@@ -730,7 +815,7 @@ vec3 tracePath(vec3 view,vec3 origin){
   if(primaryRay&&!finished)return vec3(1e4,0,1e4);
   vec3 visible=vec3(1);
   bool shade=job.kind==PRIMARY||job.kind==BLOCK_REFLECT||uPass==1;
-  if(shade&&shadeWeight>0.0)visible=sunVisibility(shadePoint+shadeNormal*1e-3,uPass==1?coneDirection(lightDir,.012):lightDir);
+  if(shade&&shadeWeight>0.0)visible=sunVisibility(shadePoint+shadeNormal*1e-3,uPass==1?coneDirection(lightDir,.006):lightDir);
   vec3 lit=radiance+directSum*visible;
   if(job.kind==PRIMARY||job.kind==BOUNCE){
    sea=job.limit>0.0&&job.limit<1e30&&brightest(throughput)>.001;
@@ -751,7 +836,7 @@ vec3 tracePath(vec3 view,vec3 origin){
 #if R2_ONE_BOUNCE
    bounce=job.kind==PRIMARY&&bounceWeight>0.0;
 #else
-   bounce=uPass==1&&bounceWeight>0.0&&(job.kind==PRIMARY||(!sea&&bounces<min(4,uBounces)));
+   bounce=uPass==1&&bounceWeight>0.0&&bounces<min(4,uBounces)&&(primaryRay||!sea);
    if(bounce){bounceAlbedo*=job.gain;bounceSpecular*=job.gain;bounceAmbient*=job.gain;}
 #endif
   }else{
@@ -796,7 +881,6 @@ vec3 tracePath(vec3 view,vec3 origin){
 #if R2_ONE_BOUNCE
    vec3 incoming=view;
 #else
-   if(bounces>=min(4,uBounces))break;
    bounces++;
    vec3 incoming=bounceView;
 #endif
@@ -806,7 +890,20 @@ vec3 tracePath(vec3 view,vec3 origin){
     d=reflect(incoming,coneDirection(bounceShading,bounceRoughness));
     if(dot(d,bounceNormal)<=0.0)d=reflect(incoming,bounceNormal);
     gain=bounceSpecular/chance;
-   }else{d=cosineDirection(bounceNormal);gain=bounceAlbedo/(1.0-chance);}
+   }else{
+    // 首次漫反射覆盖整个半球；后续反弹独立抽样，避免同一路径的方向互相锁定。
+    vec2 uv;
+#if R2_ONE_BOUNCE
+    uv=pathSample.xy;
+#else
+    if(bounces==1)uv=pathSample.xy;
+    else uv=vec2(random(),random());
+#endif
+    // 间接光也要跟着贴图法线转向；落入方块内部的方向没有入射光。
+    d=cosineDirection(bounceShading,uv);
+    if(dot(d,bounceNormal)<=0.0)break;
+    gain=bounceAlbedo/(1.0-chance);
+   }
    vec3 start=bouncePoint+bounceNormal*1e-3;
    float limit=seaLimit(start,d);
    job=PathRay(start,d,gain,limit>0.0?limit:1e30,uOcean&&start.y<uOceanHeight,BOUNCE);
@@ -850,7 +947,7 @@ vec3 tracePixel(vec2 pixel){
  if(oceanHit&&brightest(remaining)>.001){
   radiance=vec3(0);directSum=vec3(0);throughput=vec3(1);
   eye=origin+view*oceanDistance;ray=view;primaryRay=false;
-  contribute(waterLinear,waterColor.a,0.0,plainMaterial(vec3(0,underwater?-1:1,0)),false);
+  contribute(waterLinear,waterColor.a,0.0,plainMaterial(vec3(0,underwater?-1:1,0)),false,1.0);
   vec3 surface=radiance+directSum,through=throughput;
   eye+=vec3(0,underwater?1e-3:-1e-3,0);
   march(1e30,false);
@@ -865,10 +962,16 @@ vec3 tracePixel(vec2 pixel){
 }
 // 输出线性亮度与权重；绘制器把多帧按权重相加，显示时除以总权重。预览帧权重更高，累积初期的噪点因此不显眼。
 void main(){
- seed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u+uFrame*26699u);
+ pixelSeed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u);
+ seed=pcg(pixelSeed+uFrame*26699u);
  setupLight();steps=0;faceTests=0;
  vec2 jitter=uJitter.xy;
- if(uPass==1) jitter+=(vec2(random(),random())-.5)*uJitter.z;
+ if(uPass==1){
+  // 指定子格网格时，每个子格独立推进序列，避免网格周期与 Sobol 周期锁定。
+  uint grid=uint(round(1.0/uJitter.z)),cells=grid*grid;
+  pathSample=samplePath(uFrame/cells,cells==1u?pixelSeed:pcg(pixelSeed+uFrame%cells));
+  jitter+=(pathSample.zw-.5)*uJitter.z;
+ }
  vec3 color=tracePixel(uPicking?uPickPixel:gl_FragCoord.xy+jitter);
  if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);

@@ -218,7 +218,6 @@ export async function createWebGPURenderer(
       return group(device, sceneLayout, pairs);
     }
     let scene = bind(),
-      sequence = 0,
       waterTime = 0,
       film: Film | undefined,
       samples = 0,
@@ -234,7 +233,7 @@ export async function createWebGPURenderer(
       epoch++;
       times.length = 0;
     }
-    function prepare(camera: Camera, tier: Program, o: Frame, history: boolean, seed = sequence++) {
+    function prepare(camera: Camera, tier: Program, o: Frame, history: boolean, sampleIndex = 0) {
       if (boundPool !== (world?.pool ?? emptyPool)) scene = bind();
       if (fatal) throw Error(fatal);
       const ray = programs.get(tier)!;
@@ -252,7 +251,7 @@ export async function createWebGPURenderer(
         uSize: world?.size ?? [0, 0, 0],
         uHasWorld: +!!world,
         uViewport: [o.width, o.height],
-        uFrame: seed,
+        uFrame: sampleIndex,
         uSun: sun.map((v) => v / length),
         uWorldOrigin: origin,
         uDirectoryOffset: [mod(origin[0], SIZE[0] * 16), 0, mod(origin[2], SIZE[2] * 16)],
@@ -366,7 +365,7 @@ export async function createWebGPURenderer(
         keepPreview = tier === "shading";
       } else samples++;
       objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
-      const exposure = prepare(camera, tier, { ...o, time: waterTime }, add),
+      const exposure = prepare(camera, tier, { ...o, time: waterTime }, add, Math.max(0, samples - 1)),
         enc = device.createCommandEncoder();
       trace(enc, tier, film.next(), undefined, !!queries);
       film.composite(enc, exposure, !!o.debug, queries);
@@ -481,8 +480,7 @@ export async function createWebGPURenderer(
         closed = false,
         presented = 0,
         target: Target,
-        exposure = 1,
-        seed = 0;
+        exposure = 1;
       return {
         get samples() {
           return done;
@@ -495,7 +493,6 @@ export async function createWebGPURenderer(
           if (closed || pending || done >= total || !programs.has(program)) return;
           if (!tile) {
             target = f.next();
-            seed = sequence++;
             objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
           }
           const jitter = sampleCell(done, grid);
@@ -506,7 +503,7 @@ export async function createWebGPURenderer(
             program,
             { ...o, tier: undefined, bounces: o.bounces ?? 4, jitter, tileOrigin: [x, y] },
             done > 0,
-            seed,
+            done,
           );
           const enc = device.createCommandEncoder();
           trace(enc, program, target, [x, y, Math.min(256, width - x), Math.min(256, height - y)]);

@@ -128,14 +128,19 @@ func sample(img *image.NRGBA, u, v float64) color.NRGBA {
 	return img.NRGBAAt(x, y)
 }
 
-// linear 把颜色转换到亮度空间，避免平均缩小时变暗。
-func linear(v byte) float64 {
-	f := float64(v) / 255
-	if f <= .04045 {
-		return f / 12.92
+// 颜色通道只有 256 个输入值，合成和缩小时可直接读取对应的线性亮度。
+var linearBrightness = func() [256]float64 {
+	var values [256]float64
+	for i := range values {
+		f := float64(i) / 255
+		if f <= .04045 {
+			values[i] = f / 12.92
+		} else {
+			values[i] = math.Pow((f+.055)/1.055, 2.4)
+		}
 	}
-	return math.Pow((f+.055)/1.055, 2.4)
-}
+	return values
+}()
 
 // srgb 仅编码颜色通道，数据图不会经过这里。
 func srgb(v float64) byte {
@@ -176,9 +181,9 @@ func compose(parts []Part, tiles map[string]tile, side int) tile {
 				b := float64(c.A) / 255
 				alpha := a + b*(1-a)
 				if alpha > 0 {
-					c.R = srgb((linear(front.R)*float64(p.Tint[0])*a + linear(c.R)*b*(1-a)) / alpha)
-					c.G = srgb((linear(front.G)*float64(p.Tint[1])*a + linear(c.G)*b*(1-a)) / alpha)
-					c.B = srgb((linear(front.B)*float64(p.Tint[2])*a + linear(c.B)*b*(1-a)) / alpha)
+					c.R = srgb((linearBrightness[front.R]*float64(p.Tint[0])*a + linearBrightness[c.R]*b*(1-a)) / alpha)
+					c.G = srgb((linearBrightness[front.G]*float64(p.Tint[1])*a + linearBrightness[c.G]*b*(1-a)) / alpha)
+					c.B = srgb((linearBrightness[front.B]*float64(p.Tint[2])*a + linearBrightness[c.B]*b*(1-a)) / alpha)
 				}
 				c.A = byte(math.Round(alpha * 255))
 				if len(parts) == 1 || a > 0 {
@@ -204,7 +209,7 @@ func mipBytes(img *image.NRGBA, colorData bool) [][]byte {
 	if colorData {
 		for i := 0; i < len(values); i += 4 {
 			for c := range 3 {
-				values[i+c] = linear(img.Pix[i+c]) * values[i+3]
+				values[i+c] = linearBrightness[img.Pix[i+c]] * values[i+3]
 			}
 		}
 	}
@@ -287,9 +292,9 @@ func resize(source *image.NRGBA, width, height int, colorData bool) *image.NRGBA
 						float64(p.A) / 255,
 					}
 					if colorData {
-						values[0] = linear(p.R) * values[3]
-						values[1] = linear(p.G) * values[3]
-						values[2] = linear(p.B) * values[3]
+						values[0] = linearBrightness[p.R] * values[3]
+						values[1] = linearBrightness[p.G] * values[3]
+						values[2] = linearBrightness[p.B] * values[3]
 					}
 					for c := range 4 {
 						sum[c] += values[c] * area
@@ -330,7 +335,7 @@ func measureLayer(img *image.NRGBA) layerColor {
 		for mode := range 2 {
 			result.alpha[mode] += alpha[mode]
 			for c := range 3 {
-				result.rgb[mode][c] += linear(img.Pix[i+c]) * alpha[mode]
+				result.rgb[mode][c] += linearBrightness[img.Pix[i+c]] * alpha[mode]
 			}
 		}
 	}

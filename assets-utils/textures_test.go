@@ -70,6 +70,8 @@ func TestTexturePack(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(textureDir, "dirt.png"), []byte("broken PNG"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// 日光传感器使用独立图集，较大的侧面图不应把 64 像素的普通方块层放大到 128。
+	writePNG("daylight_detector_side", 128, 128, func(x, y int) color.NRGBA { return color.NRGBA{R: 128, A: 255} })
 	var manifest texturepack.Manifest
 	data, err := Files.ReadFile("assets/textures.json")
 	if err != nil {
