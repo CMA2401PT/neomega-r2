@@ -890,6 +890,14 @@ vec3 tracePath(vec3 view,vec3 origin){
  vec3 color=vec3(0),seaPoint,seaView,seaGain,blockFront;
  float fog=0.0,seaDistance=0.0;
 #if RENDER_TIER==3
+ // 光影档的直射强度以地面受光为基准。累积档在雾顶还原入射日光后，
+ // 表面和雾中采样点各自按真实路径衰减。参考高度固定在世界 Y=0，海面以上才计入雾层。
+ float incidentSunGain=1.0;
+ if(uAirExtinction>0.0&&uSun.y>0.0){
+  vec2 airColumn=airInterval(-uWorldOrigin.y,uSun.y,1e30);
+  // 雾顶入射日光最多提高三倍，避免浓雾或接近日落时反推出过强的光源。
+  incidentSunGain=exp(min(log(3.0),uAirExtinction*(airColumn.y-airColumn.x)));
+ }
  float airTransmission=1.0;
  vec3 airRadiance=vec3(0);
  cameraInWater=job.submerged;
@@ -910,7 +918,7 @@ vec3 tracePath(vec3 view,vec3 origin){
 #endif
   bool finished=march(job.limit,job.submerged);
   if(primaryRay&&!finished)return vec3(1e4,0,1e4);
-  vec3 visible=vec3(1);
+  vec3 directFactor=vec3(1);
   bool shade=job.kind==PRIMARY||job.kind==BLOCK_REFLECT||uPass==1;
   vec3 shadowOrigin=shadePoint+shadeNormal*1e-3;
   vec3 shadowDirection=lightDir;
@@ -928,19 +936,19 @@ vec3 tracePath(vec3 view,vec3 origin){
     shadowOrigin=origin+view*(air.x+airSampleDistance(uAirExtinction,1.0-airTransmission));
     shadowDirection=lightDir;
    }
-   vec3 visibility=sunVisibility(shadowOrigin,shadowDirection);
-   if(query==0)visible=visibility;
+   vec3 transmittedLight=incidentSunGain*sunVisibility(shadowOrigin,shadowDirection);
+   if(query==0)directFactor=transmittedLight;
    else{
     // Henyey–Greenstein 相函数偏向前方。直射着色使用 E/π，相函数的 1/(4π) 因而留下 1/4。
     const float g=.4;
     float phase=.25*(1.0-g*g)/pow(1.0+g*g-2.0*g*dot(view,lightDir),1.5);
-    airRadiance=lightColor*visibility*(phase*(1.0-airTransmission));
+    airRadiance=lightColor*transmittedLight*(phase*(1.0-airTransmission));
    }
   }
 #else
-  if(surfaceShadow)visible=sunVisibility(shadowOrigin,shadowDirection);
+  if(surfaceShadow)directFactor=sunVisibility(shadowOrigin,shadowDirection);
 #endif
-  vec3 lit=radiance+directSum*visible;
+  vec3 lit=radiance+directSum*directFactor;
   if(job.kind==PRIMARY||job.kind==BOUNCE){
    sea=job.limit>0.0&&job.limit<1e30&&brightest(throughput)>.001;
    if(sea){
@@ -955,7 +963,7 @@ vec3 tracePath(vec3 view,vec3 origin){
    }
    if(job.kind==PRIMARY){
     fog=touched&&!job.submerged?1.0-exp(-3.0*pow(firstDepth/uFog,8.0)):0.0;
-    block=mirrored;blockFront=mirrorRadiance+mirrorDirect*visible;
+    block=mirrored;blockFront=mirrorRadiance+mirrorDirect*directFactor;
    }
 #if R2_ONE_BOUNCE
    bounce=job.kind==PRIMARY&&bounceWeight>0.0;
