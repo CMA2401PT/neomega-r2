@@ -231,8 +231,30 @@
     </footer>
     <output id="task-status" class="panel" role="status" hidden></output>
     <div id="notice" class="panel" role="status" hidden></div>
+    <dialog id="preset-dialog" aria-labelledby="preset-dialog-title">
+      <form id="preset-form">
+        <h2 id="preset-dialog-title">保存渲染参数组</h2>
+        <label>名称 <input id="preset-name" required autocomplete="off"></label>
+        <div class="preset-actions">
+          <button type="button" id="preset-cancel">取消</button><button type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
     <section id="settings" class="popover panel" popover>
       <h2>显示设置</h2>
+      <details id="render-presets">
+        <summary>渲染参数组</summary>
+        <label class="setting">已保存<select id="preset-list"></select></label>
+        <div class="preset-actions">
+          <button id="preset-load">加载</button><button id="preset-delete">删除</button>
+          <button id="preset-save">保存当前参数…</button>
+        </div>
+        <div class="preset-actions">
+          <button id="preset-import">导入 JSON…</button><button id="preset-export">导出当前 JSON</button>
+          <input id="preset-file" type="file" accept=".json,application/json" hidden>
+        </div>
+        <p class="hint">把参数组 JSON 拖入画面即可应用。相机留在当前位置。</p>
+      </details>
       <details id="appearance">
         <summary>镜头与布光</summary>
         <fieldset><legend>镜头</legend>

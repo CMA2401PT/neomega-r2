@@ -100,5 +100,5 @@ export function bindAppearance(settings: Appearance, camera: Camera, changed: ()
   panel.ontoggle = syncAngles;
   element("appearance-reset").onclick = () => { Object.assign(settings, appearanceDefaults); apply(); };
   refresh();
-  return syncAngles;
+  return { refresh, syncAngles };
 }

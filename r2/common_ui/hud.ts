@@ -7,6 +7,20 @@ export function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return node as T;
 }
 
+/** 可随参数组保存的显示与操作控件，以同一份映射读写界面和文件。 */
+export const settingInputs = [
+  ["near-radius", "nearRadius"],
+  ["far-radius", "farRadius"],
+  ["resolution", "resolution"],
+  ["speed", "speed"],
+  ["fog", "fog"],
+  ["photo-scale", "photoScale"],
+  ["photo-supersample", "photoSupersample"],
+  ["export-scale", "exportScale"],
+  ["export-supersample", "exportSupersample"],
+  ["time", "time"],
+] as const;
+
 /** 收起原生弹出面板，避免切换视图后留下顶层 UI。 */
 export function closePopovers() {
   for (const panel of document.querySelectorAll<HTMLElement>(".popover:popover-open"))
@@ -75,21 +89,8 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     for (const panel of document.querySelectorAll<HTMLElement>(".popover:popover-open"))
       place(panel);
   });
-  for (const [id, key] of [
-    ["near-radius", "nearRadius"],
-    ["far-radius", "farRadius"],
-    ["resolution", "resolution"],
-    ["speed", "speed"],
-    ["fog", "fog"],
-    ["photo-scale", "photoScale"],
-    ["photo-supersample", "photoSupersample"],
-    ["export-scale", "exportScale"],
-    ["export-supersample", "exportSupersample"],
-    ["time", "time"],
-  ] as const) {
+  for (const [id, key] of settingInputs) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
-    if (input instanceof HTMLInputElement && key === "fog") input.checked = settings.fog;
-    else input.value = String(settings[key]);
     input.addEventListener(id === "time" ? "input" : "change", () => {
       if (key === "fog") settings.fog = (input as HTMLInputElement).checked;
       else if (key === "resolution") settings.resolution = input.value;
@@ -97,6 +98,15 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
       changed();
     });
   }
+  /** 参数组一次修改多个字段，控件在应用后一起回显。 */
+  function syncInputs() {
+    for (const [id, key] of settingInputs) {
+      const input = element<HTMLInputElement | HTMLSelectElement>(id);
+      if (key === "fog") (input as HTMLInputElement).checked = settings.fog;
+      else input.value = String(settings[key]);
+    }
+  }
+  syncInputs();
   // 静止时累积与动态时间互斥：时间在走画面就一直在变，累积不起来。打开其中一个时关掉另一个。
   const exclusive = { stillAccumulation: "timeFlow", timeFlow: "stillAccumulation" } as const;
   if (settings.stillAccumulation && settings.timeFlow) settings.stillAccumulation = false;
@@ -125,6 +135,7 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     closePopovers();
   };
   return {
+    syncInputs,
     /** 设置读数与按下态来自同一份设置，时间流动时也可刷新。 */
     settings() {
       element<HTMLOutputElement>("near-value").textContent = `${settings.nearRadius} 区块`;

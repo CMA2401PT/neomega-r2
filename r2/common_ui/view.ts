@@ -1,4 +1,5 @@
 import { appearanceDefaults, bindAppearance, lighting } from "./appearance.js";
+import { bindPresets } from "./presets.js";
 import { FrameRate } from "./frame-rate.js";
 import { createHUD, element } from "./hud.js";
 import { FullscreenMap } from "./map.js";
@@ -40,7 +41,13 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   bindMovePad(element("movepad"), controls);
   const hud = createHUD({ settings, jump, changed: refreshSettings });
   const appearance = settings.appearance = { ...appearanceDefaults, ...settings.appearance };
-  const syncAngles = bindAppearance(appearance, camera, refreshSettings);
+  const { refresh: refreshAppearance, syncAngles } = bindAppearance(appearance, camera, refreshSettings);
+  const releasePresets = bindPresets(settings, appearance, camera, () => {
+    refreshAppearance();
+    syncAngles();
+    hud.syncInputs();
+    refreshSettings();
+  }, hud.error);
   const rate = new FrameRate();
   let currentView: ReturnType<FullscreenMap["frame"]> | null = null;
   let shownTier = settings.tier, last = performance.now(), statusAt = 0;
@@ -344,6 +351,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       return map.setWorld(readChunks);
     },
     dispose() {
+      releasePresets();
       rate.reset();
       firstStillFrameFence?.dispose();
       cancelPhoto();
