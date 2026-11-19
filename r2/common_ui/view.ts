@@ -40,7 +40,11 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
   const hud = createHUD({ settings, jump, changed: refreshSettings });
-  const appearance = settings.appearance = { ...appearanceDefaults, ...settings.appearance };
+  const appearance = settings.appearance = {
+    ...appearanceDefaults,
+    autoSunColor: settings.appearance ? (settings.appearance.autoSunColor ?? true) : appearanceDefaults.autoSunColor,
+    ...settings.appearance,
+  };
   const { refresh: refreshAppearance, syncAngles } = bindAppearance(appearance, camera, refreshSettings);
   const releasePresets = bindPresets(settings, appearance, camera, () => {
     refreshAppearance();

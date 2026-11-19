@@ -45,7 +45,7 @@ const SAMPLER_UNITS: Record<string, number> = {
 type ProgramName = Tier | "photo" | "basic-pick" | "voxel-pick";
 const programFor = (tier: Tier, purpose?: "photo"): ProgramName =>
   tier === "accumulation" && purpose === "photo" ? "photo" : tier;
-interface FrameInputs extends Pick<DrawOptions, "directLight" | "skyLight" | "airExtinction" | "solarHaze" | "cloudShadows" | "exposureEV" | "autoExposure"> {
+interface FrameInputs extends Pick<DrawOptions, "sunColor" | "autoSunColor" | "directLight" | "skyLight" | "airExtinction" | "solarHaze" | "cloudShadows" | "exposureEV" | "autoExposure"> {
   width: number;
   height: number;
   tier: ProgramName;
@@ -117,6 +117,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uHierarchy",
     "uFragments",
     "uSun",
+    "uSunColor",
+    "uAutoSunColor",
     "uDirectLight",
     "uSkyLight",
     "uWorldData",
@@ -317,7 +319,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug,
       hierarchy,
       fragments,
-      sun, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
+      sun, sunColor, autoSunColor, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
       fog,
       ocean,
       objects: drawObjects = true,
@@ -378,6 +380,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     );
     gl.uniform1i(u("uObjectsEnabled"), !drawObjects || objects.enabled === false ? 0 : 1);
     objects.update(time, origin);
+    gl.uniform3fv(u("uSunColor"), sunColor ?? [1, 1, 1]);
+    gl.uniform1i(u("uAutoSunColor"), Number(autoSunColor ?? true));
     gl.uniform3fv(u("uDirectLight"), directLight ?? [1, 1, 1]);
     gl.uniform3fv(u("uSkyLight"), skyLight ?? [1, 1, 1]);
     return frameExposure(sun[1] / length, exposureEV, autoExposure);
@@ -404,7 +408,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug = 0,
       hierarchy = true,
       fragments = true,
-      sun = [0.45, 0.62, 0.3], directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
+      sun = [0.45, 0.62, 0.3], sunColor, autoSunColor, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
       objects = true,
@@ -435,7 +439,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug,
       hierarchy,
       fragments,
-      sun, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
+      sun, sunColor, autoSunColor, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
       fog,
       ocean,
     });
@@ -476,7 +480,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       objects = true,
       bounces = 4,
       time = 0,
-      sun = [0.45, 0.62, 0.3], directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
+      sun = [0.45, 0.62, 0.3], sunColor, autoSunColor, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
     }: PhotoOptions,
@@ -519,7 +523,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         debug: 0,
         hierarchy: true,
         fragments: true,
-        sun, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
+        sun, sunColor, autoSunColor, directLight, skyLight, airExtinction, solarHaze, cloudShadows, exposureEV, autoExposure,
         fog,
         ocean,
       });

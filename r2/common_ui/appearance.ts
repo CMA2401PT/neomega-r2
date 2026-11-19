@@ -5,7 +5,7 @@ import { element } from "./hud.js";
 export const appearanceDefaults = {
   fov: 65, exposureEV: 0, autoExposure: true,
   manualSun: false, azimuth: 210, elevation: 24,
-  directColor: "#ffffff", directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 15, solarHaze: false, cloudShadows: false,
+  directColor: "#ffffff", autoSunColor: false, directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 15, solarHaze: false, cloudShadows: false,
 };
 export type Appearance = typeof appearanceDefaults;
 const radians = Math.PI / 180;
@@ -26,7 +26,9 @@ export function lighting(settings: Appearance, hours: number): LightingOptions {
     sun: settings.manualSun
       ? [Math.sin(bearing) * Math.cos(altitude), Math.sin(altitude), -Math.cos(bearing) * Math.cos(altitude)]
       : [Math.cos(orbit), Math.sin(orbit), 0.3],
-    directLight: lightGain(settings.directColor, settings.directStrength),
+    sunColor: lightGain(settings.directColor, 1),
+    autoSunColor: settings.autoSunColor,
+    directLight: Array(3).fill(settings.directStrength),
     skyLight: lightGain(settings.skyColor, settings.skyStrength),
     exposureEV: settings.exposureEV,
     autoExposure: settings.autoExposure,
@@ -46,7 +48,7 @@ export function bindAppearance(settings: Appearance, camera: Camera, changed: ()
   // 朝向与俯仰在飞行中不断变化，只在相机页签可见时回写滑条。
   const panel = element("settings-camera");
   const ranges = ["fov", "exposureEV", "azimuth", "elevation", "directStrength", "skyStrength", "airOpacity"] as const;
-  const switches = ["manualSun", "autoExposure", "solarHaze", "cloudShadows"] as const;
+  const switches = ["manualSun", "autoExposure", "autoSunColor", "solarHaze", "cloudShadows"] as const;
   const colors = ["directColor", "skyColor"] as const;
   function refresh() {
     camera.fov = settings.fov;

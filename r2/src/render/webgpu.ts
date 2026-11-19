@@ -254,6 +254,8 @@ export async function createWebGPURenderer(
         uViewport: [o.width, o.height],
         uFrame: sampleIndex,
         uSun: sun.map((v) => v / length),
+        uSunColor: o.sunColor ?? [1, 1, 1],
+        uAutoSunColor: +(o.autoSunColor ?? true),
         uDirectLight: o.directLight ?? [1, 1, 1],
         uSkyLight: o.skyLight ?? [1, 1, 1],
         uAirExtinction: o.airExtinction ?? 0,

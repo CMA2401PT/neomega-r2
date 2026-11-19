@@ -37,6 +37,8 @@ function decode(value: unknown): Preset {
   if (data.format !== format || data.version !== 1) throw Error("无法识别这份渲染参数组");
   if (typeof data.name !== "string" || !data.name.trim()) throw Error("参数组缺少名称");
   const s = record(data.settings), a = record(s.appearance), c = record(data.camera);
+  // 旧参数组中的直射色调叠加在随太阳高度变化的预设上。
+  if (!("autoSunColor" in a)) a.autoSunColor = true;
   function check(id: string, value: unknown) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
     let valid: boolean;

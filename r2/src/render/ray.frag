@@ -32,7 +32,8 @@ vec3 firstNormal;
 uniform int uDebug;
 uniform bool uHierarchy,uFragments;
 // 指向太阳的单位向量；太阳落到地平线下以后由反方向的月亮照明。
-uniform vec3 uSun,uDirectLight,uSkyLight;
+uniform vec3 uSun,uSunColor,uDirectLight,uSkyLight;
+uniform bool uAutoSunColor;
 // 四档绘制器各自编译，低档用预处理去掉整段代码，弱设备只需编译、执行自己那一档：
 // 0 体素：每个非空格子都是纯色立方体，水与玻璃是透明纯色块；无阴影、无雾、无水面效果。
 // 1 基础：完整的方块形状与贴图，水只是像玻璃一样的透明面；无阴影、无雾、无水面效果与反射、无 PBR。
@@ -88,7 +89,7 @@ float bounceRoughness;
 bool captureBounce;
 float shadeWeight,bounceWeight;
 // 本像素的光照：光源方向与亮度（白天为太阳，夜间为月亮），以及来自天空的常量环境光。
-vec3 lightDir,lightColor,ambient;
+vec3 lightDir,lightColor,ambient,sunlight;
 // rayLength 是未归一化方向的长度，用于把屏幕上一个像素换算成表面上的足迹；反弹射线没有像素足迹。
 float firstDepth,rayLength,primaryTravel;
 bool primaryRay;
@@ -235,8 +236,10 @@ void setupLight(){
 #else
  vec3 daylight=mix(vec3(1.0,.5,.22)*.9,vec3(1.0,.95,.88)*1.1,smoothstep(0.0,.45,h));
 #endif
+ // 固定颜色时只取预设的亮度，让日落照样变暗。太阳圆盘和它照亮的表面与雾共用光色。
+ sunlight=uSunColor*(uAutoSunColor?daylight:vec3(dot(daylight,vec3(.2126,.7152,.0722))));
  lightColor=sunUp
-  ?daylight*smoothstep(0.0,.08,h)
+  ?sunlight*smoothstep(0.0,.08,h)
   :vec3(.10,.12,.18)*smoothstep(0.0,.15,h);
  lightColor*=uDirectLight;
  vec3 sky=.5*(baseSkyRadiance(vec3(0,1,0))+baseSkyRadiance(normalize(vec3(0,.15,1))));
@@ -879,7 +882,7 @@ vec3 stars(vec3 d){
 vec3 background(vec3 d){
  vec3 sky=skyRadiance(d)+stars(d);
  float toward=dot(d,uSun);
- sky+=uDirectLight*vec3(1.0,.9,.75)*30.0*smoothstep(.9996,.9997,toward)*smoothstep(-.05,.02,uSun.y);
+ sky+=uDirectLight*sunlight*30.0*smoothstep(.9996,.9997,toward)*smoothstep(-.05,.02,uSun.y);
  sky+=uDirectLight*vec3(.8,.85,1.0)*2.0*smoothstep(.9997,.9998,-toward)*smoothstep(-.02,.05,-uSun.y);
  return sky;
 }

@@ -23,6 +23,10 @@ export interface LightingOptions {
   time?: number;
   /** 指向太阳的方向；太阳在地平线下时由月亮照明。 */
   sun?: number[];
+  /** 太阳光的基础颜色，在线性 RGB 空间中指定。默认白色。 */
+  sunColor?: number[];
+  /** 按太阳高度为基础色加入日照色调。省略时沿用各档原有的自动配色。 */
+  autoSunColor?: boolean;
   /** 日月直射和天空辐射分别乘以这两个线性 RGB 系数，默认都是白色单位强度。 */
   directLight?: number[];
   skyLight?: number[];
