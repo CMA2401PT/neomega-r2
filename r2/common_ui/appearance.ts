@@ -5,7 +5,7 @@ import { element } from "./hud.js";
 export const appearanceDefaults = {
   fov: 65, exposureEV: 0, autoExposure: true,
   manualSun: false, azimuth: 210, elevation: 24,
-  directColor: "#ffffff", autoSunColor: false, directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 15, solarHaze: false, cloudShadows: false,
+  directColor: "#ffffff", autoSunColor: false, directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 0, solarHaze: false, cloudShadows: false,
 };
 export type Appearance = typeof appearanceDefaults;
 const radians = Math.PI / 180;

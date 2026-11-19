@@ -19,6 +19,7 @@
   "devDependencies": {
     "@webgpu/glslang": "0.0.15",
     "@webgpu/types": "0.1.74",
+    "adm-zip": "0.6.1",
     "esbuild": "0.28.2",
     "naga-wasi-cli": "0.1.0",
     "typescript": "7.0.2"

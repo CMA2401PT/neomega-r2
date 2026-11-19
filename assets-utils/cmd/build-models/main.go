@@ -10,11 +10,11 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	java "neomega-blocks/presets/java/v1"
-	"neomega-view-utils/r2assets"
 	"neomega-view-utils/r2assets/internal/modeldata"
 	geometry "neomega-view-utils/r2assets/internal/sourcegeometry"
 	"neomega-view-utils/r2assets/internal/texturepack"
@@ -38,6 +38,12 @@ func main() {
 }
 
 func generate() error {
+	// 合成贴图需要先读回模型基表。展开的中间文件只在生成期间使用。
+	output, err := os.MkdirTemp("", "r2-assets-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(output)
 	source, err := os.Open("sourceassets/geometry.nvtables")
 	if err != nil {
 		return err
@@ -65,8 +71,8 @@ func generate() error {
 		cubes[r.State] = r.Material
 	}
 	states := map[string]uint32{}
-	catalog := r2assets.Catalog{
-		Models:     []r2assets.Model{{}},
+	catalog := modeldata.Catalog{
+		Models:     []modeldata.Model{{}},
 		Statistics: map[string]int{},
 	}
 	type cubeKey struct {
@@ -107,7 +113,7 @@ func generate() error {
 			if !ok {
 				id = uint32(len(catalog.Models))
 				fastIDs[key] = id
-				model := r2assets.Model{
+				model := modeldata.Model{
 					Kind:   1,
 					Offset: uint32(len(fast) / 4),
 					Count:  6,
@@ -158,13 +164,13 @@ func generate() error {
 		}
 		id := uint32(len(catalog.Models))
 		shapeIDs[key] = id
-		catalog.Models = append(catalog.Models, r2assets.Model{Kind: 2})
+		catalog.Models = append(catalog.Models, modeldata.Model{Kind: 2})
 		// 原表面登记到它伸进的每个格子，顶点平移到该格子的局部坐标；着色器只接受落在本格射线区间内的交点。
 		for z := minimum[2]; z <= maximum[2]; z++ {
 			for y := minimum[1]; y <= maximum[1]; y++ {
 				for x := minimum[0]; x <= maximum[0]; x++ {
 					offset := [3]int{x, y, z}
-					piece := r2assets.Model{Kind: 2, Offset: uint32(len(references))}
+					piece := modeldata.Model{Kind: 2, Offset: uint32(len(references))}
 					for _, q := range quads {
 						if !overlapsCell(q, offset) {
 							continue
@@ -188,7 +194,7 @@ func generate() error {
 					} else if piece.Count > 0 {
 						pieceID := uint32(len(catalog.Models))
 						catalog.Models = append(catalog.Models, piece)
-						catalog.Models[id].Fragments = append(catalog.Models[id].Fragments, r2assets.Fragment{Offset: offset, Model: pieceID})
+						catalog.Models[id].Fragments = append(catalog.Models[id].Fragments, modeldata.Fragment{Offset: offset, Model: pieceID})
 					}
 					catalog.Statistics["maxCellQuads"] = max(catalog.Statistics["maxCellQuads"], int(piece.Count))
 				}
@@ -216,7 +222,7 @@ func generate() error {
 		"quad-references.bin": references,
 		"quad-records.bin":    surfaces,
 	} {
-		f, err := os.Create("assets/" + name)
+		f, err := os.Create(filepath.Join(output, name))
 		if err != nil {
 			return err
 		}
@@ -239,7 +245,7 @@ func generate() error {
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile("assets/states.bin", modeldata.EncodeStates(table), 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(output, "states.bin"), modeldata.EncodeStates(table), 0644); err != nil {
 		return err
 	}
 	catalog.Statistics["stateHashes"] = len(table)
@@ -248,39 +254,41 @@ func generate() error {
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile("assets/catalog.json", encoded, 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(output, "catalog.json"), encoded, 0644); err != nil {
 		return err
 	}
 	manifest, err := json.Marshal(recipes.manifest)
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile("assets/textures.json", manifest, 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(output, "textures.json"), manifest, 0644); err != nil {
 		return err
 	}
-	baseAtlas, err := os.ReadFile("sourceassets/atlas.png")
-	if err != nil {
-		return err
-	}
-	if err = os.WriteFile("assets/base-atlas.png", baseAtlas, 0644); err != nil {
-		return err
-	}
-	// 原始表供每次换包重新推导，避免继承上一包的透明分类和图集区域。
-	for _, name := range []string{"catalog.json", "fast.bin", "quad-records.bin"} {
-		data, err := os.ReadFile("assets/" + name)
+	for source, target := range map[string]string{"atlas.png": "base-atlas.png", "book.png": "book.png"} {
+		data, err := os.ReadFile(filepath.Join("sourceassets", source))
 		if err != nil {
 			return err
 		}
-		if err = os.WriteFile("assets/base-"+name, data, 0644); err != nil {
+		if err = os.WriteFile(filepath.Join(output, target), data, 0644); err != nil {
 			return err
 		}
 	}
-	set, err := texturepack.Build(os.DirFS("assets"), nil, 128)
+	// 原始表供每次换包重新推导，避免继承上一包的透明分类和图集区域。
+	for _, name := range []string{"catalog.json", "fast.bin", "quad-records.bin"} {
+		data, err := os.ReadFile(filepath.Join(output, name))
+		if err != nil {
+			return err
+		}
+		if err = os.WriteFile(filepath.Join(output, "base-"+name), data, 0644); err != nil {
+			return err
+		}
+	}
+	set, err := texturepack.Build(os.DirFS(output), nil, 128)
 	if err != nil {
 		return err
 	}
 	for name, data := range set.Files {
-		if err = os.WriteFile("assets/"+name, data, 0644); err != nil {
+		if err = os.WriteFile(filepath.Join(output, name), data, 0644); err != nil {
 			return err
 		}
 	}
@@ -298,5 +306,5 @@ func generate() error {
 			}
 		}
 	}
-	return nil
+	return packAssets(output)
 }

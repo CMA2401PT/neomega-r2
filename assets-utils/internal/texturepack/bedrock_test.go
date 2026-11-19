@@ -31,11 +31,10 @@ func TestBedrockHeightAndMER(t *testing.T) {
 	if n.R >= 128 || n.G != 128 || n.B != 255 {
 		t.Fatalf("向右升高的表面法线应朝左，实际为 %v", n)
 	}
-	for y := range tile.normal.Rect.Dy() {
-		for x := range tile.normal.Rect.Dx() {
-			if depth := tile.normal.NRGBAAt(x, y).A; depth != 255 {
-				t.Fatalf("基岩高度只改变法线，不应触发视差，(%d, %d) 的高度通道为 %d", x, y, depth)
-			}
+	// 首帧最高点 175 贴住表面，中点 46 和谷底 0 按落差写入浅视差。
+	for x, want := range []uint8{233, 239, 255} {
+		if got := tile.normal.NRGBAAt(x, 1).A; got != want {
+			t.Fatalf("纹素 (%d, 1) 的高度通道应为 %d，实际为 %d", x, want, got)
 		}
 	}
 	if s := tile.specular.NRGBAAt(0, 0); s != (color.NRGBA{R: 191, G: 230, A: 254}) {

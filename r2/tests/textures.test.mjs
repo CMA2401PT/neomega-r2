@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { defaultAssets } from "../scripts/default-assets.mjs";
 import { createTextures, decodeTextures, readTextureStream } from "../src/render/textures.ts";
 import { prepareRegion } from "../src/scene/prepare.ts";
 
@@ -21,25 +21,26 @@ test("贴图上传保留六张图的格式、布局与 mip，并释放被替换�
   });
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    const data = await readFile(new URL("../../assets-utils/assets/" + url, import.meta.url));
+    const data = defaultAssets.readFile("assets/" + url);
     return { arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), json: async () => JSON.parse(data) };
   };
   try {
     const uniforms = new Map(), textures = await createTextures(gl, uniforms, "");
+    const { side, levels, layers } = await (await fetch("textures-info.json")).json();
     const arrays = calls.filter(([name]) => name === "texStorage3D");
     assert.deepEqual(arrays.map((c) => c.slice(2)), [
-      [5, "SRGB8_ALPHA8", 16, 16, 563],
-      [5, "RGBA8", 16, 16, 563],
-      [5, "RGBA8", 16, 16, 563],
+      [levels, "SRGB8_ALPHA8", side, side, layers],
+      [levels, "RGBA8", side, side, layers],
+      [levels, "RGBA8", side, side, layers],
     ]);
-    assert.equal(calls.filter(([name]) => name === "texSubImage3D").length, 15);
-    const normals = calls.filter(([name]) => name === "texSubImage3D")[5].at(-1);
-    assert.deepEqual([...normals.slice(0, 4)], [128, 128, 255, 255]);
+    assert.equal(calls.filter(([name]) => name === "texSubImage3D").length, levels * 3);
+    const normals = calls.filter(([name]) => name === "texSubImage3D")[levels].at(-1);
     assert.equal(live.size, 11);
     const byteCount = textures.bytes;
     const files = new Map();
     for (const name of ["headers.bin", "fast.bin", "quad-records.bin", "surface-layers.bin", "surface-normals.bin", "surface-specular.bin", "atlas-color.bin", "atlas-normals.bin", "atlas-specular.bin"])
       files.set(name, await (await fetch(name)).arrayBuffer());
+    assert.deepEqual(normals.subarray(0, 4), new Uint8Array(files.get("surface-normals.bin"), 0, 4));
     textures.install({ files, info: await (await fetch("textures-info.json")).json(), catalog: textures.catalog });
     assert.equal(live.size, 11);
     assert.equal(textures.bytes, byteCount);

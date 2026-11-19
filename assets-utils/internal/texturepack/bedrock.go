@@ -109,8 +109,14 @@ func readBedrockTile(blocks fs.FS, texture string) tile {
 		height := func(x, y int) float64 {
 			return float64(heights.NRGBAAt((x+w)%w, (y+h)%h).R) / 255
 		}
-		// 基岩高度图表示受光凹凸；1/16 仅作为生成斜率的强度，不写入 labPBR 视差深度。
-		// A 固定为 255，让轮廓和颜色纹素留在原表面，避免把像素边界拉成阶梯侧壁。
+		// 法线保留原有坡度。视差量程取 1/32 格，让纹素交界只露出窄边。
+		// 每张图的最高点贴住方块表面，平坦的高度图因此没有视差。
+		var peak uint8
+		for i := 0; i < len(heights.Pix); i += 4 {
+			peak = max(peak, heights.Pix[i])
+		}
+		const parallaxRange = 1.0 / 32.0
+		const labPBRDepthRange = 0.25
 		const normalStrength = 1.0 / 16.0
 		for y := range h {
 			for x := range w {
@@ -121,7 +127,7 @@ func readBedrockTile(blocks fs.FS, texture string) tile {
 					R: byte(math.Round(127.5 + dx*scale)),
 					G: byte(math.Round(127.5 + dy*scale)),
 					B: 255,
-					A: 255,
+					A: 255 - byte(math.Round(float64(peak-heights.NRGBAAt(x, y).R) * parallaxRange / labPBRDepthRange)),
 				})
 			}
 		}

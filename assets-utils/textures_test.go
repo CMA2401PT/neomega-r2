@@ -99,7 +99,8 @@ func TestTexturePack(t *testing.T) {
 		offset += (id*size*size + y*size + x) * 4
 		return set.Files[file][offset : offset+4]
 	}
-	vanilla, err := BuildTextures("", 0)
+	// 自选包缺少的纹理沿用原版。
+	vanilla, err := BuildTextures("", 128)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,13 +127,6 @@ func TestTexturePack(t *testing.T) {
 	assertPixel(readPixel(vanilla, "surface-specular.bin", layer("redstone_lamp_on"), 0, 0, 0), []byte{0, 0, 0, 170})
 	for level := range pack.Info.Levels {
 		assertPixel(readPixel(pack, "surface-specular.bin", layer("sea_lantern"), 0, 0, level), []byte{0, 0, 0, 255})
-	}
-	generated, err := Files.ReadFile("assets/surface-specular.bin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(generated, vanilla.Files["surface-specular.bin"]) {
-		t.Fatal("预生成自发光资源与运行时合成不一致，请执行 go generate")
 	}
 	stone := layer("stone")
 	assertPixel(readPixel(pack, "surface-layers.bin", stone, 0, 0, 0), []byte{255, 0, 0, 255})
@@ -268,5 +262,59 @@ func TestTexturePack(t *testing.T) {
 			t.Fatal("传输快照错位", entry.Name)
 		}
 		position += (entry.Length + 3) / 4 * 4
+	}
+}
+
+// 默认材质既可直接从静态资源读取，也可用空路径重新合成。两条路径应提供相同的贴图和模型表。
+func TestDefaultTextures(t *testing.T) {
+	set, err := BuildTextures("", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range set.Files {
+		generated, err := Files.ReadFile("assets/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(generated, data) {
+			t.Fatalf("%s 与原版材质不一致，请执行 go generate", name)
+		}
+	}
+}
+
+// 草色覆盖层只负责染色。四个朝向与积雪变种的侧面都应由底图填满。
+func TestDefaultGrassSideCoverage(t *testing.T) {
+	var manifest texturepack.Manifest
+	data, err := Files.ReadFile("assets/textures.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var info texturepack.Info
+	data, err = Files.ReadFile("assets/textures-info.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	colors, err := Files.ReadFile("assets/surface-layers.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	layerBytes := info.Side * info.Side * 4
+	for id, parts := range manifest.Layers {
+		base := parts[0].Texture
+		if base != "minecraft:block/grass_block_side" && base != "minecraft:block/grass_block_snow" {
+			continue
+		}
+		pixels := colors[id*layerBytes : (id+1)*layerBytes]
+		for i := 3; i < len(pixels); i += 4 {
+			if pixels[i] != 255 {
+				t.Fatalf("%s 的第 %d 个像素丢失了底图，透明度为 %d", base, i/4, pixels[i])
+			}
+		}
 	}
 }

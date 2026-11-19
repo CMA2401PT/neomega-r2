@@ -3,17 +3,12 @@
 package r2assets
 
 import (
-	"embed"
 	"encoding/json"
 
 	"neomega-view-utils/r2assets/internal/modeldata"
 )
 
-// Files 保存默认资源包，文件位于 assets/ 下，由 go generate 重新生成。
-//
 //go:generate go run ./cmd/build-models
-//go:embed assets/*
-var Files embed.FS
 
 // Fragment 指向模型伸进相邻格子的部分。
 type Fragment = modeldata.Fragment
