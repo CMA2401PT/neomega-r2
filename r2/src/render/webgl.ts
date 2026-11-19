@@ -45,7 +45,7 @@ const SAMPLER_UNITS: Record<string, number> = {
 type ProgramName = Tier | "photo" | "basic-pick" | "voxel-pick";
 const programFor = (tier: Tier, purpose?: "photo"): ProgramName =>
   tier === "accumulation" && purpose === "photo" ? "photo" : tier;
-interface FrameInputs extends Pick<DrawOptions, "directLight" | "skyLight" | "exposureEV" | "autoExposure"> {
+interface FrameInputs extends Pick<DrawOptions, "directLight" | "skyLight" | "airExtinction" | "exposureEV" | "autoExposure"> {
   width: number;
   height: number;
   tier: ProgramName;
@@ -126,6 +126,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     "uWater",
     "uJitter",
     "uFog",
+    "uAirExtinction",
     "uTime",
     "uOcean",
     "uOceanHeight",
@@ -314,7 +315,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug,
       hierarchy,
       fragments,
-      sun, directLight, skyLight, exposureEV, autoExposure,
+      sun, directLight, skyLight, airExtinction, exposureEV, autoExposure,
       fog,
       ocean,
       objects: drawObjects = true,
@@ -357,6 +358,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform1ui(u("uWater"), catalog.water);
     gl.uniform3fv(u("uJitter"), jitter);
     gl.uniform1f(u("uFog"), fog);
+    gl.uniform1f(u("uAirExtinction"), airExtinction ?? 0);
     gl.uniform1f(u("uTime"), waterTime);
     gl.uniform1i(u("uOcean"), Number(ocean !== undefined));
     gl.uniform1f(u("uOceanHeight"), (ocean ?? 0) - origin[1]);
@@ -398,7 +400,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug = 0,
       hierarchy = true,
       fragments = true,
-      sun = [0.45, 0.62, 0.3], directLight, skyLight, exposureEV, autoExposure,
+      sun = [0.45, 0.62, 0.3], directLight, skyLight, airExtinction, exposureEV, autoExposure,
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
       objects = true,
@@ -415,7 +417,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     if (!accumulate) {
       waterTime = time;
       previewTier = tier;
-    } else if (accumulator.samples === 0 && previewTier !== "shading") accumulator.clear();
+    } else if (accumulator.samples === 0 && (previewTier !== "shading" || (airExtinction ?? 0) > 0)) accumulator.clear();
     accumulator.begin(accumulate);
     const exposure = prepare(camera, {
       width,
@@ -429,7 +431,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       debug,
       hierarchy,
       fragments,
-      sun, directLight, skyLight, exposureEV, autoExposure,
+      sun, directLight, skyLight, airExtinction, exposureEV, autoExposure,
       fog,
       ocean,
     });
@@ -470,7 +472,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       objects = true,
       bounces = 4,
       time = 0,
-      sun = [0.45, 0.62, 0.3], directLight, skyLight, exposureEV, autoExposure,
+      sun = [0.45, 0.62, 0.3], directLight, skyLight, airExtinction, exposureEV, autoExposure,
       fog = world ? Math.min(world.size[0], world.size[2]) / 2 : 1e9,
       ocean,
     }: PhotoOptions,
@@ -513,7 +515,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
         debug: 0,
         hierarchy: true,
         fragments: true,
-        sun, directLight, skyLight, exposureEV, autoExposure,
+        sun, directLight, skyLight, airExtinction, exposureEV, autoExposure,
         fog,
         ocean,
       });

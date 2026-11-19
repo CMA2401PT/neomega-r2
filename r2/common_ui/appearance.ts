@@ -5,7 +5,7 @@ import { element } from "./hud.js";
 export const appearanceDefaults = {
   fov: 65, exposureEV: 0, autoExposure: true,
   manualSun: false, azimuth: 210, elevation: 24,
-  directColor: "#ffffff", directStrength: 1, skyColor: "#ffffff", skyStrength: 1,
+  directColor: "#ffffff", directStrength: 1, skyColor: "#ffffff", skyStrength: 1, airOpacity: 15,
 };
 export type Appearance = typeof appearanceDefaults;
 const radians = Math.PI / 180;
@@ -30,6 +30,7 @@ export function lighting(settings: Appearance, hours: number): LightingOptions {
     skyLight: lightGain(settings.skyColor, settings.skyStrength),
     exposureEV: settings.exposureEV,
     autoExposure: settings.autoExposure,
+    airExtinction: -Math.log1p(-settings.airOpacity / 100) / 100,
   };
 }
 
@@ -41,7 +42,7 @@ function compass(degrees: number): string {
 /** 拖动控件即时更新画面；飞行转头时方位读数也跟着当前镜头。 */
 export function bindAppearance(settings: Appearance, camera: Camera, changed: () => void) {
   const panel = element<HTMLDetailsElement>("appearance");
-  const ranges = ["fov", "exposureEV", "azimuth", "elevation", "directStrength", "skyStrength"] as const;
+  const ranges = ["fov", "exposureEV", "azimuth", "elevation", "directStrength", "skyStrength", "airOpacity"] as const;
   const switches = ["manualSun", "autoExposure"] as const;
   const colors = ["directColor", "skyColor"] as const;
   function refresh() {
@@ -51,6 +52,7 @@ export function bindAppearance(settings: Appearance, camera: Camera, changed: ()
       const value = settings[key];
       input.value = String(value);
       const label = key === "azimuth" ? compass(value)
+        : key === "airOpacity" ? value + "%"
         : key === "exposureEV" ? value + " EV"
         : key.endsWith("Strength") ? value + "×" : value + "°";
       element(key + "-value").textContent = label;

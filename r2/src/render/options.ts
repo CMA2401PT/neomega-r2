@@ -26,6 +26,8 @@ export interface LightingOptions {
   /** 日月直射和天空辐射分别乘以这两个线性 RGB 系数，默认都是白色单位强度。 */
   directLight?: number[];
   skyLight?: number[];
+  /** 累积档的均匀薄雾消光系数，单位为每格。零或省略时关闭。 */
+  airExtinction?: number;
   /** 曝光补偿，以档为单位。关闭昼夜曝光适应后，零档固定为日间曝光。 */
   exposureEV?: number;
   autoExposure?: boolean;

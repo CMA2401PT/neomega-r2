@@ -53,6 +53,11 @@ uniform sampler2D uVoxels;
 #endif
 // 远景雾在这个距离上接近不透明，遮住观察窗口的边界。
 uniform float uFog;
+#if RENDER_TIER==3
+// 每格空气的消光系数。只计算相机到首个界面之间的单次散射。
+uniform float uAirExtinction;
+bool cameraInWater;
+#endif
 // 秒；宿主固定时间后累积同一个波面，动画时重开预览。
 uniform float uTime;
 // 海面独立于体素窗口；波纹使用世界坐标，窗口移动时相位不变。
@@ -569,6 +574,26 @@ void intersectCell(uint current,uint parts,ivec3 cell,float begin,float end,inou
  }
 #endif
 }
+// 平行于窗口边界的射线单独处理，避免 0×无穷产生 NaN。
+void windowInterval(out vec3 entry,out vec3 leave){
+ bvec3 parallel=lessThan(abs(ray),vec3(1e-8));
+ vec3 nearSide=(vec3(0)-eye)*invRay,farSide=(uSize-eye)*invRay;
+ entry=min(nearSide,farSide);leave=max(nearSide,farSide);
+ bvec3 within=bvec3(vec3(greaterThanEqual(eye,vec3(0)))*vec3(lessThan(eye,uSize)));
+ entry=mix(entry,mix(vec3(1e30),vec3(-1e30),within),parallel);
+ leave=mix(leave,vec3(1e30),parallel);
+}
+#if RENDER_TIER==3
+// 求射线穿过近地薄雾的区间。雾顶使用固定世界高度，移动加载窗口不会改变照明。
+vec2 airInterval(float localY,float dy,float limit){
+ float floorY=max(-64.0-uWorldOrigin.y,uOcean?uOceanHeight:-1e30);
+ float topY=128.0-uWorldOrigin.y;
+ if(floorY>=topY)return vec2(0);
+ if(abs(dy)<1e-8)return vec2(0,localY>=floorY&&localY<topY?limit:0.0);
+ vec2 ends=(vec2(floorY,topY)-localY)/dy;
+ return clamp(vec2(min(ends.x,ends.y),max(ends.x,ends.y)),0.0,limit);
+}
+#endif
 #if RENDER_TIER>=2
 // 阴影射线：从命中点走向光源，只关心沿途透过了多少光，不着色。
 // 不透明立方体与镂空面的实心处完全遮挡；玻璃按代表色过滤，染色玻璃因此投下彩色影子；水按走过的距离吸收。
@@ -587,6 +612,18 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
  float last=min(far.x,min(far.y,far.z)),t=0.0,waterStart=0.0;
  vec3 light=vec3(1);
  ivec3 cell=ivec3(floor(eye));int side=0;uint previous=0u;bool inWater=false;
+#if RENDER_TIER==3
+ // 雾层也覆盖远景窗口以外。那里的样本朝向太阳时，射线仍可能重新进入已加载的地形。
+ if(any(lessThan(eye,vec3(0)))||any(greaterThanEqual(eye,uSize))){
+  vec3 entry,leave;windowInterval(entry,leave);
+  t=max(0.0,max(entry.x,max(entry.y,entry.z)));
+  if(t<last){
+   cell=clamp(ivec3(floor(eye+ray*(t+EPS))),ivec3(0),ivec3(uSize)-1);
+   int axis=entry.x>=entry.y&&entry.x>=entry.z?0:entry.y>=entry.z?1:2;
+   side=axis*2+(pick(ray,axis)<0.0?1:0);
+  }
+ }
+#endif
  for(int iteration=0;iteration<1024;iteration++){
   if(t>=last-EPS||any(lessThan(cell,ivec3(0)))||any(greaterThanEqual(cell,ivec3(uSize))))break;
   int level;bool cellLevel;uint parts;
@@ -616,18 +653,15 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
   }
   previous=current;t=end;cell=nextCell;side=exitSide^1;
  }
+#if RENDER_TIER==3
+ if(uAirExtinction>0.0){
+  vec2 air=airInterval(origin.y,direction.y,1e30);
+  light*=exp(-uAirExtinction*(air.y-air.x));
+ }
+#endif
  return light;
 }
 #endif
-// 平行于窗口边界的射线单独处理，避免 0×无穷产生 NaN。
-void windowInterval(out vec3 entry,out vec3 leave){
- bvec3 parallel=lessThan(abs(ray),vec3(1e-8));
- vec3 nearSide=(vec3(0)-eye)*invRay,farSide=(uSize-eye)*invRay;
- entry=min(nearSide,farSide);leave=max(nearSide,farSide);
- bvec3 within=bvec3(vec3(greaterThanEqual(eye,vec3(0)))*vec3(lessThan(eye,uSize)));
- entry=mix(entry,mix(vec3(1e30),vec3(-1e30),within),parallel);
- leave=mix(leave,vec3(1e30),parallel);
-}
 // 沿当前射线走完窗口；高空起点先靠近入口，避免大距离浮点误差使格子边界漏面。
 // limit 让主射线停在解析水面；submerged 让窗口内外的路程都按海水吸收。
 // 主射线保留靠近前的距离，拾取、雾与透视纹理足迹仍相对原来的像平面。
@@ -669,6 +703,10 @@ bool march(float limit,bool submerged){
   // 镂空立方体（树叶、格栅）对介质规则而言等同空气，只在进入时测本格的入射面，相邻同类之间的面也可见。
   bool cutout=description.x==3u;uint cutoutFaces=description.y;
   uint medium=description.x==1u?current:0u;
+#endif
+#if RENDER_TIER==3
+  // 体素水独立于解析海面。在水内起步时，首个界面以前没有空气。
+  if(primaryRay&&inside&&entering&&medium!=0u&&description.w==uWaterGroup)cameraInWater=true;
 #endif
   if(medium==0u)description=uvec4(0);
   int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
@@ -793,11 +831,24 @@ struct PathRay { vec3 start, direction, gain; float limit; bool submerged; int k
 float seaLimit(vec3 p,vec3 d){
  return uOcean&&abs(d.y)>1e-8?(uOceanHeight-p.y)/d.y:-1.0;
 }
+#if RENDER_TIER==3
+// 截断指数分布的逆函数：按到相机的透射率分配样本。逐像素错开的 Sobol 第一维
+// 依次覆盖近处和远处。积分权重化简为 1-T，每个像素每轮只需一次雾中遮挡查询。
+float airSampleDistance(float extinction,float opacity){
+ float u=fract(pathSample.x+float(pcg(pixelSeed+19u)>>8u)/16777216.0);
+ return -log(max(1.0-u*opacity,1e-7))/extinction;
+}
+#endif
 vec3 tracePath(vec3 view,vec3 origin){
  float distance=seaLimit(origin,view);
  PathRay job=PathRay(origin,view,vec3(1),distance>0.0?distance:1e30,uOcean&&origin.y<uOceanHeight,PRIMARY);
  vec3 color=vec3(0),seaPoint,seaView,seaGain,blockFront;
  float fog=0.0,seaDistance=0.0;
+#if RENDER_TIER==3
+ float airTransmission=1.0;
+ vec3 airRadiance=vec3(0);
+ cameraInWater=job.submerged;
+#endif
  bool sea=false,fromBelow=false,hasTransmission=false,block=false,bounce=false;
  vec3 transmitStart,transmitDir,transmitGain;
 #if !R2_ONE_BOUNCE
@@ -816,7 +867,34 @@ vec3 tracePath(vec3 view,vec3 origin){
   if(primaryRay&&!finished)return vec3(1e4,0,1e4);
   vec3 visible=vec3(1);
   bool shade=job.kind==PRIMARY||job.kind==BLOCK_REFLECT||uPass==1;
-  if(shade&&shadeWeight>0.0)visible=sunVisibility(shadePoint+shadeNormal*1e-3,uPass==1?coneDirection(lightDir,.006):lightDir);
+  vec3 shadowOrigin=shadePoint+shadeNormal*1e-3;
+  vec3 shadowDirection=lightDir;
+  bool surfaceShadow=shade&&shadeWeight>0.0;
+  if(surfaceShadow&&uPass==1)shadowDirection=coneDirection(lightDir,.006);
+#if RENDER_TIER==3
+  vec2 air=vec2(0);
+  if(primaryRay&&!cameraInWater&&uAirExtinction>0.0)
+   air=airInterval(origin.y,view.y,touched?min(firstDepth,job.limit):job.limit);
+  bool sampleAir=air.y>air.x;
+  if(sampleAir)airTransmission=exp(-uAirExtinction*(air.y-air.x));
+  // 表面及雾中遮挡走同一个遍历调用点，避免驱动内联两份完整的世界查询。
+  for(int query=surfaceShadow?0:1;query<(sampleAir&&brightest(lightColor)>0.0?2:1);query++){
+   if(query==1){
+    shadowOrigin=origin+view*(air.x+airSampleDistance(uAirExtinction,1.0-airTransmission));
+    shadowDirection=lightDir;
+   }
+   vec3 visibility=sunVisibility(shadowOrigin,shadowDirection);
+   if(query==0)visible=visibility;
+   else{
+    // Henyey–Greenstein 相函数偏向前方。直射着色使用 E/π，相函数的 1/(4π) 因而留下 1/4。
+    const float g=.4;
+    float phase=.25*(1.0-g*g)/pow(1.0+g*g-2.0*g*dot(view,lightDir),1.5);
+    airRadiance=lightColor*visibility*(phase*(1.0-airTransmission));
+   }
+  }
+#else
+  if(surfaceShadow)visible=sunVisibility(shadowOrigin,shadowDirection);
+#endif
   vec3 lit=radiance+directSum*visible;
   if(job.kind==PRIMARY||job.kind==BOUNCE){
    sea=job.limit>0.0&&job.limit<1e30&&brightest(throughput)>.001;
@@ -912,7 +990,11 @@ vec3 tracePath(vec3 view,vec3 origin){
   }
   break;
  }
- return mix(color,skyRadiance(view),fog);
+ color=mix(color,skyRadiance(view),fog);
+#if RENDER_TIER==3
+ color=color*airTransmission+airRadiance;
+#endif
+ return color;
 }
 
 #endif
