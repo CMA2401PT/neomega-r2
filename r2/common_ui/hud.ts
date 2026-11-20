@@ -120,8 +120,8 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
   ] as const)
     element(id).onclick = () => {
       settings[key] = !settings[key];
-      if (settings[key] && exclusive[key]) settings[exclusive[key]] = false;
-      changed();
+      if (settings[key]) settings[exclusive[key]] = false;
+      changed(key);
     };
   element<HTMLSelectElement>("resolution").options[0].textContent =
     `屏幕原生（${+devicePixelRatio.toFixed(2)}×）`;

@@ -57,7 +57,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }, hud.error);
   const rate = new FrameRate();
   let currentView: ReturnType<FullscreenMap["frame"]> | null = null;
-  let shownTier = settings.tier, last = performance.now(), statusAt = 0;
+  let shownTier = settings.tier, last: number | undefined, statusAt = 0;
   let drawn = "";
   let wasOverview = false;
   let photo: Photo | null = null, photoWaiting = false;
@@ -232,7 +232,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   /** 同一帧循环消费当前视图的相机；世界、光照和累积仍使用同一条绘制路径。 */
   function frame(now: number, session: WorldSession | null, { continuous = false, drawOptions: overrides }: FrameOptions = {}) {
     const world = scene();
-    const dt = Math.min(0.05, (now - last) / 1000);
+    const elapsedSeconds = (now - (last ?? now)) / 1000;
     last = now;
     if (firstStillFrameFence?.ready()) {
       firstStillFrameFence.dispose();
@@ -262,9 +262,10 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     currentView = view;
     if (renderer.ready(settings.tier)) shownTier = settings.tier;
     controls.enabled = view.objects;
-    controls.update(dt, Number(settings.speed));
+    // 慢帧后限制相机单步位移，昼夜时钟仍按实际经过的时间推进。
+    controls.update(Math.min(0.05, elapsedSeconds), Number(settings.speed));
     if (settings.timeFlow) {
-      settings.time = (settings.time + (dt * 24) / 240) % 24;
+      settings.time = (settings.time + (elapsedSeconds * 24) / 240) % 24;
       hud.settings();
     }
     session?.focus(view.center, { ...settings, nearPosition: camera.position });
@@ -287,6 +288,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     ]);
     const changed =
       continuous ||
+      settings.timeFlow ||
       state !== drawn ||
       (objects && renderer.animating(view.camera, { width, height }));
     let rendered = false;
@@ -342,6 +344,15 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
 
   function refreshSettings(key?: keyof typeof settings) {
+    if (settings.timeFlow && appearance.manualSun) {
+      if (key === "timeFlow") {
+        appearance.manualSun = false;
+        refreshAppearance();
+      } else {
+        // 手动放置太阳或载入旧版冲突设置时，保留指定的光照方向。
+        settings.timeFlow = false;
+      }
+    }
     renderer.outputSettings.accumulationFilter = settings.accumulationFilter ?? "light";
     // 显示滤波只改变如何看当前样本，切换档位后接着原有样本继续累积。
     if (key === "accumulationFilter") {
