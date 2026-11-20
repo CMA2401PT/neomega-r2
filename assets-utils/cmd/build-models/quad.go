@@ -11,6 +11,23 @@ type vertex struct {
 	UV       geometry.Vec2
 }
 
+// snapToCellBoundaries 消除模型旋转后留在整数格面附近的舍入误差。
+// 在计算包围盒前对齐，使格子归属、面积裁切和最终平面编码使用同一组顶点。
+func snapToCellBoundaries(quads []geometry.Quad) {
+	const tolerance = 1e-12 // 单位为格；只对齐靠近整数的坐标分量。
+	for i := range quads {
+		for j := range quads[i].Positions {
+			position := &quads[i].Positions[j]
+			for axis, value := range position {
+				boundary := math.Round(value)
+				if math.Abs(value-boundary) <= tolerance {
+					position[axis] = boundary
+				}
+			}
+		}
+	}
+}
+
 // clipToCell 将表面多边形裁进一个格子，用来判断原表面是否伸进该格。
 func clipToCell(polygon []vertex, cell [3]int) []vertex {
 	for axis := range 3 {

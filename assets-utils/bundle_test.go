@@ -3,10 +3,49 @@ package r2assets
 import (
 	"encoding/binary"
 	"math"
+	"os"
+	"strings"
 	"testing"
 
 	"neomega-blocks/ir"
+	java "neomega-blocks/presets/java/v1"
+	geometry "neomega-view-utils/r2assets/internal/sourcegeometry"
 )
+
+// 楼梯完整落在一格内。每种朝向、转角和上下半部都应保留源模型的全部面。
+func TestGeneratedStairsKeepAllFaces(t *testing.T) {
+	file, err := os.Open("sourceassets/geometry.nvtables")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	source, err := geometry.DecodeTables[uint32](file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states, err := OpenStates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := OpenCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for state := range java.JavaFullStates() {
+		if !strings.HasSuffix(state.ShortName(), "_stairs") {
+			continue
+		}
+		hash := state.Hash()
+		want := 0
+		for _, shape := range source.Index[hash] {
+			want += len(source.Shapes[shape].Quads)
+		}
+		model := catalog.Models[states[hash]]
+		if want == 0 || int(model.Count) != want || len(model.Fragments) != 0 {
+			t.Fatalf("%s：源模型有 %d 个面，生成后本格有 %d 个面，另有 %d 个跨格片段", state, want, model.Count, len(model.Fragments))
+		}
+	}
+}
 
 // 每个格子登记的表面都必须与该格相交，否则射线在这一格永远命中不到它，说明登记表错位。
 func TestGeneratedQuadsTouchTheirCell(t *testing.T) {

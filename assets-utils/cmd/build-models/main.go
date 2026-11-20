@@ -147,6 +147,7 @@ func generate() error {
 			catalog.Unsupported = append(catalog.Unsupported, name)
 			continue
 		}
+		snapToCellBoundaries(quads)
 		lo := [3]float64{math.Inf(1), math.Inf(1), math.Inf(1)}
 		hi := [3]float64{math.Inf(-1), math.Inf(-1), math.Inf(-1)}
 		for _, q := range quads {
@@ -159,8 +160,8 @@ func generate() error {
 		}
 		var minimum, maximum [3]int
 		for a := range 3 {
-			minimum[a] = int(math.Floor(lo[a] + 1e-8))
-			maximum[a] = max(minimum[a], int(math.Ceil(hi[a]-1e-8))-1)
+			minimum[a] = int(math.Floor(lo[a]))
+			maximum[a] = max(minimum[a], int(math.Ceil(hi[a]))-1)
 		}
 		id := uint32(len(catalog.Models))
 		shapeIDs[key] = id
