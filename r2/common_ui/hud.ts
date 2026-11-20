@@ -15,6 +15,7 @@ export const settingInputs = [
   ["resolution", "resolution"],
   ["speed", "speed"],
   ["fog", "fog"],
+  ["accumulation-filter", "accumulationFilter"],
   ["photo-scale", "photoScale"],
   ["photo-supersample", "photoSupersample"],
   ["export-scale", "exportScale"],
@@ -29,7 +30,7 @@ export function closePopovers() {
 }
 
 /** 让界面事件通过回调交给宿主，读数只在用户没有编辑时跟随相机。 */
-export function createHUD({ settings, jump, changed }: { settings: ViewSettings; jump(position: number[]): void; changed(): void }) {
+export function createHUD({ settings, jump, changed }: { settings: ViewSettings; jump(position: number[]): void; changed(key?: keyof ViewSettings): void }) {
   const fields = ["x", "y", "z"].map(id => element<HTMLInputElement>(id)),
     form = element<HTMLFormElement>("teleport");
   let loaded = false,
@@ -91,8 +92,9 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     input.addEventListener(id === "time" ? "input" : "change", () => {
       if (key === "fog") settings.fog = (input as HTMLInputElement).checked;
       else if (key === "resolution") settings.resolution = input.value;
+      else if (key === "accumulationFilter") settings.accumulationFilter = input.value === "light" ? "light" : "off";
       else settings[key] = Number(input.value);
-      changed();
+      changed(key);
     });
   }
   /** 参数组一次修改多个字段，控件在应用后一起回显。 */

@@ -178,6 +178,7 @@ export async function createWebGPURenderer(
       generation = 0,
       world: GPUWorld | null = null;
     await onProgress?.({ index: 3, total: 3, label: "正在准备 WebGPU 绘制缓冲区…" });
+    const outputSettings = { denoiseAccumulation: false };
     const fx = await displayPipelines(device, vert),
       sampler = device.createSampler({ minFilter: "nearest", magFilter: "nearest", mipmapFilter: "linear" });
     const frame = device.createBuffer({
@@ -345,16 +346,17 @@ export async function createWebGPURenderer(
       p.draw(3);
       p.end();
     }
-    function present(enc: GPUCommandEncoder, f: Film) {
-      if (canvas.width !== f.width || canvas.height !== f.height) {
-        canvas.width = f.width;
-        canvas.height = f.height;
+    function present(enc: GPUCommandEncoder, image: GPUTexture) {
+      if (canvas.width !== image.width || canvas.height !== image.height) {
+        canvas.width = image.width;
+        canvas.height = image.height;
       }
-      enc.copyTextureToTexture({ texture: f.output }, { texture: ctx!.getCurrentTexture() }, [
-        f.width,
-        f.height,
+      enc.copyTextureToTexture({ texture: image }, { texture: ctx!.getCurrentTexture() }, [
+        image.width,
+        image.height,
       ]);
     }
+    let displayedFrame: GPUTexture | undefined;
     function submitFrame(camera: Camera, o: DrawOptions) {
       const tier = o.accumulate ? "accumulation" : (o.tier ?? "shading");
       // 每次只接受一张交互画面。GPU 忙时让宿主继续处理输入，下次绘制直接取最新相机。
@@ -376,8 +378,10 @@ export async function createWebGPURenderer(
       const exposure = prepare(camera, tier, { ...o, time: waterTime }, add, Math.max(0, samples - 1)),
         enc = device.createCommandEncoder();
       trace(enc, tier, film.next(), undefined, !!queries);
-      film.composite(enc, exposure, !!o.debug, queries);
-      present(enc, film);
+      const denoise = tier === "accumulation" && outputSettings.denoiseAccumulation && !o.debug;
+      film.composite(enc, exposure, !!o.debug, denoise ? null : queries);
+      displayedFrame = film.displayImage(enc, denoise, queries);
+      present(enc, displayedFrame);
       let read: GPUBuffer | undefined, resolve: GPUBuffer | undefined;
       if (queries) {
         resolve = device.createBuffer({
@@ -487,6 +491,7 @@ export async function createWebGPURenderer(
         pending = false,
         closed = false,
         presented = 0,
+        presentedDenoise = false,
         target: Target,
         exposure = 1;
       return {
@@ -533,15 +538,20 @@ export async function createWebGPURenderer(
           );
         },
         present() {
-          if (done > presented && !closed) {
+          const denoise = tier === "accumulation" && outputSettings.denoiseAccumulation;
+          if (done && !closed && (done > presented || denoise !== presentedDenoise)) {
+            presentedDenoise = denoise;
             presented = done;
             const enc = device.createCommandEncoder();
-            present(enc, f);
+            present(enc, f.displayImage(enc, denoise));
             device.queue.submit([enc.finish()]);
           }
         },
         async png() {
-          const data = await readTexture(device, f.output, 4);
+          const enc = device.createCommandEncoder();
+          const image = f.displayImage(enc, tier === "accumulation" && outputSettings.denoiseAccumulation);
+          device.queue.submit([enc.finish()]);
+          const data = await readTexture(device, image, 4);
           const c = new OffscreenCanvas(width, height);
           c.getContext("2d")!.putImageData(
             new ImageData(new Uint8ClampedArray(data.buffer), width, height),
@@ -570,6 +580,7 @@ export async function createWebGPURenderer(
     if (readyError) throw Error(readyError);
     return {
       backend: "webgpu" as const,
+      outputSettings,
       gl: null,
       device,
       maxTextureSize: device.limits.maxTextureDimension2D,
@@ -635,9 +646,9 @@ export async function createWebGPURenderer(
         return { ready: () => ready, dispose() {} };
       },
       async pixels() {
-        if (!film) return new Uint8Array(0);
-        const { output, width, height } = film,
-          raw = await readTexture(device, output, 4),
+        if (!displayedFrame) return new Uint8Array(0);
+        const { width, height } = displayedFrame,
+          raw = await readTexture(device, displayedFrame, 4),
           flipped = new Uint8Array(raw.length),
           row = width * 4;
         for (let y = 0; y < height; y++)

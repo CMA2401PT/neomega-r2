@@ -14,6 +14,8 @@ export interface ViewSettings {
   timeFlow: boolean;
   fog: boolean;
   stillAccumulation: boolean;
+  /** 静止累积和照片的最终画面共用此档位。 */
+  accumulationFilter?: "off" | "light";
   photoScale: number;
   photoSupersample: number;
   exportScale: number;

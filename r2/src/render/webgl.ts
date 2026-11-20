@@ -277,6 +277,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     });
   let objects = new ObjectStore(gl, uniforms);
   await onProgress?.({ index: 3, total: 3, label: "正在准备绘制缓冲区…" });
+  const outputSettings = { denoiseAccumulation: false };
   const accumulator = createAccumulator(gl, vertex);
   // 一个累积序列固定水面时刻，否则样本会把移动波纹平均成模糊镜面。
   let waterTime = 0;
@@ -454,7 +455,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     // GPU 时间包括射线绘制与显示合成（泛光、色调映射）。
     if (q) gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    accumulator.present({ exposure, raw: debug !== 0 });
+    accumulator.present({ exposure, raw: debug !== 0, denoise: accumulate && outputSettings.denoiseAccumulation });
     if (q) {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
       queries.push(q);
@@ -581,11 +582,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
           canvas.height = height;
           resetTiming();
         }
-        film.present({ exposure, raw: false });
+        film.present({ exposure, raw: false, denoise: tier === "accumulation" && outputSettings.denoiseAccumulation });
       },
       /** 把累积结果做色调映射后读回，编码成 PNG。 */
       png() {
-        const pixels = film.read({ exposure });
+        const pixels = film.read({ exposure, denoise: tier === "accumulation" && outputSettings.denoiseAccumulation });
         const image = new ImageData(width, height),
           row = width * 4;
         // 帧缓冲的第一行在画面底部，PNG 的第一行在顶部。
@@ -660,6 +661,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    */
   return {
     backend: "webgl" as const,
+    outputSettings,
     maxTextureSize: Math.min(
       gl.getParameter(gl.MAX_TEXTURE_SIZE),
       gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),

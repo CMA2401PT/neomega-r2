@@ -36,6 +36,25 @@ void main(){
  color=mix(color,bloom(gl_FragCoord.xy/vec2(textureSize(uImage,0))),BLOOM);
  outColor=vec4(srgbColor(aces(color*uExposure)),1);
 }`;
+// 与 WebGPU 使用同一个 3×3 双边核。比较已完成色调映射的颜色，保留 35% 的原像素。
+const DENOISE = `#version 300 es
+precision highp float;
+uniform highp sampler2D uImage;
+out vec4 outColor;
+void main(){
+ ivec2 p=ivec2(gl_FragCoord.xy),edge=textureSize(uImage,0)-1;
+ vec3 center=texelFetch(uImage,p,0).rgb,sum=center;
+ float total=1.0;
+ for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
+  if(x==0&&y==0)continue;
+  vec3 color=texelFetch(uImage,clamp(p+ivec2(x,y),ivec2(0),edge),0).rgb;
+  vec3 delta=(color-center)*(255.0/4.0);
+  float weight=exp(-.5*(float(x*x+y*y)/(.85*.85)+dot(delta,delta)/3.0));
+  sum+=color*weight;
+  total+=weight;
+ }
+ outColor=vec4(mix(center,sum/total,.65),1);
+}`;
 // 光晕在最终画面里的占比。
 const BLOOM = 0.075;
 // 显示时读取的两张缓冲放在射线程序用不到的单元上，射线程序已绑定的贴图不受影响。
@@ -71,11 +90,14 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       throw Error(gl.getProgramInfoLog(program) ?? "着色器链接失败");
     return program;
   }
-  const prefilter = compile(PREFILTER),
+  const denoiseProgram = compile(DENOISE),
+    prefilter = compile(PREFILTER),
     program = compile(COMPOSITE.replace("BLOOM", BLOOM.toFixed(3)));
   const location = (name: string) => gl.getUniformLocation(program, name);
   const exposure = location("uExposure"),
     raw = location("uRaw");
+  gl.useProgram(denoiseProgram);
+  gl.uniform1i(gl.getUniformLocation(denoiseProgram, "uImage"), UNIT);
   gl.useProgram(prefilter);
   gl.uniform1i(gl.getUniformLocation(prefilter, "uImage"), UNIT);
   gl.useProgram(program);
@@ -86,6 +108,8 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
     // 半尺寸、带完整 mipmap 的泛光缓冲。
     glow: WebGLTexture | null = null,
     glowFramebuffer: WebGLFramebuffer | null = null,
+    filterImage: WebGLTexture | null = null,
+    filterFramebuffer: WebGLFramebuffer | null = null,
     width = 0,
     height = 0,
     // 当前画面已经相加的累积样本数，不含预览帧。
@@ -98,6 +122,10 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
     gl.deleteFramebuffer(framebuffer);
     gl.deleteTexture(glow);
     gl.deleteFramebuffer(glowFramebuffer);
+    gl.deleteTexture(filterImage);
+    gl.deleteFramebuffer(filterFramebuffer);
+    filterImage = null;
+    filterFramebuffer = null;
     width = w;
     height = h;
     texture = gl.createTexture();
@@ -143,10 +171,21 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
     samples = 0;
   }
 
-  /** 先生成泛光的各级模糊，再把缓冲画到 target 上。 */
-  function composite(target: WebGLFramebuffer | null, value: number, debug: boolean): void {
+  /** 把累积缓冲合成为显示色，按所选档位平滑后写入目标画面。 */
+  function composite(target: WebGLFramebuffer | null, value: number, debug: boolean, denoise: boolean): void {
     gl.disable(gl.BLEND);
     gl.activeTexture(gl.TEXTURE0 + UNIT);
+    const filter = denoise && !debug;
+    if (filter && !filterImage) {
+      filterImage = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, filterImage);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      filterFramebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, filterFramebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, filterImage, 0);
+    }
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.activeTexture(gl.TEXTURE0 + BLOOM_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, glow);
@@ -155,12 +194,19 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
     gl.useProgram(prefilter);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.generateMipmap(gl.TEXTURE_2D);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, filter ? filterFramebuffer : target);
     gl.viewport(0, 0, width, height);
     gl.useProgram(program);
     gl.uniform1f(exposure, value);
     gl.uniform1i(raw, Number(debug));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (filter) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+      gl.activeTexture(gl.TEXTURE0 + UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, filterImage);
+      gl.useProgram(denoiseProgram);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
   }
 
   return {
@@ -187,11 +233,11 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       samples = 0;
     },
     /** 把缓冲显示到画布。 */
-    present({ exposure, raw }: { exposure: number; raw: boolean }): void {
-      composite(null, exposure, raw);
+    present({ exposure, raw, denoise }: { exposure: number; raw: boolean; denoise: boolean }): void {
+      composite(null, exposure, raw, denoise);
     },
     /** 色调映射后读回 8 位 RGBA，第一行在画面底部。 */
-    read({ exposure }: { exposure: number }): Uint8Array {
+    read({ exposure, denoise }: { exposure: number; denoise: boolean }): Uint8Array {
       const target = gl.createTexture(),
         output = gl.createFramebuffer(),
         pixels = new Uint8Array(width * height * 4);
@@ -207,7 +253,7 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
         target,
         0,
       );
-      composite(output, exposure, false);
+      composite(output, exposure, false, denoise);
       gl.bindFramebuffer(gl.FRAMEBUFFER, output);
       gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -220,13 +266,16 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
     },
     get bytes() {
       // 累积缓冲每像素 16 字节；半尺寸的泛光缓冲连同 mipmap 约为每像素 8×¼×4/3 字节。
-      return width * height * 16 + Math.round((width * height * 8) / 3);
+      return width * height * (filterImage ? 20 : 16) + Math.round((width * height * 8) / 3);
     },
     dispose() {
       gl.deleteTexture(texture);
       gl.deleteFramebuffer(framebuffer);
       gl.deleteTexture(glow);
       gl.deleteFramebuffer(glowFramebuffer);
+      gl.deleteFramebuffer(filterFramebuffer);
+      gl.deleteTexture(filterImage);
+      gl.deleteProgram(denoiseProgram);
       gl.deleteProgram(prefilter);
       gl.deleteProgram(program);
     },

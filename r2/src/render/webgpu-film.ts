@@ -36,6 +36,25 @@ fn texel(p: vec2i) -> vec3f {
   let x=mix(s.rgb/max(s.a,.00001),bloom/24.,.075)*display.x;
   let c = clamp(x*(2.51*x+.03)/(x*(2.43*x+.59)+.14),vec3f(0),vec3f(1));
   return vec4f(select(c*12.92,1.055*pow(c,vec3f(1./2.4))-.055,c>vec3f(.0031308)),1);
+}
+// 在最终显示色中比较颜色。半径为一像素，RGB 均方色差的尺度是 8 位色的 4 级。
+@fragment fn denoise(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let p = vec2i(pos.xy);
+  let center = textureLoad(img,p,0).rgb;
+  let edge = vec2i(textureDimensions(img))-1;
+  var sum = center;
+  var total = 1.;
+  for(var y=-1;y<=1;y++) {
+    for(var x=-1;x<=1;x++) {
+      if(x==0 && y==0){continue;}
+      let color = textureLoad(img,clamp(p+vec2i(x,y),vec2i(0),edge),0).rgb;
+      let delta = (color-center)*(255./4.);
+      let weight = exp(-.5*(f32(x*x+y*y)/(.85*.85)+dot(delta,delta)/3.));
+      sum += color*weight;
+      total += weight;
+    }
+  }
+  return vec4f(mix(center,sum/total,.65),1.);
 }`;
 
 export async function displayPipelines(device: GPUDevice, vertexModule: GPUShaderModule) {
@@ -46,15 +65,17 @@ export async function displayPipelines(device: GPUDevice, vertexModule: GPUShade
       vertex: { module: vertexModule, entryPoint: "vert" },
       fragment: { module, entryPoint, targets: [{ format }] },
     });
-  const [pre, mip, show] = await Promise.all([
+  const [pre, mip, show, denoise] = await Promise.all([
     make("prefilter", "rgba16float"),
     make("mip", "rgba16float"),
     make("composite", "rgba8unorm"),
+    make("denoise", "rgba8unorm"),
   ]);
   return {
     pre,
     mip,
     show,
+    denoise,
     sampler: device.createSampler({ minFilter: "linear", magFilter: "linear", mipmapFilter: "linear" }),
   };
 }
@@ -114,33 +135,64 @@ export function frameFilm(
       [3, { buffer: display }],
     ]),
   }));
+  // 保留最近一轮完整的显示原图，分块拍照期间也能切换降噪并保存同一轮照片。
+  const outputView = output.createView();
+  let filtered: { texture: GPUTexture; view: GPUTextureView; bind: GPUBindGroup } | undefined;
+  let filteredCurrent = false;
   let last = 1;
+
+  function pass(
+    enc: GPUCommandEncoder,
+    pipeline: GPURenderPipeline,
+    bind: GPUBindGroup,
+    view: GPUTextureView,
+    queries?: GPUQuerySet | null,
+  ) {
+    const p = enc.beginRenderPass({
+      ...(queries ? { timestampWrites: { querySet: queries, endOfPassWriteIndex: 1 } } : {}),
+      colorAttachments: [{ view, loadOp: "clear", clearValue: [0, 0, 0, 0], storeOp: "store" }],
+    });
+    p.setPipeline(pipeline);
+    p.setBindGroup(0, bind);
+    p.draw(3);
+    p.end();
+  }
+
+  /** 从最近完成的原图取得显示画面，同一轮的屏幕和 PNG 可复用滤波结果。 */
+  function displayImage(enc: GPUCommandEncoder, denoise: boolean, queries?: GPUQuerySet | null): GPUTexture {
+    if (!denoise) return output;
+    if (!filtered) {
+      const texture = target("rgba8unorm", [width, height]);
+      filtered = {
+        texture,
+        view: texture.createView(),
+        bind: group(device, fx.denoise.getBindGroupLayout(0), [[0, outputView]]),
+      };
+    }
+    if (!filteredCurrent) {
+      pass(enc, fx.denoise, filtered.bind, filtered.view, queries);
+      filteredCurrent = true;
+    }
+    return filtered.texture;
+  }
+
   return {
     width,
     height,
-    output,
-    bytes: width * height * 36 + (size[0] * size[1] * 8 * 4) / 3,
+    displayImage,
+    get bytes() {
+      return width * height * (filtered ? 40 : 36) + (size[0] * size[1] * 8 * 4) / 3;
+    },
     next() {
       last = 1 - last;
       return frames[last];
     },
-    composite(enc: GPUCommandEncoder, exposure: number, raw: boolean, queries: GPUQuerySet | null = null) {
+    composite(enc: GPUCommandEncoder, exposure: number, raw: boolean, queries?: GPUQuerySet | null) {
       device.queue.writeBuffer(display, 0, new Float32Array([exposure, +raw, 0, 0]));
-      function pass(pipeline: GPURenderPipeline, bind: GPUBindGroup, view: GPUTextureView) {
-        const p = enc.beginRenderPass({
-          ...(pipeline === fx.show && queries
-            ? { timestampWrites: { querySet: queries, endOfPassWriteIndex: 1 } }
-            : {}),
-          colorAttachments: [{ view, loadOp: "clear", clearValue: [0, 0, 0, 0], storeOp: "store" }],
-        });
-        p.setPipeline(pipeline);
-        p.setBindGroup(0, bind);
-        p.draw(3);
-        p.end();
-      }
-      pass(fx.pre, frames[last].pre, mips[0]);
-      downs.forEach((g, i) => pass(fx.mip, g, mips[i + 1]));
-      pass(fx.show, frames[last].show, output.createView());
+      pass(enc, fx.pre, frames[last].pre, mips[0]);
+      downs.forEach((g, i) => pass(enc, fx.mip, g, mips[i + 1]));
+      pass(enc, fx.show, frames[last].show, outputView, queries);
+      filteredCurrent = false;
     },
     dispose() {
       textures.forEach((t) => t.destroy());

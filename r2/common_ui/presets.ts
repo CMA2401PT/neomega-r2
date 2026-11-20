@@ -39,11 +39,13 @@ function decode(value: unknown): Preset {
   const s = record(data.settings), a = record(s.appearance), c = record(data.camera);
   // 旧参数组中的直射色调叠加在随太阳高度变化的预设上。
   if (!("autoSunColor" in a)) a.autoSunColor = true;
+  // 旧参数组保存的是未经降噪的画面。
+  if (!("accumulationFilter" in s)) s.accumulationFilter = "off";
   function check(id: string, value: unknown) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
     let valid: boolean;
     if (input instanceof HTMLSelectElement) {
-      valid = typeof value === (id === "resolution" ? "string" : "number") && [...input.options].some(o => o.value === String(value));
+      valid = typeof value === (id === "resolution" || id === "accumulation-filter" ? "string" : "number") && [...input.options].some(o => o.value === String(value));
     } else if (input.type === "checkbox") valid = typeof value === "boolean";
     else if (input.type === "color") valid = typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
     else valid = typeof value === "number" && Number.isFinite(value) && value >= Number(input.min) && value <= Number(input.max);

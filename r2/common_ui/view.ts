@@ -39,6 +39,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   const map = new FullscreenMap({ renderer, camera, jump });
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
+  settings.accumulationFilter ??= "light";
   const hud = createHUD({ settings, jump, changed: refreshSettings });
   const appearance = settings.appearance = {
     ...appearanceDefaults,
@@ -337,7 +338,13 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     }
   }
 
-  function refreshSettings() {
+  function refreshSettings(key?: keyof typeof settings) {
+    renderer.outputSettings.denoiseAccumulation = settings.accumulationFilter === "light";
+    // 显示滤波只改变如何看当前样本，切换档位后接着原有样本继续累积。
+    if (key === "accumulationFilter") {
+      onSettings?.();
+      return;
+    }
     compileTier(settings.tier);
     if (settings.stillAccumulation) compileTier("accumulation");
     hud.settings();
