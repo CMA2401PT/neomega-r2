@@ -318,9 +318,10 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       drawAxes(element<HTMLCanvasElement>("axes"), camera);
       element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
       const fps = rate.fps;
+      // GPU 忙时本次刷新可能没有提交新样本，静止状态仍应显示当前累计数量。
       element<HTMLOutputElement>("fps").textContent = !changed && !rate.waiting
-        ? rendered
-          ? `累积 ${renderer.accumulated}`
+        ? accumulating && !view.overview
+          ? `静止（累积 ${renderer.accumulated} 样本）`
           : "静止"
         : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)} FPS`;
       if (session) {
