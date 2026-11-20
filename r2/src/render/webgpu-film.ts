@@ -1,3 +1,5 @@
+import { filterParameters, type AccumulationFilter } from "./options.ts";
+
 export const vertex = `
 @vertex fn vert(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
@@ -37,7 +39,8 @@ fn texel(p: vec2i) -> vec3f {
   let c = clamp(x*(2.51*x+.03)/(x*(2.43*x+.59)+.14),vec3f(0),vec3f(1));
   return vec4f(select(c*12.92,1.055*pow(c,vec3f(1./2.4))-.055,c>vec3f(.0031308)),1);
 }
-// 在最终显示色中比较颜色。半径为一像素，RGB 均方色差的尺度是 8 位色的 4 级。
+// 两个参数分别给出 8 位 RGB 色差的尺度和平均色的占比。
+@group(0) @binding(4) var<uniform> filterParams: vec2f;
 @fragment fn denoise(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let p = vec2i(pos.xy);
   let center = textureLoad(img,p,0).rgb;
@@ -48,13 +51,13 @@ fn texel(p: vec2i) -> vec3f {
     for(var x=-1;x<=1;x++) {
       if(x==0 && y==0){continue;}
       let color = textureLoad(img,clamp(p+vec2i(x,y),vec2i(0),edge),0).rgb;
-      let delta = (color-center)*(255./4.);
+      let delta = (color-center)*(255./filterParams.x);
       let weight = exp(-.5*(f32(x*x+y*y)/(.85*.85)+dot(delta,delta)/3.));
       sum += color*weight;
       total += weight;
     }
   }
-  return vec4f(mix(center,sum/total,.65),1.);
+  return vec4f(mix(center,sum/total,filterParams.y),1.);
 }`;
 
 export async function displayPipelines(device: GPUDevice, vertexModule: GPUShaderModule) {
@@ -137,7 +140,8 @@ export function frameFilm(
   }));
   // 保留最近一轮完整的显示原图，分块拍照期间也能切换降噪并保存同一轮照片。
   const outputView = output.createView();
-  let filtered: { texture: GPUTexture; view: GPUTextureView; bind: GPUBindGroup } | undefined;
+  let filtered: { texture: GPUTexture; view: GPUTextureView; bind: GPUBindGroup; params: GPUBuffer } | undefined;
+  let filterLevel: AccumulationFilter = "off";
   let filteredCurrent = false;
   let last = 1;
 
@@ -159,15 +163,23 @@ export function frameFilm(
   }
 
   /** 从最近完成的原图取得显示画面，同一轮的屏幕和 PNG 可复用滤波结果。 */
-  function displayImage(enc: GPUCommandEncoder, denoise: boolean, queries?: GPUQuerySet | null): GPUTexture {
-    if (!denoise) return output;
+  function displayImage(enc: GPUCommandEncoder, denoise: AccumulationFilter, queries?: GPUQuerySet | null): GPUTexture {
+    if (denoise === "off") return output;
     if (!filtered) {
       const texture = target("rgba8unorm", [width, height]);
+      const params = device.createBuffer({ size: 8, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       filtered = {
         texture,
+        params,
         view: texture.createView(),
-        bind: group(device, fx.denoise.getBindGroupLayout(0), [[0, outputView]]),
+        bind: group(device, fx.denoise.getBindGroupLayout(0), [[0, outputView], [4, { buffer: params }]]),
       };
+    }
+    if (filterLevel !== denoise) {
+      const { colorSigma, blend } = filterParameters[denoise];
+      device.queue.writeBuffer(filtered.params, 0, new Float32Array([colorSigma, blend]));
+      filterLevel = denoise;
+      filteredCurrent = false;
     }
     if (!filteredCurrent) {
       pass(enc, fx.denoise, filtered.bind, filtered.view, queries);
@@ -197,6 +209,7 @@ export function frameFilm(
     dispose() {
       textures.forEach((t) => t.destroy());
       display.destroy();
+      filtered?.params.destroy();
     },
   };
 }

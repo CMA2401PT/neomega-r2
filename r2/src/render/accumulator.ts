@@ -1,3 +1,5 @@
+import { filterParameters, type AccumulationFilter } from "./options.ts";
+
 // 泛光的起点：把累积结果缩到一半尺寸，之后由 mipmap 逐级模糊。
 // 太阳圆盘或偶发的极亮样本会把整片光晕染色，先限制亮度。
 const PREFILTER = `#version 300 es
@@ -36,10 +38,11 @@ void main(){
  color=mix(color,bloom(gl_FragCoord.xy/vec2(textureSize(uImage,0))),BLOOM);
  outColor=vec4(srgbColor(aces(color*uExposure)),1);
 }`;
-// 与 WebGPU 使用同一个 3×3 双边核。比较已完成色调映射的颜色，保留 35% 的原像素。
+// 与 WebGPU 使用同一个 3×3 双边核。只比较已完成色调映射的颜色。
 const DENOISE = `#version 300 es
 precision highp float;
 uniform highp sampler2D uImage;
+uniform vec2 uFilter;
 out vec4 outColor;
 void main(){
  ivec2 p=ivec2(gl_FragCoord.xy),edge=textureSize(uImage,0)-1;
@@ -48,12 +51,12 @@ void main(){
  for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
   if(x==0&&y==0)continue;
   vec3 color=texelFetch(uImage,clamp(p+ivec2(x,y),ivec2(0),edge),0).rgb;
-  vec3 delta=(color-center)*(255.0/4.0);
+  vec3 delta=(color-center)*(255.0/uFilter.x);
   float weight=exp(-.5*(float(x*x+y*y)/(.85*.85)+dot(delta,delta)/3.0));
   sum+=color*weight;
   total+=weight;
  }
- outColor=vec4(mix(center,sum/total,.65),1);
+ outColor=vec4(mix(center,sum/total,uFilter.y),1);
 }`;
 // 光晕在最终画面里的占比。
 const BLOOM = 0.075;
@@ -96,6 +99,7 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
   const location = (name: string) => gl.getUniformLocation(program, name);
   const exposure = location("uExposure"),
     raw = location("uRaw");
+  const filterLocation = gl.getUniformLocation(denoiseProgram, "uFilter");
   gl.useProgram(denoiseProgram);
   gl.uniform1i(gl.getUniformLocation(denoiseProgram, "uImage"), UNIT);
   gl.useProgram(prefilter);
@@ -172,10 +176,10 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
   }
 
   /** 把累积缓冲合成为显示色，按所选档位平滑后写入目标画面。 */
-  function composite(target: WebGLFramebuffer | null, value: number, debug: boolean, denoise: boolean): void {
+  function composite(target: WebGLFramebuffer | null, value: number, debug: boolean, denoise: AccumulationFilter): void {
     gl.disable(gl.BLEND);
     gl.activeTexture(gl.TEXTURE0 + UNIT);
-    const filter = denoise && !debug;
+    const filter = denoise !== "off" && !debug;
     if (filter && !filterImage) {
       filterImage = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, filterImage);
@@ -205,26 +209,23 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       gl.activeTexture(gl.TEXTURE0 + UNIT);
       gl.bindTexture(gl.TEXTURE_2D, filterImage);
       gl.useProgram(denoiseProgram);
+      const { colorSigma, blend } = filterParameters[denoise];
+      gl.uniform2f(filterLocation, colorSigma, blend);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
   }
 
   return {
     resize,
-    /** 让随后的射线绘制写入缓冲；返回这一帧的通道：0 预览（覆盖），1 累积（相加）。
-     * @param accumulate 画面与上一帧完全相同时为真
-     */
-    begin(accumulate: boolean): 0 | 1 {
+    /** 第一个静止样本覆盖预览，后续样本才与已累积的亮度相加。 */
+    begin(accumulate: boolean): void {
+      const add = accumulate && samples > 0;
+      samples = accumulate ? samples + 1 : 0;
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      if (accumulate) {
-        samples++;
+      if (add) {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE);
-        return 1;
-      }
-      samples = 0;
-      gl.disable(gl.BLEND);
-      return 0;
+      } else gl.disable(gl.BLEND);
     },
     /** 清空缓冲，随后的样本全部以累积方式相加。 */
     clear() {
@@ -233,11 +234,11 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       samples = 0;
     },
     /** 把缓冲显示到画布。 */
-    present({ exposure, raw, denoise }: { exposure: number; raw: boolean; denoise: boolean }): void {
+    present({ exposure, raw, denoise }: { exposure: number; raw: boolean; denoise: AccumulationFilter }): void {
       composite(null, exposure, raw, denoise);
     },
     /** 色调映射后读回 8 位 RGBA，第一行在画面底部。 */
-    read({ exposure, denoise }: { exposure: number; denoise: boolean }): Uint8Array {
+    read({ exposure, denoise }: { exposure: number; denoise: AccumulationFilter }): Uint8Array {
       const target = gl.createTexture(),
         output = gl.createFramebuffer(),
         pixels = new Uint8Array(width * height * 4);

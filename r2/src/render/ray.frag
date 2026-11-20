@@ -1130,7 +1130,7 @@ vec3 tracePixel(vec2 pixel){
  return color;
 #endif
 }
-// 输出线性亮度与权重；绘制器把多帧按权重相加，显示时除以总权重。预览帧权重更高，累积初期的噪点因此不显眼。
+// 每次绘制贡献一个样本。RGB 保存线性亮度，alpha 保存样本数。
 void main(){
  pixelSeed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u);
  seed=pcg(pixelSeed+uFrame*26699u);
@@ -1146,6 +1146,5 @@ void main(){
  if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
  if(uDebug==2)color=vec3(float(faceTests>0),float(faceTests==0&&touched),0);
- float weight=uPass==1?1.0:4.0;
- outColor=vec4(color*weight,weight);
+ outColor=vec4(color,1.0);
 }

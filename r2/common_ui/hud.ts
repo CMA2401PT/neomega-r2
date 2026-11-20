@@ -92,7 +92,7 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     input.addEventListener(id === "time" ? "input" : "change", () => {
       if (key === "fog") settings.fog = (input as HTMLInputElement).checked;
       else if (key === "resolution") settings.resolution = input.value;
-      else if (key === "accumulationFilter") settings.accumulationFilter = input.value === "light" ? "light" : "off";
+      else if (key === "accumulationFilter") settings.accumulationFilter = input.value as NonNullable<ViewSettings["accumulationFilter"]>;
       else settings[key] = Number(input.value);
       changed(key);
     });

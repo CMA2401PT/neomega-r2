@@ -3,6 +3,7 @@ export {
   createRenderer,
   type RendererOptions,
   type LightingOptions,
+  type AccumulationFilter,
   type DrawOptions,
   type PhotoOptions,
   type Tier,

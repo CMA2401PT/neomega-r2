@@ -1,8 +1,8 @@
 /// <reference types="@webgpu/types" />
-import { sampleCell } from "./options.ts";
+import { createOutputSettings, sampleCell } from "./options.ts";
 import type { Camera } from "../contracts.ts";
 import { frameExposure } from "./options.ts";
-import type { DrawOptions, PhotoOptions, RendererOptions, Tier } from "./options.ts";
+import type { AccumulationFilter, DrawOptions, PhotoOptions, RendererOptions, Tier } from "./options.ts";
 import { cameraBasis, cameraRay, cameraSpan } from "./camera.ts";
 import { hasVisibleAnimation } from "./animation.ts";
 import { loadTextureSet, type TextureSet } from "./textures.ts";
@@ -178,7 +178,7 @@ export async function createWebGPURenderer(
       generation = 0,
       world: GPUWorld | null = null;
     await onProgress?.({ index: 3, total: 3, label: "正在准备 WebGPU 绘制缓冲区…" });
-    const outputSettings = { denoiseAccumulation: false };
+    const outputSettings = createOutputSettings();
     const fx = await displayPipelines(device, vert),
       sampler = device.createSampler({ minFilter: "nearest", magFilter: "nearest", mipmapFilter: "linear" });
     const frame = device.createBuffer({
@@ -222,8 +222,7 @@ export async function createWebGPURenderer(
     let scene = bind(),
       waterTime = 0,
       film: Film | undefined,
-      samples = 0,
-      keepPreview = false;
+      samples = 0;
     let pendingFrame = false,
       epoch = 0;
     let frameDone: Promise<void> = Promise.resolve();
@@ -366,20 +365,18 @@ export async function createWebGPURenderer(
         film = frameFilm(device, fx, historyLayout, o.width, o.height);
         resetTiming();
         samples = 0;
-        keepPreview = false;
       }
-      const add = !!o.accumulate && (samples > 0 || (keepPreview && !o.solarHaze && !o.cloudShadows && !(o.airExtinction ?? 0)));
+      const add = !!o.accumulate && samples > 0;
       if (!o.accumulate) {
         waterTime = o.time ?? 0;
         samples = 0;
-        keepPreview = tier === "shading";
       } else samples++;
       objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
       const exposure = prepare(camera, tier, { ...o, time: waterTime }, add, Math.max(0, samples - 1)),
         enc = device.createCommandEncoder();
       trace(enc, tier, film.next(), undefined, !!queries);
-      const denoise = tier === "accumulation" && outputSettings.denoiseAccumulation && !o.debug;
-      film.composite(enc, exposure, !!o.debug, denoise ? null : queries);
+      const denoise = tier === "accumulation" && !o.debug ? outputSettings.accumulationFilter : "off";
+      film.composite(enc, exposure, !!o.debug, denoise === "off" ? queries : null);
       displayedFrame = film.displayImage(enc, denoise, queries);
       present(enc, displayedFrame);
       let read: GPUBuffer | undefined, resolve: GPUBuffer | undefined;
@@ -491,7 +488,7 @@ export async function createWebGPURenderer(
         pending = false,
         closed = false,
         presented = 0,
-        presentedDenoise = false,
+        presentedDenoise: AccumulationFilter = "off",
         target: Target,
         exposure = 1;
       return {
@@ -538,7 +535,7 @@ export async function createWebGPURenderer(
           );
         },
         present() {
-          const denoise = tier === "accumulation" && outputSettings.denoiseAccumulation;
+          const denoise = tier === "accumulation" ? outputSettings.accumulationFilter : "off";
           if (done && !closed && (done > presented || denoise !== presentedDenoise)) {
             presentedDenoise = denoise;
             presented = done;
@@ -549,7 +546,7 @@ export async function createWebGPURenderer(
         },
         async png() {
           const enc = device.createCommandEncoder();
-          const image = f.displayImage(enc, tier === "accumulation" && outputSettings.denoiseAccumulation);
+          const image = f.displayImage(enc, tier === "accumulation" ? outputSettings.accumulationFilter : "off");
           device.queue.submit([enc.finish()]);
           const data = await readTexture(device, image, 4);
           const c = new OffscreenCanvas(width, height);
@@ -573,7 +570,6 @@ export async function createWebGPURenderer(
       scene = bind();
       generation++;
       samples = 0;
-      keepPreview = false;
       resetTiming();
     }
     const readyError = await device.queue.onSubmittedWorkDone().then(() => fatal);
@@ -624,7 +620,6 @@ export async function createWebGPURenderer(
         scene = bind();
         generation++;
         samples = 0;
-        keepPreview = false;
         resetTiming();
         return world;
       },

@@ -266,6 +266,9 @@
           <button role="tab" id="tab-presets" data-tab="presets" aria-controls="settings-presets" aria-selected="false">
             <svg><use href="#i-preset" /></svg>参数组
           </button>
+          <button role="tab" id="tab-debug" data-tab="debug" aria-controls="settings-debug" aria-selected="false">
+            <svg><use href="#i-eye" /></svg>调试
+          </button>
         </div>
         <button id="settings-close" class="icon-button" popovertarget="settings" popovertargetaction="hide" title="关闭设置" aria-label="关闭设置">
           <svg><use href="#i-close" /></svg>
@@ -332,6 +335,8 @@
           <label class="setting">静止累积与拍照降噪<select id="accumulation-filter">
               <option value="off">关闭</option>
               <option value="light">轻度</option>
+              <option value="medium">中度</option>
+              <option value="high">高度</option>
             </select></label>
           <label class="setting">远景雾<input id="fog" class="switch" type="checkbox" /></label>
           <p class="hint">远景雾只在光影渲染器中出现。</p>
@@ -364,6 +369,9 @@
               <option value="4">4×4</option>
             </select></label>
           <p class="hint">用累积渲染器逐轮细化，4×4 需 16 轮才覆盖完整网格，高分辨率更耗显存。再按相机按钮保存 PNG，按 Esc 放弃。</p>
+        </section>
+        <section id="settings-debug" role="tabpanel" aria-labelledby="tab-debug" hidden>
+          <div id="render-debug"></div>
         </section>
         <section id="settings-presets" role="tabpanel" aria-labelledby="tab-presets" hidden>
           <h3>本机参数组</h3>

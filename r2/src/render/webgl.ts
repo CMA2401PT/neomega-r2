@@ -3,7 +3,7 @@ import { createTextures, type TextureSet } from "./textures.ts";
 import { createAccumulator } from "./accumulator.ts";
 import { WorldGPU } from "./world-gpu.ts";
 import { ObjectStore } from "../objects/store.ts";
-import { sampleCell } from "./options.ts";
+import { createOutputSettings, sampleCell } from "./options.ts";
 import { frameExposure } from "./options.ts";
 import type { Camera } from "../contracts.ts";
 
@@ -12,7 +12,7 @@ import { cameraBasis as basis, cameraRay, cameraSpan } from "./camera.ts";
 // 拍照时每次绘制覆盖的方块边长（像素）。
 const PHOTO_TILE = 256;
 
-import type { RendererOptions, Tier, PreviewTier, DrawOptions, PhotoOptions } from "./options.ts";
+import type { RendererOptions, Tier, DrawOptions, PhotoOptions } from "./options.ts";
 /** 档位在着色器里的编号，与 ray.frag 的 RENDER_TIER 一致。 */
 const TIERS: readonly Tier[] = ["voxel", "basic", "shading", "accumulation"];
 const TIER_NAMES: Record<Tier, string> = {
@@ -277,7 +277,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     });
   let objects = new ObjectStore(gl, uniforms);
   await onProgress?.({ index: 3, total: 3, label: "正在准备绘制缓冲区…" });
-  const outputSettings = { denoiseAccumulation: false };
+  const outputSettings = createOutputSettings();
   const accumulator = createAccumulator(gl, vertex);
   // 一个累积序列固定水面时刻，否则样本会把移动波纹平均成模糊镜面。
   let waterTime = 0;
@@ -387,8 +387,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     gl.uniform3fv(u("uSkyLight"), skyLight ?? [1, 1, 1]);
     return frameExposure(sun[1] / length, exposureEV, autoExposure);
   }
-  // 上一帧预览所用的档；累积从光影预览开始时保留预览帧作为起点，其他档的画面差别太大，先清空。
-  let previewTier: PreviewTier = initialTier;
   /** 只绘制当前已发布的数据；每帧上传的实例变换也计入 GPU 时间。
    * accumulate 为假时用 tier 档重新出一帧干净的预览；为真表示相机、设置与场景都和上一帧相同，
    * 这一帧用累积档作为样本加到画面上，带抗锯齿、软阴影和一次漫反射反弹。所需的档尚未编译好时不画，返回 false。
@@ -423,10 +421,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       resetTiming();
     }
     accumulator.resize(width, height);
-    if (!accumulate) {
-      waterTime = time;
-      previewTier = tier;
-    } else if (accumulator.samples === 0 && (previewTier !== "shading" || solarHaze || cloudShadows || (airExtinction ?? 0) > 0)) accumulator.clear();
+    if (!accumulate) waterTime = time;
     accumulator.begin(accumulate);
     const exposure = prepare(camera, {
       width,
@@ -455,7 +450,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     // GPU 时间包括射线绘制与显示合成（泛光、色调映射）。
     if (q) gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    accumulator.present({ exposure, raw: debug !== 0, denoise: accumulate && outputSettings.denoiseAccumulation });
+    accumulator.present({ exposure, raw: debug !== 0, denoise: accumulate ? outputSettings.accumulationFilter : "off" });
     if (q) {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
       queries.push(q);
@@ -582,11 +577,11 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
           canvas.height = height;
           resetTiming();
         }
-        film.present({ exposure, raw: false, denoise: tier === "accumulation" && outputSettings.denoiseAccumulation });
+        film.present({ exposure, raw: false, denoise: tier === "accumulation" ? outputSettings.accumulationFilter : "off" });
       },
       /** 把累积结果做色调映射后读回，编码成 PNG。 */
       png() {
-        const pixels = film.read({ exposure, denoise: tier === "accumulation" && outputSettings.denoiseAccumulation });
+        const pixels = film.read({ exposure, denoise: tier === "accumulation" ? outputSettings.accumulationFilter : "off" });
         const image = new ImageData(width, height),
           row = width * 4;
         // 帧缓冲的第一行在画面底部，PNG 的第一行在顶部。

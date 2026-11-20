@@ -1,5 +1,5 @@
 // 独立验证页：场景放进内存世界，经 memorySource 与 WorldSession 走和存档相同的准备与绘制路径。
-// 场景选择与调试选项由此页提供；相机、地图与工具栏来自 common_ui。
+// 此页提供场景选择，共享查看界面负责相机、地图与调试。
 import {
   createRenderer,
   enchantingBook,
@@ -9,7 +9,6 @@ import {
   WorldSession,
 } from "neomega-r2";
 import { createView, startupStage, type ViewSettings } from "/r2/common_ui/view.js";
-import { mountRenderDebug } from "/r2/common_ui/render-debug.js";
 import { scenes } from "./scenes.ts";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#view")!,
@@ -22,7 +21,6 @@ const settings: ViewSettings = {
   exportScale: 2, exportSupersample: 4,
 };
 input("far-radius").min = "8";
-const { status, drawOptions } = mountRenderDebug(document.getElementById("render-debug")!);
 const renderer = await createRenderer(canvas, {
   assets: "/assets/", tier: settings.tier, useWebGPU: params.get("backend") !== "webgl",
   onProgress: ({ label }) => startupStage(label),
@@ -82,6 +80,8 @@ const view = createView({
   },
 });
 
+const status = view.debugStatus;
+
 function setCamera(eye: number[], target: number[]) {
   camera.position = [...eye];
   const d = target.map((v, i) => v - eye[i]);
@@ -120,10 +120,7 @@ function render(now: number) {
   renderer.objects.enabled = r2.specialEnabled;
   view.frame(now, session, {
     continuous: !settings.stillAccumulation,
-    drawOptions: {
-      ...drawOptions(),
-      ...(r2.fixedTime == null ? {} : { time: r2.fixedTime }),
-    },
+    drawOptions: r2.fixedTime == null ? undefined : { time: r2.fixedTime },
   });
   const stats = session.stats;
   if (loaded && stats.loaded === stats.wanted && !stats.pending && !stats.nearPending) {

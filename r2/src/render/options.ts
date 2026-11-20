@@ -4,6 +4,24 @@
 export type PreviewTier = "voxel" | "basic" | "shading";
 /** 四档绘制器；accumulation 在光影之上加软阴影与漫反射反弹，静止累积与拍照专用。 */
 export type Tier = PreviewTier | "accumulation";
+export type AccumulationFilter = "off" | "light" | "medium" | "high";
+
+/** 固定取周围一圈像素。档位越高，参与平均的色差范围和平均色的占比越大。 */
+export const filterParameters = {
+  light: { colorSigma: 4, blend: 0.65 },
+  medium: { colorSigma: 8, blend: 0.82 },
+  high: { colorSigma: 16, blend: 1 },
+} as const;
+
+/** 交互画面和照片共享输出档位。旧宿主使用布尔开关时仍可选中原来的轻度滤波。 */
+export function createOutputSettings() {
+  return {
+    accumulationFilter: "off" as AccumulationFilter,
+    get denoiseAccumulation(): boolean { return this.accumulationFilter !== "off"; },
+    set denoiseAccumulation(enabled: boolean) { this.accumulationFilter = enabled ? "light" : "off"; },
+  };
+}
+
 export interface RendererOptions {
   /** 默认使用 WebGPU；显式关闭以使用 WebGL 2。 */
   useWebGPU?: boolean;

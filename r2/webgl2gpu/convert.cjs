@@ -92,8 +92,8 @@ layout(std140,binding=0) uniform Inputs { vec4 values[64]; } frame;`,
       .replace("uint(gl_FragCoord.y)", "uint(uViewport.y-gl_FragCoord.y)")
       .replace("textureLod(uObjectAtlas,", "textureLod(sampler2D(uObjectAtlas,tiles),")
       .replace(
-        "outColor=vec4(color*weight,weight);",
-        "outColor=vec4(color*weight,weight); if(frame.values[63].x>0.0) outColor+=texelFetch(history,ivec2(gl_FragCoord.xy),0);",
+        "outColor=vec4(color,1.0);",
+        "outColor=vec4(color,1.0); if(frame.values[63].x>0.0) outColor+=texelFetch(history,ivec2(gl_FragCoord.xy),0);",
       );
   }
   // 光影和累积在计算管线中逐像素写 HDR。照片的分块起点放在保留的 uniform 62。

@@ -1,4 +1,5 @@
 import { appearanceDefaults, bindAppearance, lighting } from "./appearance.js";
+import { mountRenderDebug } from "./render-debug.js";
 import { bindPresets } from "./presets.js";
 import { FrameRate } from "./frame-rate.js";
 import { createHUD, element } from "./hud.js";
@@ -40,6 +41,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
   settings.accumulationFilter ??= "light";
+  const debugPanel = mountRenderDebug(element("render-debug"), renderer.resetTiming);
   const hud = createHUD({ settings, jump, changed: refreshSettings });
   const appearance = settings.appearance = {
     ...appearanceDefaults,
@@ -228,7 +230,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
 
   /** 同一帧循环消费当前视图的相机；世界、光照和累积仍使用同一条绘制路径。 */
-  function frame(now: number, session: WorldSession | null, { continuous = false, drawOptions = {} }: FrameOptions = {}) {
+  function frame(now: number, session: WorldSession | null, { continuous = false, drawOptions: overrides }: FrameOptions = {}) {
     const world = scene();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -271,6 +273,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     const { width, height } = frameSize(renderScale());
     const light = lighting(appearance, settings.time),
       objects = view.objects;
+    const drawOptions = { ...debugPanel.drawOptions(), ...overrides };
     const state = JSON.stringify([
       view,
       width,
@@ -339,7 +342,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
 
   function refreshSettings(key?: keyof typeof settings) {
-    renderer.outputSettings.denoiseAccumulation = settings.accumulationFilter === "light";
+    renderer.outputSettings.accumulationFilter = settings.accumulationFilter ?? "light";
     // 显示滤波只改变如何看当前样本，切换档位后接着原有样本继续累积。
     if (key === "accumulationFilter") {
       onSettings?.();
@@ -355,6 +358,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
   refreshSettings();
   return {
+    debugStatus: debugPanel.status,
     hud, map, frame, refreshSettings, cancelPhoto, frames: rate.intervals,
     get fps() { return rate.fps; },
     setWorld(loaded: boolean, readChunks?: () => ArrayBuffer | Promise<ArrayBuffer>) {

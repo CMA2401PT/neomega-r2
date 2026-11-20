@@ -36,5 +36,7 @@ test("各 WebGPU 射线路径共用一个格子遍历调用点", (t) => {
     if (name.endsWith("-retry")) assert.deepEqual(slots, fastSlots);
     if (name.startsWith("photo") || name.startsWith("accumulation"))
       assert.equal(slots.includes("uBounces"), name.startsWith("photo"));
+    // 转译时插入历史读取。输出样本的写法改变后，第二轮起仍须把前面的样本加回来。
+    if (/^(accumulation|photo)/.test(name)) assert.match(wgsl, /textureLoad\(history,/);
   }
 });
