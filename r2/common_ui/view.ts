@@ -23,7 +23,7 @@ export const TIER_NAMES = { voxel: "体素渲染器", basic: "基础渲染器", 
 const DEFAULT_EXPORT_PIXELS = 24e6;
 export function createView({ renderer, camera, settings, scene, switchBackend, onSettings, onStats, report = () => {} }: ViewOptions) {
   const backend = element<HTMLAnchorElement>("render-backend");
-  backend.textContent = renderer.backend === "webgpu" ? "[webGPU]" : "[webGL]";
+  backend.textContent = renderer.backend === "webgpu" ? "WebGPU" : "WebGL";
   if (switchBackend) {
     const next = renderer.backend === "webgpu" ? "webgl" : "webgpu";
     if (next === "webgpu" && (!isSecureContext || !navigator.gpu)) {

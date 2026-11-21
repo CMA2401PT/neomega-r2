@@ -53,7 +53,7 @@
         <path d="M4 12a8 8 0 1 0 2.35-5.65" /><path d="M5.6 3.4v3.3h3.3M12 8v4l2.8 1.8" />
       </symbol>
       <symbol id="i-close-world" viewBox="0 0 24 24">
-        <path d="M10 4.5H6A1.5 1.5 0 0 0 4.5 6v12A1.5 1.5 0 0 0 6 19.5h4" /><path d="M15 8l4 4-4 4M19 12H9.5" />
+        <path d="m5 14 7-9 7 9ZM5 19h14" />
       </symbol>
       <symbol id="i-link" viewBox="0 0 24 24">
         <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
@@ -97,11 +97,11 @@
 
     <canvas id="view" tabindex="0" aria-label="三维世界视图"></canvas>
     <canvas id="map-overlay" tabindex="0" aria-label="全屏地图" hidden></canvas>
-    <div id="readouts" class="chrome halo">
+    <div id="readouts" class="chrome">
       <canvas id="axes" aria-hidden="true"></canvas
       ><output id="resolution-value"></output><output id="fps">FPS —</output>
     </div>
-    <output id="loading" class="halo" role="status"></output>
+    <output id="loading" role="status"></output>
     <section id="startup-status" class="panel" role="status" aria-live="polite">
       <strong id="startup-stage">正在加载程序…</strong>
       <span id="startup-elapsed">首次启动可能需要较长时间，请稍候</span>
