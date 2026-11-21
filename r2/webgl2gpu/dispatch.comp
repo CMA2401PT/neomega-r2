@@ -1,0 +1,60 @@
+// 第一次绘制按 8×4 像素分组。每个待补画像素在本组的 32 位掩码里占一位。
+#if !R2_CUBE_PASS
+// 返回 mask 中从低到高第 rank 个置位的位置，调用前已验证 rank < bitCount(mask)。
+uint selectPixelBit(uint mask, uint rank) {
+  uint bit = 0u;
+  for (uint width = 16u; width > 0u; width >>= 1u) {
+    uint lowerCount = uint(bitCount(mask & ((1u << width) - 1u)));
+    if (rank >= lowerCount) {
+      rank -= lowerCount;
+      mask >>= width;
+      bit += width;
+    }
+  }
+  return bit;
+}
+
+// 每 32 个相邻工作组独立重排。补画线程取这批掩码中的第 rank 个像素，
+// 使同一组中真正要跑完整模型求交的线程排在一起。只读已有掩码。
+bool retryPixel(uint groupIndex, out uvec2 pixel) {
+  const uint groupCount = 32u;
+  uint first = groupIndex & ~(groupCount - 1u);
+  uint end = min(first + groupCount, gl_NumWorkGroups.x * gl_NumWorkGroups.y);
+  uint rank = (groupIndex - first) * 32u + gl_LocalInvocationIndex;
+  for (uint i = first; i < end; i++) {
+    uint mask = retryMask[i];
+    uint count = uint(bitCount(mask));
+    if (rank < count) {
+      uint bit = selectPixelBit(mask, rank);
+      uvec2 group = uvec2(i % gl_NumWorkGroups.x, i / gl_NumWorkGroups.x);
+      pixel = group * uvec2(8, 4) + uvec2(bit & 7u, bit >> 3u);
+      return true;
+    }
+    rank -= count;
+  }
+  return false;
+}
+#endif
+
+void main() {
+  uint groupIndex = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x;
+#if R2_CUBE_PASS
+  ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) + ivec2(frame.values[62].xy);
+  if (any(greaterThanEqual(pixel, imageSize(outputHDR)))) return;
+#else
+  // 第一遍只标记了图块内的有效像素。在重排后再加分块拍照的原点。
+  uvec2 source;
+  if (!retryPixel(groupIndex, source)) return;
+  ivec2 pixel = ivec2(source) + ivec2(frame.values[62].xy);
+#endif
+  pixelCoord = vec4(vec2(pixel) + 0.5, 0, 1);
+  shadePixel();
+#if R2_CUBE_PASS
+  if (needsFullModel) {
+    atomicOr(retryMask[groupIndex], 1u << gl_LocalInvocationIndex);
+    return;
+  }
+#endif
+  imageStore(outputHDR, pixel, outColor);
+}
+

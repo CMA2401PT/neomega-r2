@@ -106,23 +106,7 @@ vec4 outColor;
 vec4 pixelCoord;`)
       .replaceAll("gl_FragCoord", "pixelCoord")
       .replace("void main(){", "void shadePixel(){");
-    source += `
-void main(){
-  ivec2 pixel=ivec2(gl_GlobalInvocationID.xy)+ivec2(frame.values[62].xy);
-  if(any(greaterThanEqual(pixel,imageSize(outputHDR))))return;
-  // 一个工作组恰好 32 个像素，用一个字记录需要完整求交的像素。
-  uint word=gl_WorkGroupID.x+gl_WorkGroupID.y*gl_NumWorkGroups.x;
-  uint bit=1u<<gl_LocalInvocationIndex;
-#if !R2_CUBE_PASS
-  if((retryMask[word]&bit)==0u)return;
-#endif
-  pixelCoord=vec4(vec2(pixel)+0.5,0,1);
-  shadePixel();
-#if R2_CUBE_PASS
-  if(needsFullModel){atomicOr(retryMask[word],bit);return;}
-#endif
-  imageStore(outputHDR,pixel,outColor);
-}`;
+    source += "\n" + fs.readFileSync(path.join(__dirname, "dispatch.comp"), "utf8");
   }
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "r2-wgsl-"));
   try {

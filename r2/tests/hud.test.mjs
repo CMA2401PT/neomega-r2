@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 // 内存 DOM 只提供 HUD 实际使用的控件；假时钟验证五秒后仍显示错误，不依赖浏览器端口。
 test("区域错误持续显示，恢复或切换世界后清除", async (t) => {
-  const result = await build({ entryPoints: [new URL("../common_ui/hud.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false });
+  const result = await build({ entryPoints: [fileURLToPath(new URL("../common_ui/hud.ts", import.meta.url))], bundle: true, format: "esm", write: false });
   const { createHUD } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
   class Element {
     hidden = true;

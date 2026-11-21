@@ -18,6 +18,8 @@ test("各 WebGPU 射线路径共用一个格子遍历调用点", (t) => {
       assert.match(wgsl, /@compute\s+@workgroup_size\(8, 4, 1\)/);
       assert.match(wgsl, /textureStore\(/);
       assert.equal(wgsl.includes("atomicOr("), !name.endsWith("-retry"));
+      // 只有补画阶段按掩码的置位数重新分派像素，首遍仍按原屏幕坐标绘制。
+      assert.equal(wgsl.includes("countOneBits("), name.endsWith("-retry"));
       assert.equal(/fn intersectObject/.test(wgsl), name.endsWith("-retry"));
     } else {
       assert.match(wgsl, /@fragment/);
