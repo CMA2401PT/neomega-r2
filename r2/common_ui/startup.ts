@@ -27,10 +27,10 @@ export function finishStartup() {
   panel.hidden = true;
 }
 
-export function failStartup(error: unknown) {
+export function failStartup(error: unknown, title = "启动失败") {
   active = false;
   clearInterval(ticker);
   panel.hidden = false;
-  label.textContent = "启动失败";
+  label.textContent = title;
   elapsed.textContent = String(error);
 }

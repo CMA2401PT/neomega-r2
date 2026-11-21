@@ -22,6 +22,9 @@ type Ray = { slots: string[] } & (
     }
 );
 type Film = ReturnType<typeof frameFilm>;
+// 780M 在文明裂痕的 700×500 整帧可持续累积，更大的画幅沿用拍照的图块尺寸。
+const FULL_SAMPLE_PIXELS = 700 * 500;
+const TILE_SIZE = 256;
 type Frame = DrawOptions & {
   bounces?: number;
   jitter?: number[];
@@ -35,7 +38,9 @@ export async function createWebGPURenderer(
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter)
     throw Error(
-      "无法取得 WebGPU 设备。请使用支持 WebGPU 的浏览器，并通过 HTTPS、localhost 或本地导出文件打开。",
+      navigator.gpu
+        ? "无法取得 WebGPU 设备。请重启浏览器或桌面查看器后重试，并检查硬件加速是否开启。"
+        : "当前页面无法使用 WebGPU。请使用支持 WebGPU 的浏览器，并通过 HTTPS、localhost 或本地导出文件打开。",
     );
   const poolLimit = Math.min(
     256 * 1024 * 1024,
@@ -57,12 +62,18 @@ export async function createWebGPURenderer(
     });
     let fatal = "",
       disposed = false;
+    let notifyFailure!: (message: string) => void;
+    const failure = new Promise<string>((resolve) => { notifyFailure = resolve; });
+    function fail(message: string) {
+      if (disposed || fatal) return;
+      fatal = message;
+      notifyFailure(message);
+    }
     device.lost.then((info) => {
-      if (!disposed) fatal = "WebGPU 设备连接中断：" + info.message;
+      fail("WebGPU 设备连接中断。" + (info.message || info.reason));
     });
     device.addEventListener("uncapturederror", (e) => {
-      fatal = e.error.message;
-      console.error(fatal);
+      fail("WebGPU 绘制出错。" + e.error.message);
     });
     const rayStages = GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE;
     const layout: GPUBindGroupLayoutEntry[] = [
@@ -225,7 +236,25 @@ export async function createWebGPURenderer(
       samples = 0;
     let pendingFrame = false,
       epoch = 0;
+    let sampleGeneration = 0;
+    let tileProgress: { done: number; total: number } | null = null;
+    function cancelAccumulation() {
+      sampleGeneration++;
+      samples = 0;
+      tileProgress = null;
+    }
     let frameDone: Promise<void> = Promise.resolve();
+    let waitingSince: number | null = null;
+    let latestWork: Promise<void> | undefined;
+    // 渲染中的等待与设备丢失是两种状态。驱动还没给出结果时，界面仍可说明正在等哪次提交。
+    function waitForDraw(): Promise<void> {
+      const work = device.queue.onSubmittedWorkDone();
+      latestWork = work;
+      waitingSince = performance.now();
+      return work.finally(() => {
+        if (latestWork === work) waitingSince = null;
+      });
+    }
     const times: number[] = [];
     const queries = device.features.has("timestamp-query")
       ? device.createQuerySet({ type: "timestamp", count: 2 })
@@ -356,29 +385,78 @@ export async function createWebGPURenderer(
       ]);
     }
     let displayedFrame: GPUTexture | undefined;
+    // 拍照和交互使用同一图块原点、边缘裁剪和射线路径。每次只编码一块，
+    // 由调用方提交并等待 GPU，最后一块才合成完整画面。
+    function tracePart(
+      camera: Camera,
+      program: Program,
+      o: Frame,
+      history: boolean,
+      sample: number,
+      target: Target,
+      tile: number | null,
+      timer = false,
+    ) {
+      let bounds: number[] | undefined;
+      let total = 1;
+      if (tile !== null) {
+        const columns = Math.ceil(target.width / TILE_SIZE);
+        total = columns * Math.ceil(target.height / TILE_SIZE);
+        const x = (tile % columns) * TILE_SIZE, y = Math.floor(tile / columns) * TILE_SIZE;
+        bounds = [x, y, Math.min(TILE_SIZE, target.width - x), Math.min(TILE_SIZE, target.height - y)];
+        o = { ...o, tileOrigin: [x, y] };
+      }
+      const exposure = prepare(camera, program, o, history, sample);
+      const enc = device.createCommandEncoder();
+      trace(enc, program, target, bounds, timer);
+      return { enc, exposure, total, last: (tile ?? 0) + 1 === total };
+    }
     function submitFrame(camera: Camera, o: DrawOptions) {
       const tier = o.accumulate ? "accumulation" : (o.tier ?? "shading");
+      if (fatal) throw Error(fatal);
+      if (!o.accumulate || film?.width !== o.width || film?.height !== o.height) cancelAccumulation();
       // 每次只接受一张交互画面。GPU 忙时让宿主继续处理输入，下次绘制直接取最新相机。
       if (!programs.has(tier) || pendingFrame) return false;
       if (!film || film.width !== o.width || film.height !== o.height) {
         film?.dispose();
         film = frameFilm(device, fx, historyLayout, o.width, o.height);
         resetTiming();
-        samples = 0;
       }
-      const add = !!o.accumulate && samples > 0;
-      if (!o.accumulate) {
-        waterTime = o.time ?? 0;
-        samples = 0;
-      } else samples++;
+      if (!o.accumulate) waterTime = o.time ?? 0;
       objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
-      const exposure = prepare(camera, tier, { ...o, time: waterTime }, add, Math.max(0, samples - 1)),
-        enc = device.createCommandEncoder();
-      trace(enc, tier, film.next(), undefined, !!queries);
-      const denoise = tier === "accumulation" && !o.debug ? outputSettings.accumulationFilter : "off";
-      film.composite(enc, exposure, !!o.debug, denoise === "off" ? queries : null);
-      displayedFrame = film.displayImage(enc, denoise, queries);
-      present(enc, displayedFrame);
+      const stamp = sampleGeneration;
+      const tiled = !!o.accumulate && o.width * o.height > FULL_SAMPLE_PIXELS;
+      const currentFilm = film, target = film.next(), sample = samples;
+      const timingEpoch = epoch, opts = { ...o, time: waterTime };
+      const view = { ...camera, position: camera.position.slice() };
+      async function render(): Promise<void> {
+        for (let tile = 0; ; tile++) {
+          const { enc, exposure, total, last } = tracePart(
+            view, tier, opts, sample > 0, sample, target, tiled ? tile : null, tile === 0,
+          );
+          if (tiled) tileProgress = { done: tile, total };
+          if (last) {
+            const denoise = tier === "accumulation" && !o.debug ? outputSettings.accumulationFilter : "off";
+            currentFilm.composite(enc, exposure, !!o.debug, denoise === "off" ? queries : null);
+            displayedFrame = currentFilm.displayImage(enc, denoise, queries);
+            present(enc, displayedFrame);
+            submitTimedFrame(enc, timingEpoch);
+          } else device.queue.submit([enc.finish()]);
+          await waitForDraw();
+          if (disposed || fatal || stamp !== sampleGeneration) return;
+          if (last) {
+            if (o.accumulate) samples++;
+            tileProgress = null;
+            return;
+          }
+        }
+      }
+      pendingFrame = true;
+      frameDone = render().finally(() => { pendingFrame = false; });
+      frameDone.catch((error) => fail("WebGPU 绘制中断。" + String(error)));
+      return true;
+    }
+    function submitTimedFrame(enc: GPUCommandEncoder, stamp: number) {
       let read: GPUBuffer | undefined, resolve: GPUBuffer | undefined;
       if (queries) {
         resolve = device.createBuffer({
@@ -390,17 +468,6 @@ export async function createWebGPURenderer(
         enc.copyBufferToBuffer(resolve, 0, read, 0, 16);
       }
       device.queue.submit([enc.finish()]);
-      pendingFrame = true;
-      const stamp = epoch;
-      frameDone = device.queue.onSubmittedWorkDone();
-      frameDone.then(
-        () => {
-          pendingFrame = false;
-        },
-        () => {
-          pendingFrame = false;
-        },
-      );
       if (read) {
         const buffer = read;
         void buffer
@@ -418,18 +485,21 @@ export async function createWebGPURenderer(
             resolve?.destroy();
           });
       }
-      return true;
     }
     function draw(camera: Camera, o: DrawOptions & { synchronize: true }): Promise<boolean>;
     function draw(camera: Camera, o: DrawOptions & { synchronize?: false }): boolean;
     function draw(camera: Camera, o: DrawOptions): boolean | Promise<boolean>;
     function draw(camera: Camera, o: DrawOptions) {
-      if (o.synchronize)
-        return device.queue.onSubmittedWorkDone().then(async () => {
+      if (o.synchronize) {
+        if (!o.accumulate) cancelAccumulation();
+        return frameDone.then(async () => {
           const rendered = submitFrame(camera, o);
-          await device.queue.onSubmittedWorkDone();
-          return rendered;
+          const stamp = sampleGeneration;
+          await frameDone;
+          if (fatal) throw Error(fatal);
+          return rendered && stamp === sampleGeneration;
         });
+      }
       return submitFrame(camera, o);
     }
     async function pick(camera: Camera, pixel: { width: number; height: number; x: number; y: number }) {
@@ -481,8 +551,6 @@ export async function createWebGPURenderer(
         view = { ...camera, position: camera.position.slice() },
         grid = Math.max(1, Math.round(o.supersample ?? (tier === "accumulation" ? 1 : 4))),
         total = tier === "accumulation" ? Infinity : grid * grid;
-      const columns = Math.ceil(width / 256),
-        tiles = columns * Math.ceil(height / 256);
       let done = 0,
         tile = 0,
         pending = false,
@@ -506,22 +574,21 @@ export async function createWebGPURenderer(
             objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
           }
           const jitter = sampleCell(done, grid);
-          const x = (tile % columns) * 256,
-            y = Math.floor(tile / columns) * 256;
-          exposure = prepare(
+          const part = tracePart(
             view,
             program,
-            { ...o, tier: undefined, bounces: o.bounces ?? 4, jitter, tileOrigin: [x, y] },
+            { ...o, tier: undefined, bounces: o.bounces ?? 4, jitter },
             done > 0,
             done,
+            target,
+            tile++,
           );
-          const enc = device.createCommandEncoder();
-          trace(enc, program, target, [x, y, Math.min(256, width - x), Math.min(256, height - y)]);
-          const last = ++tile === tiles;
+          const { enc, last } = part;
+          exposure = part.exposure;
           if (last) f.composite(enc, exposure, false);
           device.queue.submit([enc.finish()]);
           pending = true;
-          device.queue.onSubmittedWorkDone().then(
+          waitForDraw().then(
             () => {
               pending = false;
               if (last) {
@@ -529,8 +596,9 @@ export async function createWebGPURenderer(
                 tile = 0;
               }
             },
-            () => {
+            (error) => {
               closed = true;
+              fail("WebGPU 拍照或导出中断。" + String(error));
             },
           );
         },
@@ -569,7 +637,7 @@ export async function createWebGPURenderer(
       objects.store.clear();
       scene = bind();
       generation++;
-      samples = 0;
+      cancelAccumulation();
       resetTiming();
     }
     const readyError = await device.queue.onSubmittedWorkDone().then(() => fatal);
@@ -579,6 +647,10 @@ export async function createWebGPURenderer(
       outputSettings,
       gl: null,
       device,
+      failure,
+      cancelAccumulation,
+      get tileProgress() { return tileProgress; },
+      get waitingSince() { return waitingSince; },
       maxTextureSize: device.limits.maxTextureDimension2D,
       catalog,
       states,
@@ -619,11 +691,12 @@ export async function createWebGPURenderer(
         objects = objectTextures(device);
         scene = bind();
         generation++;
-        samples = 0;
+        cancelAccumulation();
         resetTiming();
         return world;
       },
       setTextures(set: TextureSet) {
+        cancelAccumulation();
         const next = materialTextures(device, set, references);
         materials.dispose();
         materials = next;
@@ -634,7 +707,7 @@ export async function createWebGPURenderer(
       },
       fence() {
         let ready = false;
-        device.queue.onSubmittedWorkDone().then(
+        Promise.all([frameDone, device.queue.onSubmittedWorkDone()]).then(
           () => (ready = true),
           () => (ready = true),
         );

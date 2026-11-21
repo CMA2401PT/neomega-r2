@@ -8,7 +8,7 @@ import { FlightControls } from "./controls.js";
 import { bindMovePad } from "./movepad.js";
 import { drawAxes } from "./overlay.js";
 export { startupStage } from "./startup.js";
-import { finishStartup } from "./startup.js";
+import { failStartup, finishStartup } from "./startup.js";
 
 import type { DrawOptions, Renderer, WorldSession, Tier } from "/r2/index.js";
 import type { ViewOptions } from "./types.js";
@@ -78,6 +78,18 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
   // 预览之外的各档启动时不编译；第一次需要时在后台编译，期间画面继续使用已有的档。
   const taskStatus = element<HTMLOutputElement>("task-status");
+  let stopped = false;
+  function stopRendering(reason: string) {
+    if (stopped) return;
+    stopped = true;
+    if (renderer.backend === "webgpu") renderer.cancelAccumulation();
+    taskStatus.hidden = true;
+    element("photo-progress").hidden = true;
+    element("fps").textContent = "绘制已停止";
+    for (const id of ["photo", "export"]) element<HTMLButtonElement>(id).disabled = true;
+    failStartup(reason + " 请刷新页面重试。如果仍无法连接显卡，请重启浏览器或桌面查看器。", "绘制已停止");
+  }
+  if (renderer.backend === "webgpu") void renderer.failure.then(stopRendering);
   /** 正在编译的档与开始时间。 */
   const compiling = new Map<Tier | "photo", { promise: Promise<void>; since: number }>();
   // 程序链接完成后，驱动仍可能在第一次实际绘制时耗时数秒。
@@ -118,10 +130,11 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
   /** 底部提示：渲染器编译进度，或拍照、导出时的操作说明。 */
   function showTaskStatus(now: number) {
+    if (stopped) return;
     const preview = compiling.get(settings.tier),
       accumulation = (photoWaiting && compiling.get("photo")) || compiling.get("accumulation"),
       elapsed = (job: {since:number}) => `已用 ${Math.floor((now - job.since) / 1000)} 秒`;
-    const text = photo
+    let text = photo
       ? photo.kind === "export"
         ? `正在导出 · ${photo.samples}/${photo.supersample ** 2} 轮超采样，完成后自动保存 · 再按导出按钮或 Esc 取消`
         : photo.samples === 0
@@ -134,6 +147,9 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
           : settings.stillAccumulation && renderer.ready("accumulation") && !firstStillFrameReady && !map.isOverview
             ? "正在准备首个累积画面 · 视角静止时开始绘制"
             : "";
+    const since = renderer.backend === "webgpu" ? renderer.waitingSince : null;
+    if (since !== null && now - since >= 10000)
+      text = `正在等待显卡完成当前绘制，已等 ${Math.floor((now - since) / 1000)} 秒。如果持续没有进展，请刷新页面后降低绘制分辨率。`;
     if (taskStatus.textContent !== text) taskStatus.textContent = text;
     taskStatus.hidden = !text;
     for (const button of document.querySelectorAll<HTMLButtonElement>(".tier"))
@@ -141,6 +157,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
   /** 拍照与导出两个按钮的状态：进行中的一项按下，另一项停用。 */
   function setPhotoButton() {
+    if (stopped) return;
     const kind = photo?.kind ?? (photoWaiting ? "photo" : null);
     element<HTMLButtonElement>("photo").setAttribute("aria-pressed", String(kind === "photo"));
     element<HTMLButtonElement>("photo").title = element<HTMLButtonElement>("photo").ariaLabel =
@@ -177,9 +194,11 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   /** 拍照用累积渲染器，导出用当前预览档。两者都按屏幕实际像素和各自的尺寸倍数取图。
    * 两者都拍最近一帧的视图，地图打开时就是俯视画面。 */
   function startPhoto(kind: Photo["kind"]) {
+    if (stopped) return;
     const world = scene();
     photoWaiting = false;
     if (!currentView) return;
+    if (renderer.backend === "webgpu") renderer.cancelAccumulation();
     const scale = kind === "photo" ? settings.photoScale : settings.exportScale;
     const { width, height } = frameSize(
       devicePixelRatio * scale,
@@ -230,15 +249,25 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
 
   /** 同一帧循环消费当前视图的相机；世界、光照和累积仍使用同一条绘制路径。 */
-  function frame(now: number, session: WorldSession | null, { continuous = false, drawOptions: overrides }: FrameOptions = {}) {
+  function frame(now: number, session: WorldSession | null, options?: FrameOptions) {
+    if (stopped) return;
+    try {
+      drawFrame(now, session, options);
+    } catch (error) {
+      stopRendering(String(error));
+    }
+  }
+  function drawFrame(now: number, session: WorldSession | null, { continuous = false, drawOptions: overrides }: FrameOptions = {}) {
     const world = scene();
     const elapsedSeconds = (now - (last ?? now)) / 1000;
     last = now;
     if (firstStillFrameFence?.ready()) {
       firstStillFrameFence.dispose();
       firstStillFrameFence = null;
-      firstStillFrameReady = true;
-      report("accumulation-first-frame-ready");
+      if (renderer.accumulated > 0) {
+        firstStillFrameReady = true;
+        report("accumulation-first-frame-ready");
+      }
     }
     if (now - statusAt > 100) showTaskStatus(now);
     if (photo) {
@@ -294,6 +323,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     let rendered = false;
     // 静止时一直累积，直到画面再次变化；没有样本上限。
     const accumulating = settings.stillAccumulation && renderer.ready("accumulation");
+    if (view.overview && changed && renderer.backend === "webgpu") renderer.cancelAccumulation();
     if (!view.overview && (changed || (accumulating && !firstStillFrameFence))) {
       if (!changed && !firstStillFrameReady) report("accumulation-first-frame-start");
       rendered = renderer.draw(view.camera, {
@@ -324,10 +354,11 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       drawAxes(element<HTMLCanvasElement>("axes"), camera);
       element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
       const fps = rate.fps;
+      const tiles = renderer.backend === "webgpu" && renderer.tileProgress;
       // GPU 忙时本次刷新可能没有提交新样本，静止状态仍应显示当前累计数量。
       element<HTMLOutputElement>("fps").textContent = !changed && !rate.waiting
         ? accumulating && !view.overview
-          ? `静止（累积 ${renderer.accumulated} 样本）`
+          ? `静止（累积 ${renderer.accumulated} 样本${tiles ? ` · 当前 ${tiles.done}/${tiles.total} 块` : ""}）`
           : "静止"
         : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)} FPS`;
       if (session) {
@@ -380,6 +411,8 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       return map.setWorld(readChunks);
     },
     dispose() {
+      stopped = true;
+      if (renderer.backend === "webgpu") renderer.cancelAccumulation();
       releasePresets();
       rate.reset();
       firstStillFrameFence?.dispose();
