@@ -14,6 +14,8 @@ export interface Scene {
 }
 export interface MountOptions extends Scene {
   actions?: HTMLElement;
+  /** 宿主编写的帮助 HTML，显示在通用操作说明与“关于 neOmega R2”之间。 */
+  helpHTML?: string;
   registry?: ObjectRegistry;
   useWebGPU?: boolean;
 }

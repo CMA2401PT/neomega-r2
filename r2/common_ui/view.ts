@@ -42,6 +42,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   bindMovePad(element("movepad"), controls);
   settings.accumulationFilter ??= "light";
   const debugPanel = mountRenderDebug(element("render-debug"), renderer.resetTiming);
+  const renderInfo = element("render-info");
   const hud = createHUD({ settings, jump, changed: refreshSettings });
   const appearance = settings.appearance = {
     ...appearanceDefaults,
@@ -368,6 +369,23 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         // 首批区域全部失败时没有可绘制的第一帧，仍需退出启动等待并显示 HUD 错误。
         if (stats.failed > 0) finishStartup();
         hud.loading(stats, world.connection);
+        if (renderInfo.matches(":popover-open")) {
+          const [x, y, z] = session.gpu.size;
+          element("render-info-tier").textContent = TIER_NAMES[shownTier];
+          element("render-info-near").textContent = `${settings.nearRadius} 区块`;
+          element("render-info-far").textContent = `${settings.farRadius} 区块`;
+          element("render-info-window").textContent = `${x}×${z}×${y} 方块`;
+          element("render-info-sections").textContent = String(stats.sections);
+          element("render-info-regions").textContent = `${stats.loaded} / ${stats.wanted}`;
+          element("render-info-pending").textContent = `${stats.pending} / ${stats.failed}`;
+          element("render-info-objects").textContent = String(stats.objects);
+          element("render-info-unknown").textContent = String(stats.unknownBlocks);
+          element("render-info-bytes").textContent = `${(stats.bytes / 1024 ** 2).toFixed(1)} MiB`;
+          element("render-info-pool").textContent = `${(stats.usedBytes / 1024 ** 2).toFixed(1)} MiB`;
+          element("render-info-memory").textContent = `${(renderer.textureBytes / 1024 ** 2).toFixed(1)} MiB`;
+          element("render-info-time").textContent = median === undefined ? "—" : `${median.toFixed(2)} ms`;
+          element("render-info-pixels").textContent = `${width}×${height}`;
+        }
         onStats?.({ stats, shownTier, median, width, height });
       }
       statusAt = now;

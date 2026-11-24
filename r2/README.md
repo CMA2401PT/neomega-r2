@@ -23,7 +23,12 @@ npm run demo
 
 ### 使用标准前端
 
-标准前端管理渲染、相机、设置与帧循环。构建后，在静态服务器上打开 `dist/standalone.html` 即可运行[完整示例](examples/standalone.html)。也可以只把这个 HTML 和 `r2-frontend.js` 复制到自己的站点。示例在浏览器内生成一块草地，宿主提供的按钮可以把相机移回起点。
+标准前端管理渲染、相机、设置与帧循环。下面两个单 HTML 示例共用相机和“返回起点”按钮，可以单独把任意一个示例与构建出的 `r2-frontend.js` 放到静态站点。启动上面的演示服务后也可直接打开。
+
+- 世界已经在内存中时，可以用 `MemoryWorld` 按方块坐标填出一块草地，交给前端显示。[运行内存世界示例](http://127.0.0.1:2415/r2/standalone.html) · [示例源码](examples/standalone.html)
+- 世界需要按位置生成或加载时，可以自己实现 `DataSource`。示例只生成相机当前请求的区域，每隔 128 格出现一块同样的草地。相机离开后返回，数据源会再次提供该区域。[运行按需数据源示例](http://127.0.0.1:2415/r2/datasource.html) · [示例源码](examples/datasource.html)
+
+内存世界的接入代码如下。
 
 ```html
 <!doctype html>
@@ -47,6 +52,8 @@ npm run demo
 ```
 
 `actions` 接收宿主的 DOM 元素。挂载期间元素位于独立的底栏面板内，原有按钮和事件处理器继续使用。前端在容器内用独立文档隔离样式、键盘与控件 ID。可通过 `await view.setScene({ source, camera, name, chunks })` 切换到另一个数据源。离开页面组件时调用 `view.dispose()` 关闭当前源、释放渲染资源并归还按钮。修改同一个内存世界时，使用 `world.commit()` 通知当前会话即可。
+
+坐标右侧的资源管理器图标打开渲染器信息，可查看当前视距、区域加载进度、显存用量与 GPU 耗时。左侧的问号打开通用操作帮助。宿主需要说明自己的按钮时，可在 `mount` 的选项中传入自己编写的 HTML，例如 `helpHTML: "<h3>场景操作</h3><p>点击返回起点可重置相机。</p>"`。这段内容会排在通用说明之后、“关于 neOmega R2”之前。
 
 前端自带默认材质包和合成信息包。设置面板支持选择 ZIP、选择目录及恢复默认，也可在代码里调用 `await view.setMaterialPack(file)` 或 `await view.setMaterialPack(null)`。
 

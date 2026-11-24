@@ -31,6 +31,13 @@ export function closePopovers() {
 
 /** 让界面事件通过回调交给宿主，读数只在用户没有编辑时跟随相机。 */
 export function createHUD({ settings, jump, changed }: { settings: ViewSettings; jump(position: number[]): void; changed(key?: keyof ViewSettings): void }) {
+  // 帮助使用模态窗口，阅读时暂停场景键盘操作，关闭后由浏览器归还焦点。
+  const help = element<HTMLDialogElement>("help");
+  element("help-open").onclick = () => {
+    closePopovers();
+    help.showModal();
+  };
+  help.onkeydown = event => event.stopPropagation();
   const fields = ["x", "y", "z"].map(id => element<HTMLInputElement>(id)),
     form = element<HTMLFormElement>("teleport");
   let loaded = false,

@@ -99,6 +99,9 @@ export async function start(options: MountOptions): Promise<Frontend> {
     URL.revokeObjectURL(bookURL);
   }
   try {
+    const help = document.createElement("template");
+    help.innerHTML = options.helpHTML ?? "";
+    document.querySelector('slot[name="help-extra"]')!.replaceWith(help.content);
     if (options.actions) element("host-actions").append(options.actions);
     await setScene(options);
     frame = requestAnimationFrame(draw);

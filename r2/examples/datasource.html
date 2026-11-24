@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>用 DataSource 按需生成草地</title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #world {
+        height: 100dvh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="world"></div>
+    <button id="home">返回起点</button>
+    <script type="module">
+      import { mount, blockHash, encodeRegion } from "./r2-frontend.js";
+
+      // 每个区域都生成同样的 32×32 草地。只保留一个 16×16×16 子区块的模板。
+      const blocks = new Uint32Array(16 ** 3);
+      const grass = blockHash('minecraft:grass_block ["snowy"="false"]');
+      for (let x = 0; x < 16; x++) {
+        for (let z = 0; z < 16; z++) {
+          blocks[(x * 16 + z) * 16] = grass; // 格子按 X、Z、Y 排列，只填 y = 0。
+        }
+      }
+
+      // 一个区域横跨 8×8 个区块。编码器使用世界子区块坐标，草地占其中的 2×2 个。
+      function grassRegion(regionX, regionZ) {
+        const sections = [];
+        for (let dx = 0; dx < 2; dx++) {
+          for (let dz = 0; dz < 2; dz++) {
+            sections.push({ position: [regionX * 8 + dx, 0, regionZ * 8 + dz], blocks });
+          }
+        }
+        return encodeRegion(sections);
+      }
+
+      let sink;
+      const source = {
+        open(receiver) {
+          sink = receiver;
+        },
+        want({ regions, objects }) {
+          // 每次请求都交付新缓冲区。生成是同步的，退订时没有待取消的任务。
+          for (const { x, z } of regions.add) sink.region(x, z, grassRegion(x, z));
+          for (const { x, z } of objects.add) sink.objects(x, z, []); // 草地没有活动对象。
+        },
+        close() {
+          sink = undefined;
+        },
+      };
+
+      const camera = { position: [16, 8, 32], yaw: 0, pitch: -0.45 };
+      const home = document.querySelector("#home");
+      const view = await mount(document.querySelector("#world"), {
+        source,
+        camera,
+        actions: home,
+        helpHTML: "<h3>草地的位置</h3><p>每隔 128 格有一块草地。点击返回起点可回到第一块。</p>",
+      });
+      home.onclick = () => view.moveCamera(camera);
+    </script>
+  </body>
+</html>

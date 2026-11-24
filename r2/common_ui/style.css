@@ -344,8 +344,8 @@ h3 svg {
   white-space: nowrap;
 }
 #hud { padding: 0; gap: 8px; }
-.hud-panel { display: flex; align-items: center; gap: 4px; padding: 5px 7px; }
-#host-actions:not(:has(> *)) { display: none; }
+.hud-panel { display: flex; align-items: center; gap: 0px; padding: 3px 5px; }
+#host-actions:not(:has(> :not([hidden]))) { display: none; }
 .divider {
   width: 1px;
   height: 22px;
@@ -359,6 +359,7 @@ h3 svg {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-inline-start: 2px;
 }
 /* 轴名与读数按同一条基线排列；输入框上方多留 2px，让数字的视觉中心落在跳转箭头的中线上。 */
 #teleport label {
@@ -496,14 +497,14 @@ h3 svg {
   align-items: center;
   gap: 3px;
   font-size: 12px;
-  padding: 0 2px 5px;
+  padding: 0 2px 5px calc(2px + 1ch);
   letter-spacing: 0.1px;
 }
 #render-backend {
   margin-left: auto;
   font-size: 10.5px;
   line-height: 16px;
-  padding: 0 5px;
+  padding: 0 2px;
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.06);
   text-decoration: none;
@@ -710,6 +711,26 @@ body.hud-hidden #photo-progress {
   padding: 16px;
   overflow: auto;
 }
+.info-details {
+  margin: 0;
+  font-size: 12px;
+}
+.info-details div {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  gap: 16px;
+  border-bottom: 1px solid #edf0f0;
+}
+.info-details dt {
+  color: var(--muted);
+}
+.info-details dd {
+  margin: 0;
+  text-align: right;
+  font-family: var(--mono);
+}
+
 .popover:not([data-placed]) {
   visibility: hidden;
 }
@@ -752,7 +773,7 @@ body[data-sheet="bottom"] #settings {
 body[data-sheet] #hud,
 body[data-sheet] #map-hud,
 body[data-sheet] #movepad,
-body[data-sheet] #info {
+body[data-sheet] .popover {
   display: none !important;
 }
 body[data-sheet="side-full"] #toolbar {
@@ -902,6 +923,77 @@ dialog::backdrop {
 .dialog-footer .button {
   min-width: 72px;
 }
+/* 帮助的标题栏固定，只有说明区域滚动，短屏上也能随时关闭。 */
+#help {
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(80dvh, 800px);
+}
+.help-content {
+  padding-top: 0;
+}
+.help-content h3 {
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 16px;
+  margin-bottom: 10px;
+}
+.help-content > h3:first-child {
+  border: 0;
+}
+.help-icons {
+  display: grid;
+  grid-template-columns: 10em 1fr;
+  column-gap: 16px;
+  row-gap: 10px;
+  align-items: start;
+  margin: 0;
+}
+.help-icons dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.help-icons dt:not(:has(svg)) {
+  padding-left: 27px;
+}
+.help-icons svg {
+  width: 20px;
+  height: 20px;
+}
+.help-icons dd {
+  margin: 0;
+  color: #394747;
+  text-wrap: pretty;
+}
+.help-about a {
+  color: #096562;
+}
+.help-about {
+  container-type: inline-size;
+}
+.help-banner {
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: min(12px, 2.3cqw);
+  line-height: 1.08;
+  color: #235a58;
+  background: rgba(144, 175, 172, 0.12);
+  padding: 14px 0;
+  text-align: left;
+  white-space: pre;
+  overflow: auto;
+}
+@media (max-width: 440px) {
+  .help-icons {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .help-icons dd {
+    margin: 0 0 8px 27px;
+  }
+}
+
 #preset-dialog {
   width: min(380px, calc(100vw - 32px));
 }
@@ -989,11 +1081,6 @@ body.map-open #movepad {
     flex-wrap: wrap;
     justify-content: center;
     row-gap: 0;
-  }
-  #teleport {
-    order: -1;
-    flex-basis: 100%;
-    justify-content: center;
   }
   #hud { row-gap: 4px; }
   #map-selection {
