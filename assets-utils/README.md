@@ -1,9 +1,21 @@
-# assets-utils
+# R2 材质资源
 
-这里保存 R2 默认的方块模型、纹理，以及从材质包生成替换资源的工具。Go 导入路径为 `neomega-view-utils/r2assets`，包名为 `r2assets`。
+方块数据只携带状态哈希。渲染器需要同版本的状态映射、模型和贴图，才能把每个哈希画成对应的方块。要让用户替换纹理，还需要知道各个面的贴图名、采样方向和原版像素。这两种输入分别发布为 ZIP。
 
-- [sourceassets](sourceassets/) 保存生成时使用的几何、材质和原始图集。可以打开 [atlas.png](sourceassets/atlas.png) 查看源纹理。素材来源见 [第三方声明](sourceassets/THIRD_PARTY_NOTICES.txt)。
-- [assets.zip](assets.zip) 保存随程序分发的资源，包括状态到模型的映射、几何表和颜色、法线、高光贴图。演示服务和离线导出工具直接读取归档。部署到普通静态服务器时，解压归档即可得到可挂载的 `assets/` 目录。Go 程序嵌入压缩后的 `assets.zip`，通过 `r2assets.Files` 按原文件名读取内容。Viewer 可直接将归档中的压缩数据作为 gzip 响应发送给浏览器，浏览器解压后再上传给 GPU。
-- `r2assets.OpenCatalog` 读取默认模型目录。`r2assets.BuildTextures(path, maxSize)` 从目录或 ZIP 合成材质包，传入空路径时按指定的贴图尺寸合成原版材质。
+- [默认材质包](default-materials.zip) 可以直接绘制方块和附魔书。使用 `r2-core.js` 时，可将 ZIP 字节交给 `openMaterialPack`，也可解压后用 `assets` 指向其中的 `assets/` 目录。Go 宿主通过 `r2assets.Files` 读取同一归档。
+- [合成信息包](material-info.zip) 保存原版图集、贴图配方，以及重算模型分类所用的三张基表。核心调用者用 `compileMaterialPack` 传入该归档与用户选择的材质。标准前端已内嵌两个匹配的归档。
 
-从本目录运行 `go generate` 可根据源数据重建 `assets.zip`。运行 `go test ./...` 检查模型表、方块状态映射与材质包转换。
+## 重建材质
+
+[sourceassets](sourceassets/) 是建表所用的几何、原始材质和图集。Go 生成方块状态映射、几何和配方，Node 再运行浏览器使用的 TypeScript 合成算法，写出两个归档。分发带默认材质的前端时，请随附[素材来源声明](sourceassets/THIRD_PARTY_NOTICES.txt)。
+
+在本目录运行以下命令。
+
+```sh
+npm ci --prefix ../r2
+go generate
+go test ./...
+npm --prefix ../r2 test
+```
+
+Go 测试检查模型与方块状态映射。TS 测试将空覆盖包的合成结果与归档逐字节比较，并检查用户贴图的透明孔、缩小层、动画首帧与基岩材质通道。

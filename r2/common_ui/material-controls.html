@@ -1,0 +1,14 @@
+<section aria-label="材质包">
+  <h3>材质包</h3>
+  <div class="button-row">
+    <button id="texture-browse" type="button" class="button">选择 ZIP</button>
+    <button id="texture-directory" type="button" class="button">选择目录</button>
+    <button id="texture-reset" type="button" class="button">恢复默认</button>
+  </div>
+  <input hidden id="texture-file" type="file" accept=".zip,.mcpack">
+  <input hidden id="texture-files" type="file" webkitdirectory multiple>
+  <label class="setting">贴图尺寸上限<select id="texture-size">
+    <option>16</option><option>32</option><option>64</option><option selected>128</option><option>256</option><option>512</option>
+  </select></label>
+  <p id="texture-status" role="status">默认材质</p>
+</section>

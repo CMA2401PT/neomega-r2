@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-//go:embed assets.zip
+//go:embed default-materials.zip
 var packedAssets string
 
 // Files 按 assets/ 下的原文件名读取默认资源。只有被读取的文件才会展开。

@@ -67,4 +67,14 @@ test("失败区域退出等待，邻区完成不会掩盖错误，重新提交�
   session.focus([8192, 64, 8192], { nearRadius: 2, farRadius: 8 });
   assert.equal(session.stats.failed, 0);
   assert.equal(session.stats.failure, undefined);
+
+  // 半径以区块给出，数据源应只收到整数区域坐标，包括负半轴上的窗口。
+  session.focus([-145, 64, -145], {nearRadius: 1, farRadius: 1});
+  assert.equal(session.stats.wanted, 4);
+  assert.ok(wanted.at(-1).regions.add.every(({x,z}) => Number.isInteger(x) && Number.isInteger(z)));
+  const requests = wanted.length;
+  session.focus([-145, 64, -145], {nearRadius: 1, farRadius: 8});
+  assert.equal(wanted.length, requests);
+  session.focus([-145, 64, -145], {nearRadius: 1, farRadius: 9});
+  assert.equal(session.stats.wanted, 16);
 });

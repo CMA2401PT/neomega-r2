@@ -24,3 +24,5 @@ rmSync(join(root, "demo/dist"), { recursive: true, force: true });
 execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "demo")], {
   stdio: "inherit",
 });
+
+await import("./release.mjs");

@@ -41,6 +41,8 @@ export interface WorldSink {
   error(x: number, z: number, error: unknown): void;
 }
 
+declare const R2_SCENE_WORKER: string;
+
 /** 世界数据源。会话打开时调用 open，之后用 want 告知需要的区域与近景对象；
  * 数据源为需要的区域调用 sink.region（以及 sink.objects），可以立即、稍后或在内容变化时重复调用。 */
 export interface DataSource {
@@ -53,7 +55,7 @@ export interface DataSource {
 export interface Focus {
   /** 近景对象的范围，单位区块。 */
   nearRadius: number;
-  /** 远景（静态方块）的范围，单位区块。 */
+  /** 远景静态方块的半径，以区块计，向上取整至完整区域（8 个区块）。 */
   farRadius: number;
   /** 近景对象跟随的位置；省略时与远景位置相同。地图视角下传主相机位置，收起地图时无需重新加载对象。 */
   nearPosition?: number[];
@@ -64,7 +66,7 @@ export interface SessionOptions {
   registry: ObjectRegistry;
   /** 数据源报告的错误与准备失败；会话继续运行。 */
   onError?: (message: string) => void;
-  /** 准备线程脚本的地址，默认与本模块同一构建目录下的 scene/worker.js。 */
+  /** 自定义准备线程的地址。独立 JS 内嵌线程，目录版从 scene/worker.js 加载。 */
   workerURL?: string | URL;
   /** 文件页面可提供已打包的 classic Blob worker。默认使用模块 worker。 */
   workerType?: WorkerType;
@@ -166,9 +168,15 @@ export class WorldSession {
       ),
     );
     this.gpu = renderer.createWorld();
-    this.worker = new Worker(options.workerURL ?? new URL("../scene/worker.js", import.meta.url), {
-      type: options.workerType ?? "module",
-    });
+    // 独立入口内嵌准备线程，跨域加载核心的页面也能从自身来源启动 Worker。
+    if (!options.workerURL && typeof R2_SCENE_WORKER !== "undefined") {
+      const url = URL.createObjectURL(new Blob([R2_SCENE_WORKER], {type: "text/javascript"}));
+      try { this.worker = new Worker(url); } finally { URL.revokeObjectURL(url); }
+    } else {
+      this.worker = new Worker(options.workerURL ?? new URL("../scene/worker.js", import.meta.url), {
+        type: options.workerType ?? "module",
+      });
+    }
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.message(event.data);
     this.worker.onerror = (event) => this.onError(event.message);
     this.post({ type: "init", catalog: renderer.catalog, states: renderer.states });
@@ -214,17 +222,19 @@ export class WorldSession {
     if (this.disposed || this.textureChange) return;
     const center = nearPosition.map((v) => Math.floor(v / 16)),
       farCenter = position.map((v) => Math.floor(v / 128 + 0.5)),
-      signature = `${center.join("/")}/${farCenter.join("/")}/${nearRadius}/${farRadius}`;
+      regionRadius = Math.ceil(farRadius / 8),
+      signature = `${center.join("/")}/${farCenter.join("/")}/${nearRadius}/${regionRadius}`;
     if (signature === this.signature) return;
     this.signature = signature;
     this.center = center;
     this.farCenter = position.map((v) => v / 16);
     this.nearRadius = nearRadius;
-    const side = farRadius * 32,
+    // 订阅和显存目录都以 128 格宽的完整区域对齐。
+    const side = regionRadius * 2 * 128,
       origin = [
-        Math.floor(position[0] / 128 + 0.5) * 128 - side / 2,
+        (farCenter[0] - regionRadius) * 128,
         -64,
-        Math.floor(position[2] / 128 + 0.5) * 128 - side / 2,
+        (farCenter[2] - regionRadius) * 128,
       ];
     this.gpu.setWindow(origin, [side, 512, side]);
     const wanted = new Map<string, RegionCoord & { visible: boolean }>();

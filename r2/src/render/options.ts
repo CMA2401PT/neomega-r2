@@ -27,7 +27,7 @@ export interface RendererOptions {
   useWebGPU?: boolean;
   /** 资源目录的 URL，以 / 结尾。 */
   assets?: string;
-  /** 离线宿主按文件名提供着色器、模型与贴图。省略时从模块与 assets 目录读取。 */
+  /** 按文件名提供模型与贴图。目录版离线播放器还用此回调提供着色器；独立 JS 自带着色器。 */
   readResource?: (name: string) => Promise<Response>;
   /** 启动时编译的预览档，默认 shading；其他档第一次需要时用 compile() 编译。 */
   tier?: PreviewTier;

@@ -17,7 +17,7 @@ import (
 	java "neomega-blocks/presets/java/v1"
 	"neomega-view-utils/r2assets/internal/modeldata"
 	geometry "neomega-view-utils/r2assets/internal/sourcegeometry"
-	"neomega-view-utils/r2assets/internal/texturepack"
+	"os/exec"
 )
 
 type cubeMaterial struct {
@@ -81,7 +81,7 @@ func generate() error {
 	}
 	fastIDs := map[cubeKey]uint32{}
 	recipes := &textureRecipes{
-		manifest: texturepack.Manifest{Textures: map[string][4]float32{}},
+		manifest: Manifest{Textures: map[string][4]float32{}},
 		ids:      map[string]int{},
 	}
 	shapeIDs := map[string]uint32{}
@@ -213,15 +213,10 @@ func generate() error {
 	catalog.Statistics["models"] = len(catalog.Models)
 	catalog.Statistics["cubeModels"] = len(fastIDs)
 	catalog.Statistics["unsupportedStates"] = len(catalog.Unsupported)
-	var headers []uint32
-	for _, model := range catalog.Models {
-		headers = append(headers, model.Kind, model.Offset, model.Count, model.Group)
-	}
 	for name, data := range map[string]any{
-		"headers.bin":         headers,
-		"fast.bin":            fast,
-		"quad-references.bin": references,
-		"quad-records.bin":    surfaces,
+		"base-fast.bin":         fast,
+		"quad-references.bin":   references,
+		"base-quad-records.bin": surfaces,
 	} {
 		f, err := os.Create(filepath.Join(output, name))
 		if err != nil {
@@ -255,7 +250,7 @@ func generate() error {
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile(filepath.Join(output, "catalog.json"), encoded, 0644); err != nil {
+	if err = os.WriteFile(filepath.Join(output, "base-catalog.json"), encoded, 0644); err != nil {
 		return err
 	}
 	manifest, err := json.Marshal(recipes.manifest)
@@ -274,26 +269,6 @@ func generate() error {
 			return err
 		}
 	}
-	// 原始表供每次换包重新推导，避免继承上一包的透明分类和图集区域。
-	for _, name := range []string{"catalog.json", "fast.bin", "quad-records.bin"} {
-		data, err := os.ReadFile(filepath.Join(output, name))
-		if err != nil {
-			return err
-		}
-		if err = os.WriteFile(filepath.Join(output, "base-"+name), data, 0644); err != nil {
-			return err
-		}
-	}
-	set, err := texturepack.Build(os.DirFS(output), nil, 128)
-	if err != nil {
-		return err
-	}
-	for name, data := range set.Files {
-		if err = os.WriteFile(filepath.Join(output, name), data, 0644); err != nil {
-			return err
-		}
-	}
-
 	summary, err := json.MarshalIndent(catalog.Statistics, "", "  ")
 	if err != nil {
 		return err
@@ -307,5 +282,7 @@ func generate() error {
 			}
 		}
 	}
-	return packAssets(output)
+	cmd := exec.Command("node", "../r2/scripts/material-packs.mjs", output)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }

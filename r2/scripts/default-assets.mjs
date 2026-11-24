@@ -2,7 +2,7 @@
 import { fileURLToPath } from "node:url";
 import AdmZip from "adm-zip";
 
-export const defaultAssets = new AdmZip(fileURLToPath(new URL("../../assets-utils/assets.zip", import.meta.url)));
+export const defaultAssets = new AdmZip(fileURLToPath(new URL("../../assets-utils/default-materials.zip", import.meta.url)));
 
 /** 将归档条目的 DEFLATE 数据封装为 gzip，让演示服务直接发送已压缩的资源。 */
 export function gzipAsset(entry) {

@@ -1,5 +1,5 @@
 // Package r2 嵌入渲染核心的构建产物，供 Go 宿主通过 HTTP 提供。
-// 资源包由 neomega-view-utils/r2assets 提供，不在本模块内。
+// dist 包含三个浏览器入口及可单独下载的材质包。
 package r2
 
 import "embed"

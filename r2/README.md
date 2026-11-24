@@ -19,13 +19,46 @@ npm run demo
 
 ## 接入自己的页面
 
-运行 `npm run build` 后，将整个 `dist/` 作为静态目录提供给浏览器。演示页把它挂在 `/r2/`，从[默认资源归档](../assets-utils/assets.zip)读取模型和贴图，通过 `/assets/` 提供给浏览器。普通静态服务器可解压这份归档，将其中的 `assets/` 目录挂在同一路径。沿用这两个路径，就可以在含有 `<canvas>` 的页面中用模块脚本绘制一块石台和一个玻璃方块。
+运行 `npm run build`，可在 `dist/` 得到三个独立的浏览器 ES 模块，以及供自建核心选择的两个材质归档。将所需 JS 放到静态站点，HTML 即可按 URL 导入。跨站点提供模块时，静态服务器需要允许页面跨域读取。TypeScript 项目也可以从 `neomega-r2/r2-frontend`、`neomega-r2/r2-core` 和 `neomega-r2/r2-link` 导入，各入口附带类型声明。
+
+### 使用标准前端
+
+标准前端管理渲染、相机、设置与帧循环。构建后，在静态服务器上打开 `dist/standalone.html` 即可运行[完整示例](examples/standalone.html)。也可以只把这个 HTML 和 `r2-frontend.js` 复制到自己的站点。示例在浏览器内生成一块草地，宿主提供的按钮可以把相机移回起点。
+
+```html
+<!doctype html>
+<meta charset="utf-8">
+<style>body { margin: 0 } #world { height: 100dvh }</style>
+<div id="world"></div>
+<button id="home">返回起点</button>
+<script type="module">
+  import { mount, MemoryWorld, memorySource } from "./r2-frontend.js";
+
+  const world = new MemoryWorld();
+  world.fill([0, 0, 0], [31, 0, 31], 'minecraft:grass_block ["snowy"="false"]');
+  const camera = { position: [16, 8, 32], yaw: 0, pitch: -0.45 };
+  const home = document.querySelector("#home");
+  const view = await mount(document.querySelector("#world"), {
+    source: memorySource(world), camera, actions: home,
+    chunks: () => world.chunkIndex(),
+  });
+  home.onclick = () => view.moveCamera(camera);
+</script>
+```
+
+`actions` 接收宿主的 DOM 元素。挂载期间元素位于独立的底栏面板内，原有按钮和事件处理器继续使用。前端在容器内用独立文档隔离样式、键盘与控件 ID。可通过 `await view.setScene({ source, camera, name, chunks })` 切换到另一个数据源。离开页面组件时调用 `view.dispose()` 关闭当前源、释放渲染资源并归还按钮。修改同一个内存世界时，使用 `world.commit()` 通知当前会话即可。
+
+前端自带默认材质包和合成信息包。设置面板支持选择 ZIP、选择目录及恢复默认，也可在代码里调用 `await view.setMaterialPack(file)` 或 `await view.setMaterialPack(null)`。
+
+### 自己接线的渲染核心
+
+核心自带渲染代码、着色器和区域准备线程。模型和贴图由调用者显式提供。将[默认材质包](../assets-utils/default-materials.zip)解压到页面旁边，准备好 `<canvas>` 元素后，下面的模块脚本即可绘制石台和玻璃方块。
 
 ```js
-import { createRenderer, MemoryWorld, memorySource, ObjectRegistry, WorldSession } from "/r2/index.js";
+import { createRenderer, MemoryWorld, memorySource, ObjectRegistry, WorldSession } from "./r2-core.js";
 
 const canvas = document.querySelector("canvas");
-const renderer = await createRenderer(canvas, { assets: "/assets/" });
+const renderer = await createRenderer(canvas, { assets: "./assets/" });
 
 const world = new MemoryWorld();
 world.fill([0, 0, 0], [15, 0, 15], "minecraft:stone");
@@ -48,11 +81,35 @@ requestAnimationFrame(frame);
 
 ### 世界会话与数据源
 
-示例中的 `WorldSession` 把数据源接到渲染器。每帧先用 `focus` 指定相机周围需要哪些区块，其中 `nearRadius` 控制活动对象的范围，`farRadius` 控制静态方块的范围，两者都以区块为单位。区域在后台准备好后，`publish` 把它交给 GPU，随后 `draw` 绘制当前画面。
+示例中的 `WorldSession` 把数据源接到渲染器。每帧先用 `focus` 指定相机周围需要哪些区块，其中 `nearRadius` 控制活动对象的范围，`farRadius` 控制静态方块的范围，两者都以区块为单位。一个区域横跨 8 个区块，因此远景半径向上取 8 的整倍数，传入 1 至 8 的窗口大小相同。区域在后台准备好后，`publish` 把它交给 GPU，随后 `draw` 绘制当前画面。
+
+数据源负责提供完整方块状态的正确哈希。核心直接用哈希查调用者所选版本的模型表。
 
 使用内存世界时，修改方块后调用 `world.commit()` 即可更新画面。如果世界由另一个进程提供，可以将示例中的 `memorySource(world)` 换成 `r2linkSource(url)`，通过 WebSocket 接收区域。关闭页面或切换世界时，调用 `session.dispose()` 释放会话。结束绘制后再调用 `renderer.dispose()`。[R2Link 协议与 Go 数据源](../go-link/README.md)
 
-需要相机操作、地图和拍照工具栏时，可以复用 [common_ui](common_ui/)。完整的页面接入示例见 [demo/index.html](demo/index.html) 和 [demo/main.ts](demo/main.ts)。Go 宿主可以通过 `r2.Files` 提供构建产物，因此应在编译 Go 程序前运行 `npm run build`。
+直接使用 ZIP 时，传入 `readResource: openMaterialPack(bytes)`，其中 `bytes` 为默认材质包的 `Uint8Array`。自带资源也可以通过同一个回调按文件名返回 `Response`。需要导入 Java 或基岩材质包时，使用与当前模型匹配的合成信息包。
+
+```js
+import { compileMaterialPack } from "./r2-core.js";
+
+const info = new Uint8Array(await (await fetch("./material-info.zip")).arrayBuffer());
+const set = await compileMaterialPack(info, fileInput.files[0], 128);
+await session.setTextures(set);
+```
+
+### 从远端接入场景
+
+`r2-link.js` 提供 WebSocket 数据源，核心和标准前端都可接收它。握手给出场景名与可选的开场相机。之后的相机消息通过回调交给宿主。下面的片段将已经挂载的 `view` 切换到远端世界。
+
+```js
+import { r2linkSource } from "./r2-link.js";
+
+const source = r2linkSource("ws://127.0.0.1:2414/r2link", {
+  onCamera: camera => view.moveCamera(camera),
+});
+const { scene, camera } = await source.welcome;
+await view.setScene({ source, name: scene.name, camera, chunks: () => source.chunks() });
+```
 
 ## 按需扩展
 
@@ -72,7 +129,7 @@ requestAnimationFrame(frame);
 
 ### 材质包怎样替换贴图
 
-Go 宿主用 `r2assets.BuildTextures` 将材质包目录或 ZIP 转为 R2 贴图集。Java 材质包可直接提供 labPBR 法线与高光图。基岩材质包按方块纹理名匹配 `textures/blocks` 下的材质定义，支持 PNG 与常量颜色。基岩高度图用于生成法线，让表面随光照呈现浅浮雕的凹凸。导入器按相邻纹素的高度差，以 1/16 的强度生成法线。斜看表面时，浅视差让矿粒和砖缝露出窄边。每张高度图的最高点落在方块面上，其他纹素按与最高点的灰度差向内下沉，黑白全量程对应 1/32 格。平坦的高度图没有落差。这两个尺度都是 R2 的转换约定。金属度、自发光与粗糙度转换为高光贴图。浏览器用 `readTextureStream` 从响应流逐个读取贴图和模型表，再用 `session.setTextures` 更新当前世界的贴图和区域数据。估算完整方块的贴图显存时，将各级纹理的像素数之和乘以层数、每像素 4 字节和 3 组纹理（颜色、法线、高光）。复杂模型的图集另计。[材质包与资源工具](../assets-utils/README.md)
+浏览器在 Worker 中读取材质包目录或 ZIP，按配方生成完整方块的纹理层、复杂模型的图集及配套模型表。Java 材质包可直接提供 labPBR 法线与高光图。基岩材质包按方块纹理名匹配 `textures/blocks` 下的材质定义，支持 PNG 与常量颜色。基岩高度图用于生成法线，让表面随光照呈现浅浮雕的凹凸。导入器按相邻纹素的高度差，以 1/16 的强度生成法线。斜看表面时，浅视差让矿粒和砖缝露出窄边。每张高度图的最高点落在方块面上，其他纹素按与最高点的灰度差向内下沉，黑白全量程对应 1/32 格。平坦的高度图没有落差。这两个尺度都是 R2 的转换约定。金属度、自发光与粗糙度转换为高光贴图。会话用 `session.setTextures` 将新贴图与按新透明度重新准备的区域在同一帧发布。估算完整方块的贴图显存时，将各级纹理的像素数之和乘以层数、每像素 4 字节和 3 组纹理（颜色、法线、高光）。复杂模型的图集另计。[材质包与资源工具](../assets-utils/README.md)
 
 光影档和累积档沿视线读取不透明完整方块的 labPBR 高度通道，使砖沿能挡住后方的砖缝。累积档还会沿光源方向检查砖沿投下的阴影。贴图中的粗糙度决定高光怎样散开。观察砖面时可以让阳光从侧面照入，再降低视角并横向移动。远处的砖墙只要在画面上足够大，也能看见起伏。当一块砖方块的贴图在较窄的投影方向从约 24 个像素缩到 8 个像素时，起伏会逐渐淡出。方块的外轮廓和选取位置由原模型决定。
 

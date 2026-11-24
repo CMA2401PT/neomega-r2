@@ -180,43 +180,46 @@
         </button>
       </div>
     </div>
-    <footer id="hud" class="dock panel chrome">
-      <slot name="leading-actions"></slot>
-      <form id="teleport" title="点击编辑坐标，Enter 跳转，Esc 还原">
-        <label
-          >X<input
-            id="x"
-            aria-label="X 坐标"
-            autocomplete="off"
-            spellcheck="false"
-            disabled /></label
-        ><label
-          >Y<input
-            id="y"
-            aria-label="Y 坐标"
-            autocomplete="off"
-            spellcheck="false"
-            disabled /></label
-        ><label
-          >Z<input
-            id="z"
-            aria-label="Z 坐标"
-            autocomplete="off"
-            spellcheck="false"
-            disabled /></label
-        ><button
-          id="teleport-go"
-          class="icon-button"
-          title="跳转到坐标"
-          aria-label="跳转到坐标"
-          type="submit"
-          disabled
-        >
-          <svg><use href="#i-arrow" /></svg>
-        </button>
-      </form>
-      <i class="divider"></i>
-      <slot name="actions"></slot>
+    <footer id="hud" class="dock chrome">
+      <div class="panel hud-panel">
+        <form id="teleport" title="点击编辑坐标，Enter 跳转，Esc 还原">
+          <label
+            >X<input
+              id="x"
+              aria-label="X 坐标"
+              autocomplete="off"
+              spellcheck="false"
+              disabled /></label
+          ><label
+            >Y<input
+              id="y"
+              aria-label="Y 坐标"
+              autocomplete="off"
+              spellcheck="false"
+              disabled /></label
+          ><label
+            >Z<input
+              id="z"
+              aria-label="Z 坐标"
+              autocomplete="off"
+              spellcheck="false"
+              disabled /></label
+          ><button
+            id="teleport-go"
+            class="icon-button"
+            title="跳转到坐标"
+            aria-label="跳转到坐标"
+            type="submit"
+            disabled
+          >
+            <svg><use href="#i-arrow" /></svg>
+          </button>
+        </form>
+      </div>
+      <div id="host-actions" class="panel hud-panel">
+        <slot name="leading-actions"></slot>
+        <slot name="actions"></slot>
+      </div>
     </footer>
     <footer id="map-hud" class="dock panel" hidden>
       <output id="map-selection">单击方块选点</output><i class="divider"></i

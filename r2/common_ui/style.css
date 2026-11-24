@@ -343,6 +343,9 @@ h3 svg {
   padding: 5px 7px;
   white-space: nowrap;
 }
+#hud { padding: 0; gap: 8px; }
+.hud-panel { display: flex; align-items: center; gap: 4px; padding: 5px 7px; }
+#host-actions:not(:has(> *)) { display: none; }
 .divider {
   width: 1px;
   height: 22px;
@@ -992,9 +995,7 @@ body.map-open #movepad {
     flex-basis: 100%;
     justify-content: center;
   }
-  #teleport + .divider {
-    display: none;
-  }
+  #hud { row-gap: 4px; }
   #map-selection {
     flex-basis: 100%;
     min-width: 0;

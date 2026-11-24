@@ -4,12 +4,26 @@ import (
 	"encoding/json"
 	"math"
 	geometry "neomega-view-utils/r2assets/internal/sourcegeometry"
-	"neomega-view-utils/r2assets/internal/texturepack"
 )
+
+// Part 保留配方中的名字和采样方向，覆盖层换图时才能连同染色一起重建。
+type Part struct {
+	Texture string     `json:"texture"`
+	UV      [6]float64 `json:"uv"`
+	Tint    [3]float32 `json:"tint"`
+	Cutout  bool       `json:"cutout,omitempty"`
+}
+
+// Manifest 保留原版回退区域、立方体合成配方和四边形记录对应的贴图名字。
+type Manifest struct {
+	Textures map[string][4]float32 `json:"textures"`
+	Layers   [][]Part              `json:"layers"`
+	Quads    []string              `json:"quads"`
+}
 
 // textureRecipes 用名字参与去重，让像素相同但名字不同的贴图仍能分别替换。
 type textureRecipes struct {
-	manifest texturepack.Manifest
+	manifest Manifest
 	ids      map[string]int
 }
 
@@ -48,7 +62,7 @@ func (r *textureRecipes) cube(m cubeMaterial, quads []geometry.Quad) [6][16]floa
 			float32(representative[2]) / 255,
 			float32(representative[3]) / 255,
 		}
-		var parts []texturepack.Part
+		var parts []Part
 		for _, q := range qs {
 			r.registerTexture(q)
 			axis := face / 2
@@ -63,7 +77,7 @@ func (r *textureRecipes) cube(m cubeMaterial, quads []geometry.Quad) [6][16]floa
 				uv[1][0][0] - uv[0][0][0], uv[1][0][1] - uv[0][0][1],
 				uv[0][1][0] - uv[0][0][0], uv[0][1][1] - uv[0][0][1],
 			}
-			part := texturepack.Part{
+			part := Part{
 				Texture: q.Surface.Texture,
 				UV:      [6]float64{0, 0, 1, 0, 0, 1},
 				Tint:    [3]float32{1, 1, 1},
