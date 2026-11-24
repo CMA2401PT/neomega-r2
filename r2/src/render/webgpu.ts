@@ -414,6 +414,7 @@ export async function createWebGPURenderer(
     function submitFrame(camera: Camera, o: DrawOptions) {
       const tier = o.accumulate ? "accumulation" : (o.tier ?? "shading");
       if (fatal) throw Error(fatal);
+      const model = o.superResolution ?? "off";
       if (!o.accumulate || film?.width !== o.width || film?.height !== o.height) cancelAccumulation();
       // 每次只接受一张交互画面。GPU 忙时让宿主继续处理输入，下次绘制直接取最新相机。
       if (!programs.has(tier) || pendingFrame) return false;
@@ -425,7 +426,7 @@ export async function createWebGPURenderer(
       if (!o.accumulate) waterTime = o.time ?? 0;
       objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
       const stamp = sampleGeneration;
-      const tiled = !!o.accumulate && o.width * o.height > FULL_SAMPLE_PIXELS;
+      const tiled = !!o.accumulate && film.width * film.height > FULL_SAMPLE_PIXELS;
       const currentFilm = film, target = film.next(), sample = samples;
       const timingEpoch = epoch, opts = { ...o, time: waterTime };
       const view = { ...camera, position: camera.position.slice() };
@@ -437,8 +438,8 @@ export async function createWebGPURenderer(
           if (tiled) tileProgress = { done: tile, total };
           if (last) {
             const denoise = tier === "accumulation" && !o.debug ? outputSettings.accumulationFilter : "off";
-            currentFilm.composite(enc, exposure, !!o.debug, denoise === "off" ? queries : null);
-            displayedFrame = currentFilm.displayImage(enc, denoise, queries);
+            currentFilm.composite(enc, exposure, !!o.debug, denoise === "off" && model === "off" ? queries : null);
+            displayedFrame = currentFilm.displayImage(enc, denoise, model, o.displaySize ?? o, queries);
             present(enc, displayedFrame);
             submitTimedFrame(enc, timingEpoch);
           } else device.queue.submit([enc.finish()]);
@@ -547,9 +548,14 @@ export async function createWebGPURenderer(
         void compileProgram(program).catch((error) => {
           compileError = error;
         });
+      const model = o.superResolution ?? "off";
+      const pngScale = model !== "off" && o.saveSuperResolution2x ? 2 : 1;
+      const pngSize = { width: width * pngScale, height: height * pngScale };
+      if (Math.max(pngSize.width, pngSize.height) > device.limits.maxTextureDimension2D)
+        throw Error("PNG 的边长超过设备上限，请降低输出尺寸或关闭「保存 2× 超分原图」。");
       const f = frameFilm(device, fx, historyLayout, width, height),
         view = { ...camera, position: camera.position.slice() },
-        grid = Math.max(1, Math.round(o.supersample ?? (tier === "accumulation" ? 1 : 4))),
+        grid = Math.max(1, Math.round(o.supersample ?? 1)),
         total = tier === "accumulation" ? Infinity : grid * grid;
       let done = 0,
         tile = 0,
@@ -602,24 +608,26 @@ export async function createWebGPURenderer(
             },
           );
         },
-        present() {
+        present(displaySize?: { width: number; height: number }) {
+          const size = model !== "off" && displaySize ? displaySize : o;
+          const resized = canvas.width !== size.width || canvas.height !== size.height;
           const denoise = tier === "accumulation" ? outputSettings.accumulationFilter : "off";
-          if (done && !closed && (done > presented || denoise !== presentedDenoise)) {
+          if (done && !closed && (done > presented || denoise !== presentedDenoise || resized)) {
             presentedDenoise = denoise;
             presented = done;
             const enc = device.createCommandEncoder();
-            present(enc, f.displayImage(enc, denoise));
+            present(enc, f.displayImage(enc, denoise, model, size));
             device.queue.submit([enc.finish()]);
           }
         },
         async png() {
           const enc = device.createCommandEncoder();
-          const image = f.displayImage(enc, tier === "accumulation" ? outputSettings.accumulationFilter : "off");
+          const image = f.displayImage(enc, tier === "accumulation" ? outputSettings.accumulationFilter : "off", model, pngSize);
           device.queue.submit([enc.finish()]);
           const data = await readTexture(device, image, 4);
-          const c = new OffscreenCanvas(width, height);
+          const c = new OffscreenCanvas(pngSize.width, pngSize.height);
           c.getContext("2d")!.putImageData(
-            new ImageData(new Uint8ClampedArray(data.buffer), width, height),
+            new ImageData(new Uint8ClampedArray(data.buffer), pngSize.width, pngSize.height),
             0,
             0,
           );

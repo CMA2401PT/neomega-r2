@@ -15,7 +15,9 @@ export const settingInputs = [
   ["resolution", "resolution"],
   ["speed", "speed"],
   ["fog", "fog"],
+  ["super-resolution", "superResolution"],
   ["accumulation-filter", "accumulationFilter"],
+  ["save-sr-2x", "saveSuperResolution2x"],
   ["photo-scale", "photoScale"],
   ["photo-supersample", "photoSupersample"],
   ["export-scale", "exportScale"],
@@ -97,8 +99,9 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
   for (const [id, key] of settingInputs) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
     input.addEventListener(id === "time" ? "input" : "change", () => {
-      if (key === "fog") settings.fog = (input as HTMLInputElement).checked;
+      if (key === "fog" || key === "saveSuperResolution2x") settings[key] = (input as HTMLInputElement).checked;
       else if (key === "resolution") settings.resolution = input.value;
+      else if (key === "superResolution") settings.superResolution = input.value as ViewSettings["superResolution"];
       else if (key === "accumulationFilter") settings.accumulationFilter = input.value as NonNullable<ViewSettings["accumulationFilter"]>;
       else settings[key] = Number(input.value);
       changed(key);
@@ -108,7 +111,13 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
   function syncInputs() {
     for (const [id, key] of settingInputs) {
       const input = element<HTMLInputElement | HTMLSelectElement>(id);
-      if (key === "fog") (input as HTMLInputElement).checked = settings.fog;
+      if (key === "fog" || key === "saveSuperResolution2x") (input as HTMLInputElement).checked = !!settings[key];
+      else if (key === "resolution" && input instanceof HTMLSelectElement) {
+        // 旧窗口倍数在非整数像素比的显示器上可能对应一个自定义屏幕倍数。
+        if (![...input.options].some(option => option.value === settings.resolution))
+          input.add(new Option("屏幕尺寸 " + Number(settings.resolution.slice(7)).toFixed(3) + "×", settings.resolution));
+        input.value = settings.resolution;
+      }
       else input.value = String(settings[key]);
     }
   }
@@ -130,8 +139,6 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
       if (settings[key]) settings[exclusive[key]] = false;
       changed(key);
     };
-  element<HTMLSelectElement>("resolution").options[0].textContent =
-    `屏幕原生（${+devicePixelRatio.toFixed(2)}×）`;
   // 隐藏后按钮换成划掉的眼睛，表示 HUD 当前收起；按钮本身不显示按下态。
   const eye = element<HTMLButtonElement>("eye");
   eye.onclick = () => {

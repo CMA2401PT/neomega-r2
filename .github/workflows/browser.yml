@@ -1,0 +1,62 @@
+name: 构建浏览器入口与材质包
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: neomega-r2
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: CMA2401PT/neomega-blocks
+          ref: 9e6d41fb90ede80d51e16135c177a8c14757a93d
+          path: neomega-blocks
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: CMA2401PT/neomega-nbt
+          ref: 0cc62741e754672e8255ead4eda4e4456ca1129d
+          path: neomega-nbt
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: neomega-r2/assets-utils/go.mod
+          cache-dependency-path: neomega-r2/assets-utils/go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: neomega-r2/r2/package-lock.json
+      - run: npm ci
+        working-directory: neomega-r2/r2
+      - name: 从原始模型与贴图生成两个材质包
+        working-directory: neomega-r2/assets-utils
+        run: |
+          go generate
+          go test ./...
+      - name: 构建并验证独立入口
+        working-directory: neomega-r2/r2
+        run: |
+          npm run build
+          npm run check
+          npm test
+          mkdir -p "$RUNNER_TEMP/r2-browser"
+          cp dist/{r2-core.js,r2-frontend.js,r2-link.js,default-materials.zip,material-info.zip} "$RUNNER_TEMP/r2-browser/"
+          cp ../assets-utils/sourceassets/THIRD_PARTY_NOTICES.txt "$RUNNER_TEMP/r2-browser/"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: r2-browser
+          path: ${{ runner.temp }}/r2-browser/
+          if-no-files-found: error

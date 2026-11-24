@@ -4,6 +4,8 @@
 export type PreviewTier = "voxel" | "basic" | "shading";
 /** 四档绘制器；accumulation 在光影之上加软阴影与漫反射反弹，静止累积与拍照专用。 */
 export type Tier = PreviewTier | "accumulation";
+/** WebGPU 输出使用的 2× 超分模型。WebGL 始终按目标尺寸绘制。 */
+export type SuperResolution = "off" | "cnn-xs" | "cnn-s";
 export type AccumulationFilter = "off" | "light" | "medium" | "high";
 
 /** 固定取周围一圈像素。档位越高，参与平均的色差范围和平均色的占比越大。 */
@@ -72,6 +74,10 @@ export function frameExposure(sunHeight: number, ev = 0, adapt = true): number {
 }
 
 export interface DrawOptions extends LightingOptions {
+  /** width、height 决定射线采样尺寸。WebGPU 可在显示前对最终画面做一次超分增强。 */
+  superResolution?: SuperResolution;
+  /** 超分增强作用的屏幕像素尺寸。省略时使用渲染宽高。 */
+  displaySize?: { width: number; height: number };
   width: number;
   height: number;
   /** 预览用哪一档，默认 shading；必须已经编译好。 */
@@ -86,12 +92,16 @@ export interface DrawOptions extends LightingOptions {
 }
 
 export interface PhotoOptions extends LightingOptions {
+  /** 创建照片时固定模型和输出尺寸，所有采样轮次按指定照片尺寸累积。 */
+  superResolution?: SuperResolution;
   width: number;
   height: number;
+  /** 启用 WebSR 时，PNG 保留原图两倍的宽高；默认保存为指定尺寸。 */
+  saveSuperResolution2x?: boolean;
   /** 用哪一档绘制，默认 accumulation：每个像素不停累积随机样本，没有上限。
    * 预览档用于导出当前画面：每个像素按 supersample×supersample 的网格取样，取满后完成。 */
   tier?: Tier;
-  /** 像素采样网格的边长。预览默认 4，采满网格即完成；累积默认 1，循环遍历网格并在格内随机取样。 */
+  /** 像素采样网格的边长。预览默认 1，采满网格即完成；累积默认 1，循环遍历网格并在格内随机取样。 */
   supersample?: number;
   /** 累积档光线最多反弹次数。 */
   bounces?: number;

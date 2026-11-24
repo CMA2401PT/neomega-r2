@@ -4,6 +4,13 @@ import { appearanceDefaults, type Appearance } from "./appearance.js";
 import { element, settingInputs } from "./hud.js";
 import type { ViewSettings } from "./types.js";
 
+/** 旧版的数字字符串按 CSS 窗口尺寸取样，换算为本显示器上的物理像素倍数。 */
+export function screenResolution(value: string): string {
+  if (!["0.5", "0.75", "1", "1.5", "2"].includes(value)) return value;
+  const scale = Number(value) / devicePixelRatio;
+  return scale === 1 ? "native" : "native-" + scale;
+}
+
 const libraryKey = "neomega-r2-render-presets";
 const format = "neomega-r2-render-preset";
 type Preset = {
@@ -41,11 +48,17 @@ function decode(value: unknown): Preset {
   if (!("autoSunColor" in a)) a.autoSunColor = true;
   // 旧参数组保存的是未经降噪的画面。
   if (!("accumulationFilter" in s)) s.accumulationFilter = "off";
+  if (!("superResolution" in s) || s.superResolution === "cnn-m") s.superResolution = "off";
+  s.saveSuperResolution2x ??= false;
+  if (typeof s.resolution === "string") s.resolution = screenResolution(s.resolution);
   function check(id: string, value: unknown) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
     let valid: boolean;
-    if (input instanceof HTMLSelectElement) {
-      valid = typeof value === (id === "resolution" || id === "accumulation-filter" ? "string" : "number") && [...input.options].some(o => o.value === String(value));
+    if (id === "resolution") {
+      valid = value === "native" || (typeof value === "string" && value.startsWith("native-") &&
+        Number.isFinite(Number(value.slice(7))) && Number(value.slice(7)) > 0);
+    } else if (input instanceof HTMLSelectElement) {
+      valid = typeof value === (id === "accumulation-filter" || id === "super-resolution" ? "string" : "number") && [...input.options].some(o => o.value === String(value));
     } else if (input.type === "checkbox") valid = typeof value === "boolean";
     else if (input.type === "color") valid = typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
     else valid = typeof value === "number" && Number.isFinite(value) && value >= Number(input.min) && value <= Number(input.max);

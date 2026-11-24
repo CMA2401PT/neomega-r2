@@ -13,10 +13,13 @@ R2 把方块世界绘制到浏览器的 WebGPU 或 WebGL 2 画布。这个仓库
 
 ## 构建与测试
 
+从 GitHub Actions 的“构建浏览器入口与材质包”工作流下载 `r2-browser`，可取得三个独立 JS 和两个材质 ZIP。推送、拉取请求和手动运行都会从源模型与贴图重建资源，再将同一版本的资源嵌入前端。
+
 在本仓库根目录运行以下命令。渲染引擎使用 Node.js 22.18 或以上版本，Go 模块使用 Go 1.25.5。Go 模块的本地替换路径指向工作区同级的 `neomega-blocks` 和 `neomega-nbt`。
 
 ```sh
 npm --prefix r2 ci
+(cd assets-utils && go generate)
 npm --prefix r2 run build
 npm --prefix r2 run check
 npm --prefix r2 test

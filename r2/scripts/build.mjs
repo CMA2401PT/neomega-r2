@@ -1,7 +1,9 @@
 // 编译 TS 并复制着色器；dist 的目录结构与 src 相同，着色器按 import.meta.url 相对路径加载。
 // 同时分发可选的共享查看界面，再编译验证页 demo/，它按 dist 的类型声明检查对核心的使用。
+import { transformSync } from "esbuild";
+import { websrModels } from "./websr-models.mjs";
 import { execFileSync } from "node:child_process";
-import { cpSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +14,20 @@ rmSync(dist, { recursive: true, force: true });
 execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", root], {
   stdio: "inherit",
 });
+// 目录版、单文件入口和离线播放器都从这个模块取得权重，使用时无需联网。
+const srModule = join(dist, "render/websr.js");
+const license = readFileSync(join(root, "vendor/websr/LICENSE"), "utf8");
+const sr = transformSync(readFileSync(join(src, "render/websr.ts"), "utf8"), {
+  loader: "ts", target: "es2023",
+  define: { R2_WEBSR_MODELS: JSON.stringify(websrModels) },
+  banner: "/*! WebSR\n" + license + "*/",
+  charset: "utf8",
+  sourcemap: "external",
+  sourcesContent: false,
+  sourcefile: "../../src/render/websr.ts",
+});
+writeFileSync(srModule, sr.code + "//# sourceMappingURL=websr.js.map\n");
+writeFileSync(srModule + ".map", sr.map);
 for (const entry of readdirSync(src, { recursive: true, withFileTypes: true }))
   if (entry.isFile() && entry.name.endsWith(".frag")) {
     const from = join(entry.parentPath, entry.name);

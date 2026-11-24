@@ -1,4 +1,4 @@
-import type { AccumulationFilter, Camera, Renderer, PreviewTier, SessionStats } from "/r2/index.js";
+import type { AccumulationFilter, Camera, SuperResolution, Renderer, PreviewTier, SessionStats } from "/r2/index.js";
 
 import type { Appearance } from "./appearance.js";
 
@@ -15,6 +15,8 @@ export interface ViewSettings {
   fog: boolean;
   stillAccumulation: boolean;
   /** 静止累积和照片的最终画面共用此档位。 */
+  superResolution?: SuperResolution;
+  saveSuperResolution2x?: boolean;
   accumulationFilter?: AccumulationFilter;
   photoScale: number;
   photoSupersample: number;

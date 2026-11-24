@@ -4,6 +4,7 @@ export {
   type RendererOptions,
   type LightingOptions,
   type AccumulationFilter,
+  type SuperResolution,
   type DrawOptions,
   type PhotoOptions,
   type Tier,

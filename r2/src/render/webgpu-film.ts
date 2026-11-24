@@ -1,4 +1,5 @@
-import { filterParameters, type AccumulationFilter } from "./options.ts";
+import { filterParameters, type AccumulationFilter, type SuperResolution } from "./options.ts";
+import { createWebSR } from "./websr.ts";
 
 export const vertex = `
 @vertex fn vert(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -95,6 +96,8 @@ export function frameFilm(
   width: number,
   height: number,
 ) {
+  let sr: ReturnType<typeof createWebSR> | undefined;
+  let upscaledFilter: AccumulationFilter | undefined;
   const textures: GPUTexture[] = [];
   function target(format: GPUTextureFormat, size: number[], levels = 1) {
     const t = device.createTexture({
@@ -163,7 +166,7 @@ export function frameFilm(
   }
 
   /** 从最近完成的原图取得显示画面，同一轮的屏幕和 PNG 可复用滤波结果。 */
-  function displayImage(enc: GPUCommandEncoder, denoise: AccumulationFilter, queries?: GPUQuerySet | null): GPUTexture {
+  function filteredImage(enc: GPUCommandEncoder, denoise: AccumulationFilter, queries?: GPUQuerySet | null): GPUTexture {
     if (denoise === "off") return output;
     if (!filtered) {
       const texture = target("rgba8unorm", [width, height]);
@@ -191,9 +194,31 @@ export function frameFilm(
   return {
     width,
     height,
-    displayImage,
+    /** 同一轮合成的屏幕与 PNG 共用超分纹理，下一轮仍从 HDR 历史开始采样。 */
+    displayImage(
+      enc: GPUCommandEncoder,
+      denoise: AccumulationFilter,
+      model: SuperResolution,
+      size: { width: number; height: number },
+      queries?: GPUQuerySet | null,
+    ): GPUTexture {
+      const image = filteredImage(enc, denoise, model === "off" ? queries : null);
+      if (model === "off") {
+        sr?.dispose();
+        sr = undefined;
+        return image;
+      }
+      if (!sr || sr.model !== model) {
+        sr?.dispose();
+        sr = createWebSR(device, model, width, height);
+        upscaledFilter = undefined;
+      }
+      const result = sr.image(enc, image, upscaledFilter !== denoise, size, queries);
+      upscaledFilter = denoise;
+      return result;
+    },
     get bytes() {
-      return width * height * (filtered ? 40 : 36) + (size[0] * size[1] * 8 * 4) / 3;
+      return (sr?.bytes ?? 0) + width * height * (filtered ? 40 : 36) + (size[0] * size[1] * 8 * 4) / 3;
     },
     next() {
       last = 1 - last;
@@ -205,31 +230,40 @@ export function frameFilm(
       downs.forEach((g, i) => pass(enc, fx.mip, g, mips[i + 1]));
       pass(enc, fx.show, frames[last].show, outputView, queries);
       filteredCurrent = false;
+      upscaledFilter = undefined;
     },
     dispose() {
       textures.forEach((t) => t.destroy());
+      sr?.dispose();
       display.destroy();
       filtered?.params.destroy();
     },
   };
 }
+/** 读回紧密排列的像素。大幅 PNG 按设备允许的缓冲大小分批读取。 */
 export async function readTexture(device: GPUDevice, texture: GPUTexture, bytes: number) {
-  const pitch = Math.ceil((texture.width * bytes) / 256) * 256;
-  const buffer = device.createBuffer({
-    size: pitch * texture.height,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
+  const row = texture.width * bytes, pitch = Math.ceil(row / 256) * 256;
+  const batch = Math.min(texture.height, Math.floor(device.limits.maxBufferSize / pitch));
+  const batches: { buffer: GPUBuffer; first: number; height: number }[] = [];
+  const packed = new Uint8Array(row * texture.height);
   try {
+    // 一起提交所有复制，后续交互帧不会覆盖尚未读到的行。
     const enc = device.createCommandEncoder();
-    enc.copyTextureToBuffer({ texture }, { buffer, bytesPerRow: pitch }, [texture.width, texture.height]);
+    for (let first = 0; first < texture.height; first += batch) {
+      const height = Math.min(batch, texture.height - first);
+      const buffer = device.createBuffer({ size: pitch * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      batches.push({ buffer, first, height });
+      enc.copyTextureToBuffer({ texture, origin: [0, first] }, { buffer, bytesPerRow: pitch }, [texture.width, height]);
+    }
     device.queue.submit([enc.finish()]);
-    await buffer.mapAsync(GPUMapMode.READ);
-    const data = new Uint8Array(buffer.getMappedRange()),
-      row = texture.width * bytes,
-      packed = new Uint8Array(row * texture.height);
-    for (let y = 0; y < texture.height; y++) packed.set(data.subarray(y * pitch, y * pitch + row), y * row);
+    for (const { buffer, first, height } of batches) {
+      await buffer.mapAsync(GPUMapMode.READ);
+      const data = new Uint8Array(buffer.getMappedRange());
+      for (let y = 0; y < height; y++) packed.set(data.subarray(y * pitch, y * pitch + row), (first + y) * row);
+      buffer.unmap();
+    }
     return packed;
   } finally {
-    buffer.destroy();
+    for (const { buffer } of batches) buffer.destroy();
   }
 }

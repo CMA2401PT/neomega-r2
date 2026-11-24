@@ -472,7 +472,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       width,
       height,
       tier = "accumulation",
-      supersample = tier === "accumulation" ? 1 : 4,
+      supersample = 1,
       objects = true,
       bounces = 4,
       time = 0,

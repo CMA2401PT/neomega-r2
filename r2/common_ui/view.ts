@@ -1,6 +1,6 @@
 import { appearanceDefaults, bindAppearance, lighting } from "./appearance.js";
 import { mountRenderDebug } from "./render-debug.js";
-import { bindPresets } from "./presets.js";
+import { bindPresets, screenResolution } from "./presets.js";
 import { FrameRate } from "./frame-rate.js";
 import { createHUD, element } from "./hud.js";
 import { FullscreenMap } from "./map.js";
@@ -40,6 +40,12 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   const map = new FullscreenMap({ renderer, camera, jump });
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
+  settings.resolution = screenResolution(settings.resolution);
+  if (settings.superResolution !== "cnn-xs" && settings.superResolution !== "cnn-s") settings.superResolution = "off";
+  settings.saveSuperResolution2x ??= false;
+  const srSelect = element<HTMLSelectElement>("super-resolution");
+  srSelect.disabled = renderer.backend !== "webgpu";
+  if (srSelect.disabled) srSelect.title = "超分辨率需要 WebGPU";
   settings.accumulationFilter ??= "light";
   const debugPanel = mountRenderDebug(element("render-debug"), renderer.resetTiming);
   const renderInfo = element("render-info");
@@ -62,13 +68,6 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   let drawn = "";
   let wasOverview = false;
   let photo: Photo | null = null, photoWaiting = false;
-  /** 渲染尺寸跟随原生屏幕像素或用户选择的固定倍数。 */
-  function renderScale() {
-    if (settings.resolution.startsWith("native-")) return devicePixelRatio * Number(settings.resolution.slice(7));
-    return settings.resolution === "native"
-      ? devicePixelRatio
-      : Number(settings.resolution);
-  }
   function frameSize(scale: number, pixelLimit = Infinity) {
     const factor = Math.min(
       scale,
@@ -199,19 +198,28 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     const world = scene();
     photoWaiting = false;
     if (!currentView) return;
-    if (renderer.backend === "webgpu") renderer.cancelAccumulation();
     const scale = kind === "photo" ? settings.photoScale : settings.exportScale;
     const { width, height } = frameSize(
       devicePixelRatio * scale,
       kind === "export" && scale <= 2 ? DEFAULT_EXPORT_PIXELS : Infinity,
     );
-    element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
+    const saveSuperResolution2x = !srSelect.disabled && settings.superResolution !== "off" && settings.saveSuperResolution2x;
+    if (saveSuperResolution2x && 2 * Math.max(width, height) > renderer.maxTextureSize) {
+      hud.error("2× PNG 超过设备最大边长，请降低输出尺寸或关闭「保存 2× 超分原图」。");
+      setPhotoButton();
+      return;
+    }
+    if (renderer.backend === "webgpu") renderer.cancelAccumulation();
+    const pngScale = saveSuperResolution2x ? 2 : 1;
+    element<HTMLOutputElement>("resolution-value").textContent = `${width * pngScale}×${height * pngScale}`;
     rate.reset();
     const supersample = kind === "export" ? settings.exportSupersample : settings.photoSupersample;
     const film = renderer.photograph(currentView.camera, {
       width,
       height,
       supersample,
+      saveSuperResolution2x,
+      superResolution: settings.superResolution,
       ...(kind === "export" ? { tier: shownTier } : {}),
       time: performance.now() / 1000,
       ...lighting(appearance, settings.time),
@@ -219,7 +227,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       fog: currentView.fog,
       objects: currentView.objects,
     });
-    const name = `${world.name || "天空"}-${new Date().toTimeString().slice(0, 8).replaceAll(":", "")}${kind === "export" ? `-${shownTier}` : ""}.png`;
+    const name = `${world.name || "天空"}-${new Date().toTimeString().slice(0, 8).replaceAll(":", "")}${kind === "export" ? `-${shownTier}` : ""}${saveSuperResolution2x ? "-2x" : ""}.png`;
     photo = Object.assign(film, { name, kind, supersample, finishing: false });
     setPhotoButton();
     showTaskStatus(performance.now());
@@ -235,18 +243,23 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     const job = photo;
     if (!job || job.finishing) return;
     job.finishing = true;
-    if (download) {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(await job.png());
-      link.download = job.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    try {
+      if (download) {
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(await job.png());
+        link.download = job.name;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      }
+    } catch (error) {
+      hud.error("保存 PNG 失败：" + error);
+    } finally {
+      job.dispose();
+      photo = null;
+      drawn = "";
+      setPhotoButton();
+      showTaskStatus(performance.now());
     }
-    job.dispose();
-    photo = null;
-    drawn = "";
-    setPhotoButton();
-    showTaskStatus(performance.now());
   }
 
   /** 同一帧循环消费当前视图的相机；世界、光照和累积仍使用同一条绘制路径。 */
@@ -274,7 +287,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     if (photo) {
       if (photo.finishing) return;
       photo.step();
-      photo.present();
+      photo.present(frameSize(devicePixelRatio));
       element<HTMLOutputElement>("photo-progress").textContent = photo.kind === "export"
         ? `${photo.samples}/${photo.supersample ** 2}`
         : `${photo.samples} 样本`;
@@ -301,7 +314,9 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     session?.focus(view.center, { ...settings, nearPosition: camera.position });
     session?.publish();
     map.refresh(session);
-    const { width, height } = frameSize(renderScale());
+    const { width, height } = frameSize(devicePixelRatio * (settings.resolution === "native" ? 1 : Number(settings.resolution.slice(7))));
+    const screenSize = frameSize(devicePixelRatio);
+    const displaySize = renderer.backend === "webgpu" && settings.superResolution !== "off" ? screenSize : undefined;
     const light = lighting(appearance, settings.time),
       objects = view.objects;
     const drawOptions = { ...debugPanel.drawOptions(), ...overrides };
@@ -309,6 +324,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       view,
       width,
       height,
+      screenSize,
       shownTier,
       settings.fog,
       light,
@@ -331,6 +347,8 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         width,
         height,
         tier: shownTier,
+        displaySize,
+        superResolution: settings.superResolution,
         accumulate: !changed,
         time: now / 1000,
         ...light,
@@ -384,7 +402,9 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
           element("render-info-pool").textContent = `${(stats.usedBytes / 1024 ** 2).toFixed(1)} MiB`;
           element("render-info-memory").textContent = `${(renderer.textureBytes / 1024 ** 2).toFixed(1)} MiB`;
           element("render-info-time").textContent = median === undefined ? "—" : `${median.toFixed(2)} ms`;
-          element("render-info-pixels").textContent = `${width}×${height}`;
+          element("render-info-pixels").textContent = displaySize && (displaySize.width !== width || displaySize.height !== height)
+            ? `${width}×${height} → ${displaySize.width}×${displaySize.height}`
+            : `${width}×${height}`;
         }
         onStats?.({ stats, shownTier, median, width, height });
       }
@@ -402,9 +422,17 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         settings.timeFlow = false;
       }
     }
+    if (srSelect.disabled) srSelect.value = "off";
+    element<HTMLInputElement>("save-sr-2x").disabled = srSelect.disabled || settings.superResolution === "off";
+    if (key === "saveSuperResolution2x") { onSettings?.(); return; }
     renderer.outputSettings.accumulationFilter = settings.accumulationFilter ?? "light";
-    // 显示滤波只改变如何看当前样本，切换档位后接着原有样本继续累积。
+    // 降噪和超分只影响输出。静止累积的下一帧直接用新设置显示，已有样本可继续使用。
     if (key === "accumulationFilter") {
+      onSettings?.();
+      return;
+    }
+    if (key === "superResolution" && settings.stillAccumulation && renderer.ready("accumulation")) {
+      renderer.resetTiming();
       onSettings?.();
       return;
     }
