@@ -60,3 +60,38 @@ jobs:
           name: r2-browser
           path: ${{ runner.temp }}/r2-browser/
           if-no-files-found: error
+
+  publish:
+    name: 上传 JS 和材质包到 COS
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: cos-r2-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v6
+        with:
+          name: r2-browser
+          path: r2-browser
+      - name: 安装腾讯云 COS SDK
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cos-sdk"
+          "$RUNNER_TEMP/cos-sdk/bin/pip" install cos-python-sdk-v5==1.9.45
+      - name: 发布当前主分支的构建产物
+        env:
+          T_COS_SECRET_ID: ${{ secrets.T_COS_SECRET_ID }}
+          T_COS_SECRET_KEY: ${{ secrets.T_COS_SECRET_KEY }}
+          T_COS_SERVICE_URL: ${{ secrets.T_COS_SERVICE_URL || vars.T_COS_SERVICE_URL || 'https://ap-nanjing.myqcloud.com' }}
+          T_COS_ACCESS_URL: ${{ secrets.T_COS_ACCESS_URL || vars.T_COS_ACCESS_URL || 'https://omega-1259160345.cos.accelerate.myqcloud.com' }}
+        run: |
+          # 旧构建可能后完成，也可能被手动重跑。只有当前提交更新公开入口。
+          tip=$(git ls-remote --exit-code origin refs/heads/main)
+          if [[ "${tip%%[[:space:]]*}" != "$GITHUB_SHA" ]]; then
+            echo "main 已更新，跳过旧构建的上传。"
+            exit 0
+          fi
+          "$RUNNER_TEMP/cos-sdk/bin/python" r2/scripts/publish-cos.py r2-browser "$GITHUB_SHA"
