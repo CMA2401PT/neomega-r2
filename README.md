@@ -23,7 +23,7 @@ R2 把方块世界绘制到浏览器的 WebGPU 或 WebGL 2 画布。这个仓库
 
 自建界面可使用[渲染核心](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js)。需要订阅远端数据源时可加载 [R2Link 客户端](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-link.js)。[默认材质包](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip)提供绘制所需的模型和贴图，[合成信息包](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/material-info.zip)用于导入自选材质。
 
-这些地址跟随主分支更新。需要固定依赖时，在 `/r2/` 后加入一次已发布构建的完整 Git 提交号；JS 和材质包应使用同一个提交号。
+这些固定地址随主分支的成功构建更新。需要锁定版本时，可从对应的 GitHub Actions 构建下载 `r2-browser`，把其中的 JS 和材质包一同放在自己的站点。
 
 ## 构建与测试
 

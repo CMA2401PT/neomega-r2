@@ -94,4 +94,4 @@ jobs:
             echo "main 已更新，跳过旧构建的上传。"
             exit 0
           fi
-          "$RUNNER_TEMP/cos-sdk/bin/python" r2/scripts/publish-cos.py r2-browser "$GITHUB_SHA"
+          "$RUNNER_TEMP/cos-sdk/bin/python" r2/scripts/publish-cos.py r2-browser
