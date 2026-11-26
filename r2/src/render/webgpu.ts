@@ -29,11 +29,12 @@ type Frame = DrawOptions & {
   bounces?: number;
   jitter?: number[];
   pickPixel?: number[];
+  writeDepth?: boolean;
   tileOrigin?: [number, number];
 };
 export async function createWebGPURenderer(
   canvas: HTMLCanvasElement,
-  { tier: initial = "shading", assets = "/r2/assets/", readResource, onProgress }: RendererOptions = {},
+  { tier: initial = "shading", depthOutput = false, assets = "/r2/assets/", readResource, onProgress }: RendererOptions = {},
 ) {
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter)
@@ -95,7 +96,10 @@ export async function createWebGPURenderer(
     }
     const sceneLayout = device.createBindGroupLayout({ entries: layout });
     const historyLayout = device.createBindGroupLayout({
-      entries: [{ binding: 0, visibility: rayStages, texture: { sampleType: "unfilterable-float" } }],
+      entries: [
+        { binding: 0, visibility: rayStages, texture: { sampleType: "unfilterable-float" } },
+        { binding: 1, visibility: rayStages, storageTexture: { format: "r32float", access: "write-only" } },
+      ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [sceneLayout, historyLayout] });
     const outputLayout = device.createBindGroupLayout({
@@ -214,7 +218,11 @@ export async function createWebGPURenderer(
       format: "rgba32float",
       usage: GPUTextureUsage.TEXTURE_BINDING,
     });
-    const pickHistory = group(device, historyLayout, [[0, emptyHistory.createView()]]);
+    // 只输出颜色、拾取或拍照时共用这个占位绑定，着色器跳过深度写入。
+    const unusedDepth = device.createTexture({
+      size: [1, 1], format: "r32float", usage: GPUTextureUsage.STORAGE_BINDING,
+    }).createView();
+    const pickHistory = group(device, historyLayout, [[0, emptyHistory.createView()], [1, unusedDepth]]);
     let boundPool: GPUBuffer;
     function bind() {
       boundPool = world?.pool ?? emptyPool;
@@ -314,6 +322,7 @@ export async function createWebGPURenderer(
       });
       if (o.tileOrigin) data.set(o.tileOrigin, 62 * 4);
       data[252] = +history;
+      data[253] = Number(o.writeDepth ?? false);
       device.queue.writeBuffer(frame, 0, data);
       return frameExposure(sun[1] / length, o.exposureEV, o.autoExposure);
     }
@@ -385,6 +394,7 @@ export async function createWebGPURenderer(
       ]);
     }
     let displayedFrame: GPUTexture | undefined;
+    let previewDepth: Film["depth"] = null;
     // 拍照和交互使用同一图块原点、边缘裁剪和射线路径。每次只编码一块，
     // 由调用方提交并等待 GPU，最后一块才合成完整画面。
     function tracePart(
@@ -420,7 +430,8 @@ export async function createWebGPURenderer(
       if (!programs.has(tier) || pendingFrame) return false;
       if (!film || film.width !== o.width || film.height !== o.height) {
         film?.dispose();
-        film = frameFilm(device, fx, historyLayout, o.width, o.height);
+        previewDepth = null;
+        film = frameFilm(device, fx, historyLayout, o.width, o.height, unusedDepth, depthOutput);
         resetTiming();
       }
       if (!o.accumulate) waterTime = o.time ?? 0;
@@ -428,7 +439,7 @@ export async function createWebGPURenderer(
       const stamp = sampleGeneration;
       const tiled = !!o.accumulate && film.width * film.height > FULL_SAMPLE_PIXELS;
       const currentFilm = film, target = film.next(), sample = samples;
-      const timingEpoch = epoch, opts = { ...o, time: waterTime };
+      const timingEpoch = epoch, opts = { ...o, time: waterTime, writeDepth: depthOutput && !o.accumulate };
       const view = { ...camera, position: camera.position.slice() };
       async function render(): Promise<void> {
         for (let tile = 0; ; tile++) {
@@ -442,6 +453,7 @@ export async function createWebGPURenderer(
             displayedFrame = currentFilm.displayImage(enc, denoise, model, o.displaySize ?? o, queries);
             present(enc, displayedFrame);
             submitTimedFrame(enc, timingEpoch);
+            if (!o.accumulate) previewDepth = currentFilm.depth;
           } else device.queue.submit([enc.finish()]);
           await waitForDraw();
           if (disposed || fatal || stamp !== sampleGeneration) return;
@@ -553,7 +565,7 @@ export async function createWebGPURenderer(
       const pngSize = { width: width * pngScale, height: height * pngScale };
       if (Math.max(pngSize.width, pngSize.height) > device.limits.maxTextureDimension2D)
         throw Error("PNG 的边长超过设备上限，请降低输出尺寸或关闭「保存 2× 超分原图」。");
-      const f = frameFilm(device, fx, historyLayout, width, height),
+      const f = frameFilm(device, fx, historyLayout, width, height, unusedDepth),
         view = { ...camera, position: camera.position.slice() },
         grid = Math.max(1, Math.round(o.supersample ?? 1)),
         total = tier === "accumulation" ? Infinity : grid * grid;
@@ -640,6 +652,7 @@ export async function createWebGPURenderer(
       };
     }
     function clear() {
+      previewDepth = null;
       world?.dispose();
       world = null;
       objects.store.clear();
@@ -652,6 +665,8 @@ export async function createWebGPURenderer(
     if (readyError) throw Error(readyError);
     return {
       backend: "webgpu" as const,
+      /** 最近一次提交的预览深度，可在同一设备后续的合成指令中直接采样。 */
+      get depth() { return previewDepth; },
       outputSettings,
       gl: null,
       device,
@@ -723,17 +738,18 @@ export async function createWebGPURenderer(
       },
       async pixels() {
         if (!displayedFrame) return new Uint8Array(0);
-        const { width, height } = displayedFrame,
-          raw = await readTexture(device, displayedFrame, 4),
-          flipped = new Uint8Array(raw.length),
-          row = width * 4;
-        for (let y = 0; y < height; y++)
-          flipped.set(raw.subarray(y * row, (y + 1) * row), (height - 1 - y) * row);
-        return flipped;
+        return readTexture(device, displayedFrame, 4, true);
+      },
+      /** 读回最近预览的每像素深度。和 pixels() 一样，从画面底部开始逐行排列。 */
+      async depthPixels(): Promise<Float32Array> {
+        if (!previewDepth) return new Float32Array(0);
+        const bytes = await readTexture(device, previewDepth.texture, 4, true);
+        return new Float32Array(bytes.buffer);
       },
       clear,
       dispose() {
         disposed = true;
+        previewDepth = null;
         world?.dispose();
         objects.store.dispose();
         materials.dispose();

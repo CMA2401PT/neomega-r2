@@ -56,5 +56,9 @@ void main() {
   }
 #endif
   imageStore(outputHDR, pixel, outColor);
+#if RENDER_TIER==2
+  // 只发布本遍已完成的像素，需要精细求交的像素由补画阶段写入。
+  if (frame.values[63].y > 0.0) imageStore(outputDepth, pixel, vec4(viewDepth));
+#endif
 }
 

@@ -72,7 +72,11 @@ const int uBounces=1;
 #else
 uniform int uBounces;
 #endif
-out vec4 outColor;
+layout(location=0) out vec4 outColor;
+#if R2_GL_DEPTH
+layout(location=1) out float outDepth;
+#define R2_WRITE_DEPTH outDepth=viewDepth
+#endif
 const uint MIXED=0xffffffffu;
 const float EPS=0.00002;
 // 附加块布局：128 字格子掩码、64 字小块标签、1 字片段表地址，随后是调色板。
@@ -92,6 +96,8 @@ float shadeWeight,bounceWeight;
 vec3 lightDir,lightColor,ambient,sunlight;
 // rayLength 是未归一化方向的长度，用于把屏幕上一个像素换算成表面上的足迹；反弹射线没有像素足迹。
 float firstDepth,rayLength,primaryTravel;
+// 主射线首个可见界面在相机前方多少格。后续光路会重置 firstDepth，因此在第一次遍历结束时单独保留。
+float viewDepth;
 bool primaryRay;
 // 射线进入水体的位置，负数表示不在水中。
 float waterFrom;
@@ -951,6 +957,10 @@ vec3 tracePath(vec3 view,vec3 origin){
 #endif
   bool finished=march(job.limit,job.submerged);
   if(primaryRay&&!finished)return vec3(1e4,0,1e4);
+  if(primaryRay){
+   if(touched)viewDepth=firstDepth*dot(view,uForward);
+   else if(distance>0.0&&brightest(throughput)>.001)viewDepth=distance*dot(view,uForward);
+  }
   vec3 directFactor=vec3(1);
   bool shade=job.kind==PRIMARY||job.kind==BLOCK_REFLECT||uPass==1;
   vec3 shadowOrigin=shadePoint+shadeNormal*1e-3;
@@ -1094,7 +1104,7 @@ vec3 tracePixel(vec2 pixel){
  vec3 offset=screen.x*uRight+screen.y*uUp;
  vec3 direction=uOrtho?uForward:uForward+offset;
  rayLength=length(direction);ray=direction/rayLength;eye=uCamera+(uOrtho?offset:vec3(0));primaryRay=true;primaryTravel=0.0;
- touched=false;firstDepth=-1.0;firstNormal=vec3(0);
+ viewDepth=-1.0;touched=false;firstDepth=-1.0;firstNormal=vec3(0);
  if(!uHasWorld&&!uOcean)return background(ray);
  vec3 view=ray,origin=eye;
 #if R2_PICK
@@ -1108,6 +1118,8 @@ vec3 tracePixel(vec2 pixel){
  // 迭代用尽时输出极亮的品红，色调映射后仍是纯品红，实验脚本据此统计。
  if(!march(oceanHit?oceanDistance:1e30,underwater))return vec3(1e4,0,1e4);
  if(uPicking)return vec3(0);
+ if(touched)viewDepth=firstDepth*dot(view,uForward);
+ else if(oceanHit&&brightest(throughput)>.001)viewDepth=oceanDistance*dot(view,uForward);
  // 低档没有阴影、雾与水面效果。无限海面只是一层与静止水同色的透明平面，穿过后沿原方向继续；
  // 最终停在海平面以下的射线显示深水的颜色，而不是天空。
  vec4 waterColor=table(uFast,int(model(uWater).y)+3*4+3);
@@ -1146,5 +1158,14 @@ void main(){
  if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
  if(uDebug==2)color=vec3(float(faceTests>0),float(faceTests==0&&touched),0);
+ // 对数色阶让近处方块和远景都容易分辨，1023 格以外沿用最远色。
+ if(uDebug==3){
+  float d=clamp(log2(1.0+max(viewDepth,0.0))/10.0,0.0,1.0);
+  color=viewDepth<0.0?vec3(0):mix(mix(vec3(1,.85,.12),vec3(.05,.8,.65),min(2.0*d,1.0)),
+                                    vec3(.2,.12,.75),max(2.0*d-1.0,0.0));
+ }
+#ifdef R2_WRITE_DEPTH
+ R2_WRITE_DEPTH;
+#endif
  outColor=vec4(color,1.0);
 }

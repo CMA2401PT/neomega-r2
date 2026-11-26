@@ -86,6 +86,27 @@ function frame() {
 requestAnimationFrame(frame);
 ```
 
+### 从同一帧取得 RGB 图像和深度图
+
+创建渲染器时开启 `depthOutput`，每次交互预览就会同时把颜色画到传入的画布、把深度写到独立纹理。下面的片段等待一帧预览完成，在下一次绘制前把两份结果一起读成像素数组。完整示例只绘制一次海面，点按画面即可核对同一像素的 RGB 和深度。[运行示例](http://127.0.0.1:2415/r2/color-depth.html) · [示例源码](examples/color-depth.html)
+
+```js
+const renderer = await createRenderer(canvas, { assets: "./assets/", depthOutput: true });
+const { width, height } = canvas;
+await renderer.draw(camera, { width, height, ocean: 0, synchronize: true });
+const [rgba, depth] = await Promise.all([renderer.pixels(), renderer.depthPixels()]);
+
+// 两份数组都从左下角逐行排列。这里读取从左上角计数的中心像素。
+const x = Math.floor(width / 2), y = Math.floor(height / 2);
+const i = (height - 1 - y) * width + x;
+const rgb = rgba.subarray(4 * i, 4 * i + 3);
+const distance = depth[i];
+```
+
+`rgba` 是显示颜色，每像素占四个字节，顺序为 R、G、B、A。`depth` 是 `Float32Array`，每像素一个值，表示首个可见表面沿相机正前方的距离，单位为格。天空为 `-1`。玻璃和水面记录自身的深度，贴图完全透明的孔洞继续向后求交。示例使用默认的原始分辨率，因此两份输出共用宽高。开启超分后，颜色使用画布的显示尺寸，深度保留射线采样尺寸。
+
+实时绘制时可直接使用颜色画布和 `renderer.depth`，省去读回像素的开销。后者提供 `{ texture, width, height }`，首次开启深度输出并成功绘制预览后可用。深度纹理由渲染器管理，以单通道 32 位浮点数存储，可在同一渲染设备上采样。尺寸变化后需重新获取。原生纹理在 WebGPU 中从左上角计数，在 WebGL 2 中从左下角计数。静止累积沿用最近一次预览的深度。默认界面的“设置 → 调试 → 求交显示 → 深度伪色图”可以直接查看深度分布。
+
 ### 世界会话与数据源
 
 示例中的 `WorldSession` 把数据源接到渲染器。每帧先用 `focus` 指定相机周围需要哪些区块，其中 `nearRadius` 控制活动对象的范围，`farRadius` 控制静态方块的范围，两者都以区块为单位。一个区域横跨 8 个区块，因此远景半径向上取 8 的整倍数，传入 1 至 8 的窗口大小相同。区域在后台准备好后，`publish` 把它交给 GPU，随后 `draw` 绘制当前画面。

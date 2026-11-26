@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>从一帧预览取得颜色和深度</title>
+  <style>
+    body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui; }
+    canvas { display: block; width: 100%; height: auto; }
+  </style>
+  <h1>一帧的颜色和深度</h1>
+  <canvas width="640" height="360"></canvas>
+  <p>移动指针或点按画面，可查看该像素的 RGB 和深度。</p>
+  <output>正在绘制海面…</output>
+  <script type="module">
+    import { createRenderer, openMaterialPack } from "./r2-core.js";
+
+    // 在 r2 目录运行 npm run demo，打开 /r2/color-depth.html。
+    // 独立部署时，把本页、r2-core.js 和 default-materials.zip 放到同一目录。
+    const canvas = document.querySelector("canvas");
+    const output = document.querySelector("output");
+    const pack = await fetch("./default-materials.zip");
+    const renderer = await createRenderer(canvas, {
+      readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
+      depthOutput: true,
+      useWebGPU: new URLSearchParams(location.search).get("backend") !== "webgl",
+    });
+
+    // 无限海面可以直接绘制。这里用它提供一个有深度的表面，地平线上方则是天空。
+    const camera = { position: [0, 8, 0], yaw: 0, pitch: -0.2 };
+    const { width, height } = canvas;
+    await renderer.draw(camera, { width, height, ocean: 0, synchronize: true });
+
+    // 在下一次 draw 之前同时取出两份数据。关闭超分时，两份数组逐像素对齐。
+    // rgba 是每像素四个字节的 Uint8Array，depth 是每像素一个格数的 Float32Array。
+    const [rgba, depth] = await Promise.all([renderer.pixels(), renderer.depthPixels()]);
+
+    /** x、y 从画面左上角计数，两份数组都从底行开始存储。 */
+    function showPixel(x, y) {
+      const i = (height - 1 - y) * width + x;
+      const [r, g, b] = rgba.subarray(4 * i, 4 * i + 3);
+      const distance = depth[i] < 0 ? "天空（−1）" : depth[i].toFixed(2) + " 格";
+      output.textContent = `像素 (${x}, ${y}) · RGB (${r}, ${g}, ${b}) · 深度 ${distance}`;
+    }
+    showPixel(Math.floor(width / 2), Math.floor(height / 2));
+    function inspect(event) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((event.clientX - rect.left) * width / rect.width);
+      const y = Math.floor((event.clientY - rect.top) * height / rect.height);
+      if (x >= 0 && x < width && y >= 0 && y < height) showPixel(x, y);
+    }
+    canvas.addEventListener("pointermove", inspect);
+    canvas.addEventListener("pointerdown", inspect);
+    window.addEventListener("pagehide", event => { if (!event.persisted) renderer.dispose(); });
+  </script>
+</html>

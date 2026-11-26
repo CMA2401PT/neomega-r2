@@ -25,6 +25,8 @@ export function createOutputSettings() {
 }
 
 export interface RendererOptions {
+  /** 为交互预览保留可采样的 R32F 深度纹理，供宿主叠加世界空间 UI。默认关闭。 */
+  depthOutput?: boolean;
   /** 默认使用 WebGPU；显式关闭以使用 WebGL 2。 */
   useWebGPU?: boolean;
   /** 资源目录的 URL，以 / 结尾。 */
@@ -84,6 +86,7 @@ export interface DrawOptions extends LightingOptions {
   tier?: PreviewTier;
   /** 相机、设置与场景都和上一帧相同：这一帧用累积档作为样本加到画面上。 */
   accumulate?: boolean;
+  /** 0 为正常画面，1 为求交热力图，2 为求交路径，3 为相机空间深度伪色。 */
   debug?: number;
   hierarchy?: boolean;
   fragments?: boolean;

@@ -87,5 +87,5 @@ for (const [i, name] of names.entries()) {
 
 for (const name of ["default-materials.zip", "material-info.zip"])
   copyFileSync(join(root, "../assets-utils", name), join(dist, name));
-for (const name of ["standalone.html", "datasource.html"])
+for (const name of ["standalone.html", "datasource.html", "color-depth.html"])
   copyFileSync(join(root, "examples", name), join(dist, name));

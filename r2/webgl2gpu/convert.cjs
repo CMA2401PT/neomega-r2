@@ -47,7 +47,6 @@ layout(binding=14) uniform sampler tiles;
 layout(std140,binding=0) uniform Inputs { vec4 values[64]; } frame;`,
     )
     .replace(/^precision .*;/gm, "")
-    .replace("out vec4 outColor;", "layout(location=0) out vec4 outColor;")
     .replaceAll("gl_FragCoord.xy", "vec2(gl_FragCoord.x,uViewport.y-gl_FragCoord.y)")
     .replace("vec4 table(sampler2D source", "vec4 table(texture2D source")
     .replace(/^uniform (\w+) ([\w,]+);/gm, (_, type, names) =>
@@ -95,6 +94,13 @@ layout(std140,binding=0) uniform Inputs { vec4 values[64]; } frame;`,
         "outColor=vec4(color,1.0);",
         "outColor=vec4(color,1.0); if(frame.values[63].x>0.0) outColor+=texelFetch(history,ivec2(gl_FragCoord.xy),0);",
       );
+  }
+  if (!picking && tierNumber < 3) {
+    // WebGPU 的纹理原点在左上。只为交互预览写深度；照片复用同一程序时关闭写入。
+    const depthBinding = "layout(set=1,binding=1,r32f) uniform writeonly image2D outputDepth;";
+    const storeDepth = "if(frame.values[63].y>0.0) imageStore(outputDepth,ivec2(gl_FragCoord.xy),vec4(viewDepth))";
+    source = source.replace("layout(set=1,binding=0)", depthBinding + "\n" +
+      (compute ? "" : "#define R2_WRITE_DEPTH " + storeDepth + "\n") + "layout(set=1,binding=0)");
   }
   // 光影和累积在计算管线中逐像素写 HDR。照片的分块起点放在保留的 uniform 62。
   if (compute) {

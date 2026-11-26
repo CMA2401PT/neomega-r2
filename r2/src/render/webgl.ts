@@ -79,7 +79,7 @@ function paint(): Promise<void> {
  */
 export async function createWebGLRenderer(
   canvas: HTMLCanvasElement,
-  { assets = "/r2/assets/", tier: initialTier = "shading", readResource, onProgress }: RendererOptions = {},
+  { assets = "/r2/assets/", tier: initialTier = "shading", depthOutput = false, readResource, onProgress }: RendererOptions = {},
 ) {
   const context = canvas.getContext("webgl2", {
     antialias: false,
@@ -159,6 +159,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
             : name;
     const defines = [
       "#define R2_COMPACT_CELLS 1",
+      `#define R2_GL_DEPTH ${Number(depthOutput && tier !== "accumulation" && !name.endsWith("-pick"))}`,
       `#define RENDER_TIER ${TIERS.indexOf(tier)}`,
       `#define R2_PICK ${Number(name.endsWith("-pick"))}`,
       `#define R2_ONE_BOUNCE ${Number(name === "accumulation")}`,
@@ -278,7 +279,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
   let objects = new ObjectStore(gl, uniforms);
   await onProgress?.({ index: 3, total: 3, label: "正在准备绘制缓冲区…" });
   const outputSettings = createOutputSettings();
-  const accumulator = createAccumulator(gl, vertex);
+  const accumulator = createAccumulator(gl, vertex, depthOutput);
+  let previewDepth: typeof accumulator.depth = null;
   // 一个累积序列固定水面时刻，否则样本会把移动波纹平均成模糊镜面。
   let waterTime = 0;
   const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2"),
@@ -420,6 +422,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
       canvas.height = height;
       resetTiming();
     }
+    if (previewDepth && (previewDepth.width !== width || previewDepth.height !== height)) previewDepth = null;
     accumulator.resize(width, height);
     if (!accumulate) waterTime = time;
     accumulator.begin(accumulate);
@@ -450,6 +453,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     // GPU 时间包括射线绘制与显示合成（泛光、色调映射）。
     if (q) gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (!accumulate) previewDepth = accumulator.depth;
     accumulator.present({ exposure, raw: debug !== 0, denoise: accumulate ? outputSettings.accumulationFilter : "off" });
     if (q) {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
@@ -656,6 +660,8 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
    */
   return {
     backend: "webgl" as const,
+    /** 最近一次预览的线性相机深度。纹理由渲染器持有，调整尺寸后须重新获取。 */
+    get depth() { return previewDepth; },
     outputSettings,
     maxTextureSize: Math.min(
       gl.getParameter(gl.MAX_TEXTURE_SIZE),
@@ -709,6 +715,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     photograph,
     resetTiming,
     clear() {
+      previewDepth = null;
       world?.dispose();
       world = null;
       objects.clear();
@@ -725,12 +732,17 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0
     get textureBytes() {
       return textures.bytes + accumulator.bytes + (world?.textureBytes || 0) + objects.textureBytes;
     },
+    /** 读回最近预览的每像素深度。和 pixels() 一样，从画面底部开始逐行排列。 */
+    depthPixels(): Float32Array {
+      return previewDepth ? accumulator.readDepth() : new Float32Array(0);
+    },
     pixels() {
       const data = new Uint8Array(canvas.width * canvas.height * 4);
       gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, data);
       return data;
     },
     dispose() {
+      previewDepth = null;
       world?.dispose();
       objects.dispose();
       textures.dispose();

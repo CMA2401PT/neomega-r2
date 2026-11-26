@@ -8,8 +8,10 @@ export function mountRenderDebug(panel: HTMLElement, onChange?: () => void) {
         <option value="0">正常画面</option>
         <option value="1">遍历 / 求交热力图</option>
         <option value="2">求交路径</option>
+        <option value="3">深度伪色图</option>
       </select></label>
       <p class="hint">热力图中，红色越亮表示遍历步数越多，绿色越亮表示模型面测试次数越多。求交路径中，红色表示测试过模型面，绿色表示命中且未测试模型面。</p>
+      <p class="hint">深度图按相机前方的距离着色。近处为黄，约 31 格为青绿，1023 格及以远为蓝紫，天空为黑。</p>
       <label class="setting">空域与均匀立方体跳跃<input id="hierarchy" class="switch" type="checkbox" checked /></label>
       <label class="setting">跨格片段<input id="fragments" class="switch" type="checkbox" checked /></label>
       <p class="hint">关闭跳跃可观察逐格遍历的开销。关闭跨格片段可辨认模型伸入相邻格子的部分。</p>

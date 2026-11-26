@@ -95,6 +95,8 @@ export function frameFilm(
   historyLayout: GPUBindGroupLayout,
   width: number,
   height: number,
+  unusedDepth: GPUTextureView,
+  depthOutput = false,
 ) {
   let sr: ReturnType<typeof createWebSR> | undefined;
   let upscaledFilter: AccumulationFilter | undefined;
@@ -108,7 +110,7 @@ export function frameFilm(
         GPUTextureUsage.RENDER_ATTACHMENT |
         GPUTextureUsage.COPY_SRC |
         GPUTextureUsage.TEXTURE_BINDING |
-        (format === "rgba32float" ? GPUTextureUsage.STORAGE_BINDING : 0),
+        (format === "rgba32float" || format === "r32float" ? GPUTextureUsage.STORAGE_BINDING : 0),
     });
     textures.push(t);
     return t;
@@ -127,12 +129,15 @@ export function frameFilm(
       [2, fx.sampler],
     ]),
   );
+  const depthTexture = depthOutput ? target("r32float", [width, height]) : null;
+  const depth = depthTexture && { texture: depthTexture, width, height };
+  const depthView = depthTexture?.createView() ?? unusedDepth;
   const images = [0, 1].map(() => target("rgba32float", [width, height]).createView());
   const frames = images.map((hdr, i) => ({
     hdr,
     width,
     height,
-    history: group(device, historyLayout, [[0, images[1 - i]]]),
+    history: group(device, historyLayout, [[0, images[1 - i]], [1, depthView]]),
     pre: group(device, fx.pre.getBindGroupLayout(0), [[0, hdr]]),
     show: group(device, fx.show.getBindGroupLayout(0), [
       [0, hdr],
@@ -194,6 +199,7 @@ export function frameFilm(
   return {
     width,
     height,
+    depth,
     /** 同一轮合成的屏幕与 PNG 共用超分纹理，下一轮仍从 HDR 历史开始采样。 */
     displayImage(
       enc: GPUCommandEncoder,
@@ -218,7 +224,7 @@ export function frameFilm(
       return result;
     },
     get bytes() {
-      return (sr?.bytes ?? 0) + width * height * (filtered ? 40 : 36) + (size[0] * size[1] * 8 * 4) / 3;
+      return (sr?.bytes ?? 0) + width * height * (36 + (filtered ? 4 : 0) + (depth ? 4 : 0)) + (size[0] * size[1] * 8 * 4) / 3;
     },
     next() {
       last = 1 - last;
@@ -241,7 +247,7 @@ export function frameFilm(
   };
 }
 /** 读回紧密排列的像素。大幅 PNG 按设备允许的缓冲大小分批读取。 */
-export async function readTexture(device: GPUDevice, texture: GPUTexture, bytes: number) {
+export async function readTexture(device: GPUDevice, texture: GPUTexture, bytes: number, bottomUp = false) {
   const row = texture.width * bytes, pitch = Math.ceil(row / 256) * 256;
   const batch = Math.min(texture.height, Math.floor(device.limits.maxBufferSize / pitch));
   const batches: { buffer: GPUBuffer; first: number; height: number }[] = [];
@@ -259,7 +265,10 @@ export async function readTexture(device: GPUDevice, texture: GPUTexture, bytes:
     for (const { buffer, first, height } of batches) {
       await buffer.mapAsync(GPUMapMode.READ);
       const data = new Uint8Array(buffer.getMappedRange());
-      for (let y = 0; y < height; y++) packed.set(data.subarray(y * pitch, y * pitch + row), (first + y) * row);
+      for (let y = 0; y < height; y++) {
+        const targetY = bottomUp ? texture.height - 1 - (first + y) : first + y;
+        packed.set(data.subarray(y * pitch, y * pitch + row), targetY * row);
+      }
       buffer.unmap();
     }
     return packed;

@@ -70,7 +70,7 @@ const UNIT = 15,
  * @param gl
  * @param vertexSource 全屏三角形的顶点着色器
  */
-export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: string) {
+export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: string, depthOutput = false) {
   gl.getExtension("EXT_color_buffer_float");
   gl.getExtension("EXT_float_blend");
   function compile(fragmentSource: string): WebGLProgram {
@@ -109,6 +109,7 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
   gl.uniform1i(location("uBloom"), BLOOM_UNIT);
   let texture: WebGLTexture | null = null,
     framebuffer: WebGLFramebuffer | null = null,
+    depthTexture: WebGLTexture | null = null,
     // 半尺寸、带完整 mipmap 的泛光缓冲。
     glow: WebGLTexture | null = null,
     glowFramebuffer: WebGLFramebuffer | null = null,
@@ -123,6 +124,7 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
   function resize(w: number, h: number): void {
     if (w === width && h === height) return;
     gl.deleteTexture(texture);
+    gl.deleteTexture(depthTexture);
     gl.deleteFramebuffer(framebuffer);
     gl.deleteTexture(glow);
     gl.deleteFramebuffer(glowFramebuffer);
@@ -147,6 +149,14 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       texture,
       0,
     );
+    if (depthOutput) {
+      depthTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32F, w, h);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, depthTexture, 0);
+    }
     const glowWidth = Math.max(1, w >> 1),
       glowHeight = Math.max(1, h >> 1);
     glow = gl.createTexture();
@@ -222,6 +232,8 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       const add = accumulate && samples > 0;
       samples = accumulate ? samples + 1 : 0;
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      // 静止采样只混合颜色，线框继续使用预览帧像素中心的深度。
+      if (depthTexture) gl.drawBuffers([gl.COLOR_ATTACHMENT0, accumulate ? gl.NONE : gl.COLOR_ATTACHMENT1]);
       if (add) {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE);
@@ -262,15 +274,33 @@ export function createAccumulator(gl: WebGL2RenderingContext, vertexSource: stri
       gl.deleteTexture(target);
       return pixels;
     },
+    /** 从预览帧缓冲的第二个颜色附件读出深度，行序与画布颜色读回一致。 */
+    readDepth(): Float32Array {
+      const values = new Float32Array(width * height);
+      const previous = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, framebuffer);
+      gl.readBuffer(gl.COLOR_ATTACHMENT1);
+      // 浮点附件支持 RGBA/FLOAT 读回，R32F 的有效分量是红色。
+      const rgba = new Float32Array(values.length * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, rgba);
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, previous);
+      for (let i = 0; i < values.length; i++) values[i] = rgba[i * 4];
+      return values;
+    },
+    get depth() {
+      return depthTexture && { texture: depthTexture, width, height };
+    },
     get samples() {
       return samples;
     },
     get bytes() {
       // 累积缓冲每像素 16 字节；半尺寸的泛光缓冲连同 mipmap 约为每像素 8×¼×4/3 字节。
-      return width * height * (filterImage ? 20 : 16) + Math.round((width * height * 8) / 3);
+      return width * height * (16 + (filterImage ? 4 : 0) + (depthTexture ? 4 : 0)) + Math.round((width * height * 8) / 3);
     },
     dispose() {
       gl.deleteTexture(texture);
+      gl.deleteTexture(depthTexture);
       gl.deleteFramebuffer(framebuffer);
       gl.deleteTexture(glow);
       gl.deleteFramebuffer(glowFramebuffer);

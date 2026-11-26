@@ -94,6 +94,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   const compiling = new Map<Tier | "photo", { promise: Promise<void>; since: number }>();
   // 程序链接完成后，驱动仍可能在第一次实际绘制时耗时数秒。
   let firstStillFrameReady = false;
+  let showingDepth = false;
   /** 首次静止累积绘制之后插入的 GPU 栅栏。 */
   let firstStillFrameFence: ReturnType<Renderer["fence"]> | null = null;
   /** 编译一档渲染器；已在编译或已经可用时不重复。失败时提示，之后再次需要时重试。
@@ -144,7 +145,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         ? `正在编译${TIER_NAMES[settings.tier]}，期间画面可能停顿 · ${elapsed(preview)}${shownTier !== settings.tier ? ` · 完成前继续使用${TIER_NAMES[shownTier]}` : ""}`
         : accumulation && (settings.stillAccumulation || photoWaiting)
           ? `正在编译累积渲染器 · ${elapsed(accumulation)}${photoWaiting ? " · 准备好后自动开始拍照，再按相机按钮取消" : ""}`
-          : settings.stillAccumulation && renderer.ready("accumulation") && !firstStillFrameReady && !map.isOverview
+          : !showingDepth && settings.stillAccumulation && renderer.ready("accumulation") && !firstStillFrameReady && !map.isOverview
             ? "正在准备首个累积画面 · 视角静止时开始绘制"
             : "";
     const since = renderer.backend === "webgpu" ? renderer.waitingSince : null;
@@ -316,10 +317,12 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     map.refresh(session);
     const { width, height } = frameSize(devicePixelRatio * (settings.resolution === "native" ? 1 : Number(settings.resolution.slice(7))));
     const screenSize = frameSize(devicePixelRatio);
-    const displaySize = renderer.backend === "webgpu" && settings.superResolution !== "off" ? screenSize : undefined;
     const light = lighting(appearance, settings.time),
       objects = view.objects;
     const drawOptions = { ...debugPanel.drawOptions(), ...overrides };
+    showingDepth = drawOptions.debug === 3;
+    const superResolution = showingDepth ? "off" : settings.superResolution;
+    const displaySize = renderer.backend === "webgpu" && superResolution !== "off" ? screenSize : undefined;
     const state = JSON.stringify([
       view,
       width,
@@ -339,7 +342,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       (objects && renderer.animating(view.camera, { width, height }));
     let rendered = false;
     // 静止时一直累积，直到画面再次变化；没有样本上限。
-    const accumulating = settings.stillAccumulation && renderer.ready("accumulation");
+    const accumulating = !showingDepth && settings.stillAccumulation && renderer.ready("accumulation");
     if (view.overview && changed && renderer.backend === "webgpu") renderer.cancelAccumulation();
     if (!view.overview && (changed || (accumulating && !firstStillFrameFence))) {
       if (!changed && !firstStillFrameReady) report("accumulation-first-frame-start");
@@ -348,7 +351,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         height,
         tier: shownTier,
         displaySize,
-        superResolution: settings.superResolution,
+        superResolution,
         accumulate: !changed,
         time: now / 1000,
         ...light,
