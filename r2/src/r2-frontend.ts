@@ -1,4 +1,5 @@
 import type { Frontend, MountOptions } from "./frontend-types.ts";
+export type * from "./overlay-types.ts";
 export type { Frontend, MountOptions, CameraPosition, Scene } from "./frontend-types.ts";
 export { MemoryWorld, memorySource, encodeRegion } from "./source/memory.ts";
 export { AIR, blockHash } from "./source/hash.ts";

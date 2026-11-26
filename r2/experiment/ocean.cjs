@@ -27,25 +27,28 @@ function summarize(values) {
     });
     page.on("pageerror", (error) => result.errors.push(String(error)));
     page.on("console", (message) => {
-      if (/GL_INVALID|WebGL:.*INVALID/.test(message.text())) result.errors.push(message.text());
+      if (/GPUValidationError|validation error/i.test(message.text())) result.errors.push(message.text());
     });
-    await page.goto(new URL("?backend=webgl",base).href);
+    await page.goto(base);
     await page.waitForFunction(() => {
       const s = globalThis.viewerR2?.state.stream;
       return s && s.loaded === s.wanted && !s.pending && !s.nearPending;
     });
     assert.equal(await page.evaluate(() => viewerR2.state.world.name), "Möbius");
     // 使用应用已经加载的世界，暂停宿主提交，以免截图或计时混入另一套帧参数。
-    result.input = await page.evaluate(() => {
+    result.input = await page.evaluate(async () => {
       const r = viewerR2.renderer, camera = viewerR2.state.camera;
       const draw = r.draw;
-      r.draw = () => {};
+      r.draw = () => false;
+      await r.frameDone;
+      await r.compile("accumulation");
       const angle = ((19 - 6) / 24) * 2 * Math.PI;
       globalThis.oceanTest = {
         r, draw, camera,
         options: {
           width: 1280,
           height: 720,
+          synchronize: true,
           ocean: 64,
           time: 12,
           sun: [Math.cos(angle), Math.sin(angle), 0.3],
@@ -53,11 +56,10 @@ function summarize(values) {
         },
       };
       document.querySelectorAll("body>*:not(canvas)").forEach((el) => { el.style.visibility = "hidden"; });
-      const extension = r.gl.getExtension("WEBGL_debug_renderer_info");
       return {
         camera,
         options: oceanTest.options,
-        gpu: r.gl.getParameter(extension.UNMASKED_RENDERER_WEBGL),
+        gpu: r.device.adapterInfo.description,
       };
     });
     for (const [width, height] of [[1280, 720], [1920, 1080]]) {
@@ -67,12 +69,12 @@ function summarize(values) {
           const { r, draw, camera, options } = oceanTest;
           const settings = { ...options, width, height };
           if (mode === "without-ocean") delete settings.ocean;
-          draw(camera, settings);
+          await draw(camera, settings);
           r.resetTiming();
           const start = performance.now(), completed = [];
           for (let i = 0; i < 128; i++) {
             const frameStart = performance.now();
-            draw(camera, {
+            await draw(camera, {
               ...settings,
               accumulate: mode === "accumulated",
               synchronize: true,
@@ -80,9 +82,8 @@ function summarize(values) {
             completed.push(performance.now() - frameStart);
             await new Promise(requestAnimationFrame);
           }
-          return { times: r.times, completed, elapsed: performance.now() - start, error: r.gl.getError() };
+          return { times: r.times, completed, elapsed: performance.now() - start };
         }, { width, height, mode });
-        assert.equal(measured.error, 0);
         const row = { width, height, mode, ...summarize(measured.times), completion: summarize(measured.completed), ...measured };
         result.timing.push(row);
         console.log(JSON.stringify({ ...row, times: undefined, completed: undefined }));
@@ -99,9 +100,9 @@ function summarize(values) {
         const { r, draw, options } = oceanTest;
         const d = target.map((v, i) => v - position[i]);
         const camera = { position, yaw: Math.atan2(d[0], -d[2]), pitch: Math.asin(d[1] / Math.hypot(...d)) };
-        draw(camera, options);
+        await draw(camera, options);
         for (let i = 0; i < 64; i++) {
-          draw(camera, { ...options, accumulate: true });
+          await draw(camera, { ...options, accumulate: true });
           await new Promise(requestAnimationFrame);
         }
       }, { position, target });
@@ -109,37 +110,31 @@ function summarize(values) {
     }
     result.checks = await page.evaluate(async () => {
       const { r, draw, camera, options } = oceanTest;
-      draw(camera, options);
+      await draw(camera, options);
       const before = r.accumulated;
-      const pick = r.pick(
+      const pick = await r.pick(
         { position: [0, 100, 0], yaw: 0, pitch: -Math.PI / 2 },
         { width: 101, height: 101, x: 50, y: 50 },
       );
       // 环最底部约 y=41；越过 y=64 仍能选到它，说明解析海面未挡住拾取。
       const pickedThroughOcean = pick && pick.position[1] < 64;
       const preserved = r.accumulated === before;
-      draw(camera, options);
-      const time0 = r.gl.getUniform(r.program, r.uniforms.get("uTime"));
-      draw(camera, { ...options, accumulate: true, time: 99 });
-      const time1 = r.gl.getUniform(r.program, r.uniforms.get("uTime"));
-      draw(camera, { ...options, time: 99 });
-      const time2 = r.gl.getUniform(r.program, r.uniforms.get("uTime"));
-      return { pickedThroughOcean, preserved, pick, times: [time0, time1, time2], error: r.gl.getError() };
+      return { pickedThroughOcean, preserved, pick };
     });
     assert(result.checks.pickedThroughOcean);
     assert(result.checks.preserved);
-    assert.deepEqual(result.checks.times, [12, 12, 99]);
-    assert.equal(result.checks.error, 0);
     const png = await page.evaluate(async () => {
       const { r, camera, options } = oceanTest;
       const photo = r.photograph(camera, {
         ...options,
         width: 1280,
         height: 720,
-        samples: 128,
         bounces: 2,
       });
-      while (!photo.step()) await new Promise(requestAnimationFrame);
+      while (photo.samples < 128) {
+        photo.step();
+        await new Promise(requestAnimationFrame);
+      }
       const bytes = new Uint8Array(await (await photo.png()).arrayBuffer());
       photo.dispose();
       return Array.from(bytes);
@@ -148,15 +143,14 @@ function summarize(values) {
     result.checks.emptyOcean = await page.evaluate(async () => {
       const { r, draw, camera, options } = oceanTest;
       r.clear();
-      draw(camera, { ...options, ocean: undefined });
-      const sky = r.pixels();
-      draw(camera, options);
-      const sea = r.pixels();
+      await draw(camera, { ...options, ocean: undefined });
+      const sky = await r.pixels();
+      await draw(camera, options);
+      const sea = await r.pixels();
       const offset = (100 * options.width + 100) * 4;
-      return { sky: Array.from(sky.slice(offset, offset + 3)), sea: Array.from(sea.slice(offset, offset + 3)), error: r.gl.getError() };
+      return { sky: Array.from(sky.slice(offset, offset + 3)), sea: Array.from(sea.slice(offset, offset + 3)) };
     });
     assert.notDeepEqual(result.checks.emptyOcean.sky, result.checks.emptyOcean.sea);
-    assert.equal(result.checks.emptyOcean.error, 0);
     await page.screenshot({ path: `${out}/empty-ocean.png` });
     assert.deepEqual(result.errors, []);
   } finally {

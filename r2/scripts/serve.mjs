@@ -18,7 +18,6 @@ const types = {
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json",
   ".png": "image/png",
-  ".frag": "text/plain; charset=utf-8",
   ".map": "application/json",
 };
 const [host, port] = (process.argv[2] || "127.0.0.1:2415").split(":");

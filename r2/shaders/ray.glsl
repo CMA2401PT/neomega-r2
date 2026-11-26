@@ -1,31 +1,33 @@
-#version 300 es
-precision highp float;
-precision highp int;
-precision highp usampler3D;
-precision highp usampler2D;
-precision highp sampler2DArray;
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+#include <config>
+layout(std140,binding=0) uniform Inputs { vec4 values[64]; } frame;
+layout(binding=14) uniform sampler tiles;
+layout(set=1,binding=0) uniform texture2D history;
+#if !R2_PICK && RENDER_TIER<3
+layout(set=1,binding=1,r32f) uniform writeonly image2D outputDepth;
+#endif
 // 世界数据：每个 section 一项的循环目录、目录之上的均匀层次、存放附加块与压缩索引的区域池。
-uniform usampler3D uSections,uTree;
-uniform usampler2D uWorldData;
+layout(binding=1) uniform utexture3D uSections;
+layout(binding=2) uniform utexture3D uTree;
+layout(std430,binding=3) readonly buffer Pool { uint words[]; };
 uniform ivec3 uDirectoryOffset;
 // 共享模型：模型头、四边形引用与记录、完整方块面表与面贴图数组、复杂模型图集。
-uniform usampler2D uModels,uQuadReferences;
-uniform sampler2D uQuadRecords,uFast,uAtlas,uAtlasNormals,uAtlasSpecular;
+layout(binding=4) uniform utexture2D uModels;
+layout(binding=6) uniform utexture2D uQuadReferences;
+layout(binding=7) uniform texture2D uQuadRecords;
+layout(binding=5) uniform texture2D uFast;
+layout(binding=8) uniform texture2D uAtlas;
+layout(binding=12) uniform texture2D uAtlasNormals;
+layout(binding=9) uniform texture2D uAtlasSpecular;
 // 材质包的三套同布局贴图：颜色、labPBR 法线（_n）与高光（_s）。缺图时取默认值，原版灯块由资源合成器补自发光。
-uniform sampler2DArray uSurfaces,uSurfaceNormals,uSurfaceSpecular;
+layout(binding=10) uniform texture2DArray uSurfaces;
+layout(binding=13) uniform texture2DArray uSurfaceNormals;
+layout(binding=11) uniform texture2DArray uSurfaceSpecular;
 uniform vec3 uSize,uCamera,uRight,uUp,uForward;
 uniform vec2 uViewport;
 uniform float uSpan;
 uniform bool uOrtho,uHasWorld;
-#ifndef R2_DIRECT_LOOKUP
-#define R2_DIRECT_LOOKUP 0
-#endif
-#ifndef R2_CUBE_PASS
-#define R2_CUBE_PASS 0
-#endif
-#ifndef R2_PICK
-#define R2_PICK 0
-#endif
 const bool uPicking=R2_PICK!=0;
 uniform vec2 uPickPixel;
 vec3 firstNormal;
@@ -39,9 +41,6 @@ uniform bool uAutoSunColor;
 // 1 基础：完整的方块形状与贴图，水只是像玻璃一样的透明面；无阴影、无雾、无水面效果与反射、无 PBR。
 // 2 光影：硬阴影、远景雾、水面波纹与反射、labPBR 材质；单帧预览的最高档。
 // 3 累积：在光影之上加像素内抖动、软阴影与漫反射反弹，静止累积与拍照专用。
-#ifndef RENDER_TIER
-#define RENDER_TIER 2
-#endif
 const int uPass=RENDER_TIER==3?1:0;
 // xy 是采样子格中心相对像素中心的偏移，z 是子格宽度。累积时在子格内随机取样。
 uniform vec3 uJitter;
@@ -50,7 +49,7 @@ uniform uint uFrame,uWaterGroup;
 uniform uint uWater;
 #if RENDER_TIER==0
 // 体素档的每模型代表色：每个模型两项，线性颜色与不透明度、自发光强度。
-uniform sampler2D uVoxels;
+layout(binding=15) uniform texture2D uVoxels;
 #endif
 // 远景雾在这个距离上接近不透明，遮住观察窗口的边界。
 uniform float uFog;
@@ -72,10 +71,15 @@ const int uBounces=1;
 #else
 uniform int uBounces;
 #endif
+#if R2_COMPUTE
+layout(local_size_x=8,local_size_y=4) in;
+layout(set=2,binding=0,rgba32f) uniform writeonly image2D outputHDR;
+layout(std430,set=2,binding=1) buffer RetryMask { uint retryMask[]; };
+vec4 outColor;
+vec4 pixelCoord;
+#else
 layout(location=0) out vec4 outColor;
-#if R2_GL_DEPTH
-layout(location=1) out float outDepth;
-#define R2_WRITE_DEPTH outDepth=viewDepth
+#define pixelCoord gl_FragCoord
 #endif
 const uint MIXED=0xffffffffu;
 const float EPS=0.00002;
@@ -270,8 +274,8 @@ vec2 across(vec3 v,int axis){return axis==0?v.yz:axis==1?v.zx:v.xy;}
 vec3 fromAcross(vec2 v,int axis){return axis==0?vec3(0,v):axis==1?vec3(v.y,0,v.x):vec3(v,0);}
 vec3 axisNormal(int side){vec3 n=vec3(equal(ivec3(side/2),ivec3(0,1,2)));return side%2==0?-n:n;}
 uvec4 model(uint id){return texelFetch(uModels,ivec2(int(id)%2048,int(id)/2048),0);}
-vec4 table(sampler2D source,int offset){return texelFetch(source,ivec2(offset%2048,offset/2048),0);}
-uint worldWord(uint offset){return texelFetch(uWorldData,ivec2(int(offset)%4096,int(offset)/4096),0).r;}
+vec4 table(texture2D source,int offset){return texelFetch(source,ivec2(offset%2048,offset/2048),0);}
+uint worldWord(uint offset){return words[offset];}
 // 一次命中的表面材质。geometric 是朝向射线来处的几何法线，normal 是法线贴图扰动后的着色法线；
 // f0 为正入射反射率（金属为自身颜色），diffuse 为 0 表示金属没有漫反射；emission 是自发光强度。
 struct Material{vec3 geometric,normal,f0;float occlusion,roughness,emission,diffuse;};
@@ -342,16 +346,21 @@ void contribute(vec3 rgb,float alpha,float t,Material m,bool unlit,float surface
 float surfaceFootprint(vec2 gx,vec2 gy,out vec2 major,out int taps){
  bool alongX=dot(gx,gx)>=dot(gy,gy);
  major=alongX?gx:gy;vec2 minor=alongX?gy:gx;
- float side=float(textureSize(uSurfaces,0).x);
+ float side=float(textureSize(uSurfaces,0).x/2);
  float majorTexels=length(major)*side,minorTexels=length(minor)*side;
  taps=int(clamp(ceil(majorTexels/max(minorTexels,1e-6)),1.0,4.0));
  return log2(max(max(minorTexels,majorTexels/float(taps)),1e-6));
+}
+// 每层放四张方块面贴图，与上传时的 2×2 排列一致。
+vec4 sampleTile(texture2DArray image,vec3 p,float lod){
+ int layer=int(p.z);vec2 tile=vec2(layer&1,(layer>>1)&1);
+ return textureLod(sampler2DArray(image,tiles),vec3((fract(p.xy)+tile)*.5,layer>>2),lod);
 }
 vec4 surfaceTexel(vec2 tile,float layer,vec2 major,int taps,float lod){
  vec4 sum=vec4(0);
  for(int i=0;i<4;i++){
   if(i>=taps)break;
-  sum+=textureLod(uSurfaces,vec3(tile+major*((float(i)+.5)/float(taps)-.5),layer),lod);
+  sum+=sampleTile(uSurfaces,vec3(tile+major*((float(i)+.5)/float(taps)-.5),layer),lod);
  }
  return sum/float(taps);
 }
@@ -364,7 +373,7 @@ float reliefIntersection(vec2 tile,float layer,float lod,vec2 travel,float surfa
  for(int i=0;i<steps;i++){
   float advance=min(gap,1.0/float(steps));
   float next=depth+advance;
-  float nextGap=1.0-textureLod(uSurfaceNormals,vec3(tile+travel*next,layer),lod).a-next;
+  float nextGap=1.0-sampleTile(uSurfaceNormals,vec3(tile+travel*next,layer),lod).a-next;
   if(nextGap<=0.0)return depth+advance*(gap/(gap-nextGap));
   depth=next;gap=nextGap;
  }
@@ -375,7 +384,7 @@ float reliefIntersection(vec2 tile,float layer,float lod,vec2 travel,float surfa
 float reliefSun(vec2 tile,float layer,float lod,vec2 travel,float depth){
  for(int i=1;i<=6;i++){
   float rise=depth*float(i)/6.0;
-  float blocker=1.0-textureLod(uSurfaceNormals,vec3(tile+travel*rise,layer),lod).a;
+  float blocker=1.0-sampleTile(uSurfaceNormals,vec3(tile+travel*rise,layer),lod).a;
   if(blocker+1.5/255.0<depth-rise)return 0.0;
  }
  return 1.0;
@@ -393,9 +402,7 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
  vec3 color;float alpha,surfaceSun=1.0;Material m;
  if(f1.z<0.0){
   vec4 flatColor=table(uFast,offset+3);color=linearColor(flatColor.rgb);alpha=flatColor.a;m=plainMaterial(normal);
-#if !R2_COMPACT_CELLS
   contribute(color,alpha,t,m,false,1.0);return true;
-#endif
  }else{
   int axis=side/2;
   vec2 uv=across(fract(eye+ray*t),axis);
@@ -409,7 +416,7 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
    vec2 major;int taps;
    lod=surfaceFootprint(f0.zw*sx.x+f1.xy*sx.y,f0.zw*sy.x+f1.xy*sy.y,major,taps);
 #if RENDER_TIER>=2
-   normalTexel=textureLod(uSurfaceNormals,vec3(tile,f1.z),lod);
+   normalTexel=sampleTile(uSurfaceNormals,vec3(tile,f1.z),lod);
    // major 是一个屏幕像素沿贴图跨度最大的采样方向。砖块仍占足够像素时，远墙也能看见砖缝。
    // 一张贴图在这个方向由约 24 像素缩到 8 像素时淡出起伏，极斜的视角另行淡出以免步进闪烁。
    float relief=.25*(1.0-smoothstep(1.0/24.0,1.0/8.0,length(major)))*smoothstep(.035,.18,abs(facing));
@@ -418,7 +425,7 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
     vec2 travel=(f0.zw*inPlane.x+f1.xy*inPlane.y)*(relief/abs(facing));
     float depth=reliefIntersection(tile,f1.z,lod,travel,1.0-normalTexel.a);
     tile+=travel*depth;
-    normalTexel=textureLod(uSurfaceNormals,vec3(tile,f1.z),lod);
+    normalTexel=sampleTile(uSurfaceNormals,vec3(tile,f1.z),lod);
 #if RENDER_TIER==3
     float sunFacing=dot(normal,lightDir);
     if(sunFacing>0.0){
@@ -432,11 +439,11 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
    texel=surfaceTexel(tile,f1.z,major,taps,lod);
   }else{
    // 次级射线没有像素足迹，按距离粗略选级：原版 16 像素的贴图在 4 格外开始缩小。
-   float side=float(textureSize(uSurfaces,0).x);
+   float side=float(textureSize(uSurfaces,0).x/2);
    lod=clamp(log2(t*.25*side/16.0),0.0,log2(side));
-   texel=textureLod(uSurfaces,vec3(tile,f1.z),lod);
+   texel=sampleTile(uSurfaces,vec3(tile,f1.z),lod);
 #if RENDER_TIER>=2
-   normalTexel=textureLod(uSurfaceNormals,vec3(tile,f1.z),lod);
+   normalTexel=sampleTile(uSurfaceNormals,vec3(tile,f1.z),lod);
 #endif
   }
   if(cutout&&texel.a<0.5)return false;
@@ -447,9 +454,9 @@ bool cubeSurface(uint fastOffset,int side,float t,bool cutout){
   float det=f0.z*f1.y-f1.x*f0.w;
   vec3 tangentS=normalize(fromAcross(vec2(f1.y,-f0.w)/det,axis)),tangentT=normalize(fromAcross(vec2(-f1.x,f0.z)/det,axis));
   m=decodeMaterial(normal,tangentS,tangentT,
-   normalTexel,textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod),color);
+   normalTexel,sampleTile(uSurfaceSpecular,vec3(tile,f1.z),lod),color);
 #else
-  m=glowMaterial(normal,textureLod(uSurfaceSpecular,vec3(tile,f1.z),lod));
+  m=glowMaterial(normal,sampleTile(uSurfaceSpecular,vec3(tile,f1.z),lod));
 #endif
  }
  contribute(color,alpha,t,m,f1.z>=0.0&&f1.w>=2.0,surfaceSun);
@@ -559,7 +566,7 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  level=0;cellLevel=false;parts=0u;
  ivec3 directory=(cell+uDirectoryOffset)>>4;
  // WebGPU 光影和累积直接重读目录和掩码，减少每条射线跨迭代保留的状态。
-#if !R2_DIRECT_LOOKUP
+#if !R2_COMPUTE
  if(cell>>4!=cachedSection)
 #endif
  {
@@ -579,7 +586,7 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
   ivec3 local=cell&15;
   int brick=((local.x>>2)*4+(local.z>>2))*4+(local.y>>2);
   if(maskBit(section.zw,brick)){
-#if !R2_DIRECT_LOOKUP
+#if !R2_COMPUTE
    if(brick!=cachedBrick)
 #endif
    {
@@ -602,16 +609,11 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
 }
 // 本体与片段按原顺序共用一次模型求交，避免驱动展开两份面表与实例求交。
 void intersectCell(uint current,uint parts,ivec3 cell,float begin,float end,inout Hit hit){
-#if R2_COMPACT_CELLS
- uint count=parts==0u?0u:worldWord(parts);
- for(uint j=0u;j<=count;j++)intersectModel(j==0u?current:worldWord(parts+j),cell,begin,end,hit);
-#else
  intersectModel(current,cell,begin,end,hit);
  if(parts!=0u){
   uint count=worldWord(parts);
   for(uint j=0u;j<count;j++)intersectModel(worldWord(parts+1u+j),cell,begin,end,hit);
  }
-#endif
 }
 // 平行于窗口边界的射线单独处理，避免 0×无穷产生 NaN。
 void windowInterval(out vec3 entry,out vec3 leave){
@@ -669,7 +671,7 @@ float alphaAt(uint fastOffset,int side,float t){
  int offset=int(fastOffset)+side*4;
  vec4 f0=table(uFast,offset),f1=table(uFast,offset+1);
  vec2 uv=across(fract(eye+ray*t),side/2);
- return textureLod(uSurfaces,vec3(f0.xy+f0.zw*uv.x+f1.xy*uv.y,f1.z),0.0).a;
+ return sampleTile(uSurfaces,vec3(f0.xy+f0.zw*uv.x+f1.xy*uv.y,f1.z),0.0).a;
 }
 vec3 sunVisibility(vec3 origin,vec3 direction){
  eye=origin;ray=direction;invRay=vec3(1)/ray;
@@ -778,57 +780,6 @@ bool march(float limit,bool submerged){
 #endif
   if(medium==0u)description=uvec4(0);
   int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
-#if R2_COMPACT_CELLS
-  bool crossing=entering&&!inside&&!sameMedium(previous,previousModel.w,medium,description.w);
-  bool water=medium!=0u&&description.w==uWaterGroup,retry=false;
-  // 先画离开介质的面，再画进入的面、格内模型和窗口末端的面。
-  // 三种边界事件都在循环底部采一次材质。这样 FXC 不会展开三份完整 PBR 取样。
-  for(int event=entering?0:2;event<4;event++){
-   uint faceID=0u;uvec4 faceModel=description;int faceSide=side;float faceT=t;bool cut=false;
-   if(event==0){
-    if(!crossing||previous==0u)continue;
-    absorbWater(t);faceID=previous;faceModel=previousModel;faceSide=side^1;
-   }else if(event==1){
-    if(crossing){
-     if(!water&&!submerged)waterFrom=-1.0;
-#if RENDER_TIER>=2
-     if(water&&primaryRay&&!mirrored&&side==3){mirrored=true;mirrorPoint=eye+ray*t;mirrorWeight=throughput;mirrorRadiance=radiance;mirrorDirect=directSum;}
-#endif
-     if(brightest(throughput)>.001)faceID=medium;
-    }
-    if(water&&waterFrom<0.0)waterFrom=t;
-    cut=cutout&&!inside&&brightest(throughput)>.001;
-    if(cut){faceID=current;faceModel.y=cutoutFaces;}
-    inside=false;previous=medium;previousModel=description;entering=false;
-    if(faceID==0u)continue;
-   }else if(event==2){
-    if(brightest(throughput)<=.001){finished=true;break;}
-#if RENDER_TIER>0
-    Hit hit;hit.t=end+1.0;hit.alpha=0.0;
-    if(cellLevel)intersectCell(current,parts,cell,max(t,afterHit),end,hit);
-    if(hit.alpha>0.0){
-     contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);
-     if(brightest(throughput)<=.001){finished=true;break;}
-     afterHit=hit.t+EPS;t=afterHit;
-     if(t<end-EPS){retry=true;break;}
-    }
-#endif
-    continue;
-   }else{
-    if(end<last-EPS)break;
-    finished=true;absorbWater(end);
-    if(last>=limit||previous==0u||brightest(throughput)<=.001)break;
-    faceID=previous;faceModel=previousModel;faceSide=exitSide;faceT=end;
-   }
-   bool opaqueTexel=boundarySurface(faceID,faceModel,faceSide,faceT,cut);
-#if RENDER_TIER>=2
-   if(cut&&!opaqueTexel)foliage*=.6;
-#endif
-  }
-  if(finished)break;
-  if(retry)continue;
-  t=end;cell=nextCell;side=exitSide^1;entering=true;
-#else
   // WebGPU 保留直接分支。D3D12 上的逐格事件循环在大画面连续累积时会触发设备超时。
   if(entering){
    // 水只在进出两个界面着色，界面之间按走过的距离吸收。
@@ -858,7 +809,6 @@ bool march(float limit,bool submerged){
   if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
   t=end;cell=nextCell;side=exitSide^1;entering=true;
   if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)boundarySurface(previous,previousModel,exitSide,t,false);finished=true;break;}
-#endif
  }
  if(submerged&&brightest(throughput)>.001)absorbWater(limit);
  return finished;
@@ -1143,8 +1093,13 @@ vec3 tracePixel(vec2 pixel){
 #endif
 }
 // 每次绘制贡献一个样本。RGB 保存线性亮度，alpha 保存样本数。
+#if R2_COMPUTE
+void shadePixel(){
+#else
 void main(){
- pixelSeed=pcg(uint(gl_FragCoord.x)*1973u+uint(gl_FragCoord.y)*9277u);
+#endif
+ // 相机射线以左下为原点，纹理读写使用左上原点的 pixelCoord。
+ pixelSeed=pcg(uint(pixelCoord.x)*1973u+uint(uViewport.y-pixelCoord.y)*9277u);
  seed=pcg(pixelSeed+uFrame*26699u);
  setupLight();steps=0;faceTests=0;
  vec2 jitter=uJitter.xy;
@@ -1154,7 +1109,7 @@ void main(){
   pathSample=samplePath(uFrame/cells,cells==1u?pixelSeed:pcg(pixelSeed+uFrame%cells));
   jitter+=(pathSample.zw-.5)*uJitter.z;
  }
- vec3 color=tracePixel(uPicking?uPickPixel:gl_FragCoord.xy+jitter);
+ vec3 color=tracePixel(uPicking?uPickPixel:vec2(pixelCoord.x,uViewport.y-pixelCoord.y)+jitter);
  if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
  if(uDebug==2)color=vec3(float(faceTests>0),float(faceTests==0&&touched),0);
@@ -1164,8 +1119,13 @@ void main(){
   color=viewDepth<0.0?vec3(0):mix(mix(vec3(1,.85,.12),vec3(.05,.8,.65),min(2.0*d,1.0)),
                                     vec3(.2,.12,.75),max(2.0*d-1.0,0.0));
  }
-#ifdef R2_WRITE_DEPTH
- R2_WRITE_DEPTH;
+#if !R2_PICK && !R2_COMPUTE
+ if(frame.values[63].y>0.0)imageStore(outputDepth,ivec2(pixelCoord.xy),vec4(viewDepth));
 #endif
  outColor=vec4(color,1.0);
+ if(frame.values[63].x>0.0)outColor+=texelFetch(history,ivec2(pixelCoord.xy),0);
 }
+
+#if R2_COMPUTE
+#include <dispatch>
+#endif

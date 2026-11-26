@@ -35,43 +35,6 @@ export interface ObjectUploads {
   rows(data: Float32Array<ArrayBuffer>, height: number): void;
   dispose(): void;
 }
-function glUploads(
-  gl: WebGL2RenderingContext,
-  uniforms: Map<string, WebGLUniformLocation | null>,
-): ObjectUploads {
-  const table = gl.createTexture();
-  gl.activeTexture(gl.TEXTURE12);
-  gl.bindTexture(gl.TEXTURE_2D, table);
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, 1024, (SLOTS * 12) / 1024);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.uniform1i(uniforms.get("uObjectData") ?? null, 12);
-  const atlas = gl.createTexture();
-  gl.activeTexture(gl.TEXTURE13);
-  gl.bindTexture(gl.TEXTURE_2D, atlas);
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, SIDE, SIDE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.uniform1i(uniforms.get("uObjectAtlas") ?? null, 13);
-  return {
-    image(x, y, width, height, pixels, decoded) {
-      gl.activeTexture(gl.TEXTURE13);
-      gl.bindTexture(gl.TEXTURE_2D, atlas);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      if (decoded) gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, decoded);
-      else gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels!);
-    },
-    rows(data, height) {
-      gl.activeTexture(gl.TEXTURE12);
-      gl.bindTexture(gl.TEXTURE_2D, table);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 1024, height, gl.RGBA, gl.FLOAT, data);
-    },
-    dispose() {
-      gl.deleteTexture(table);
-      gl.deleteTexture(atlas);
-    },
-  };
-}
 export class ObjectStore {
   private uploads: ObjectUploads;
   objects = new Map<string, StoredObject>();
@@ -88,13 +51,8 @@ export class ObjectStore {
   enabled: boolean | undefined;
   disposed = false;
   textureBytes: number;
-  constructor(uploads: ObjectUploads);
-  constructor(gl: WebGL2RenderingContext, uniforms: Map<string, WebGLUniformLocation | null>);
-  constructor(
-    target: ObjectUploads | WebGL2RenderingContext,
-    uniforms?: Map<string, WebGLUniformLocation | null>,
-  ) {
-    this.uploads = "rows" in target ? target : glUploads(target, uniforms!);
+  constructor(uploads: ObjectUploads) {
+    this.uploads = uploads;
     this.textureBytes = this.data.byteLength + SIDE * SIDE * 4;
   }
   async image(source: ObjectTexture, key: string): Promise<AtlasImage> {

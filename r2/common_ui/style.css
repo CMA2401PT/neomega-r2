@@ -44,6 +44,7 @@ body {
   overflow: hidden;
 }
 #view,
+.scene-overlay,
 #map-overlay {
   position: fixed;
   inset: 0;
@@ -51,6 +52,10 @@ body {
   height: 100%;
   outline: none;
   touch-action: none;
+}
+.scene-overlay {
+  z-index: 1;
+  pointer-events: none;
 }
 #map-overlay {
   z-index: 1;
@@ -499,21 +504,6 @@ h3 svg {
   font-size: 12px;
   padding: 0 2px 5px calc(2px + 1ch);
   letter-spacing: 0.1px;
-}
-#render-backend {
-  margin-left: auto;
-  font-size: 10.5px;
-  line-height: 16px;
-  padding: 0 2px;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.06);
-  text-decoration: none;
-  color: var(--muted);
-}
-#render-backend[href]:hover,
-#render-backend[href]:focus-visible {
-  color: var(--accent);
-  background: rgba(0, 0, 0, 0.1);
 }
 .brand b {
   color: #0b6b6b;

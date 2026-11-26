@@ -6,6 +6,7 @@ import { createHUD, element } from "./hud.js";
 import { FullscreenMap } from "./map.js";
 import { FlightControls } from "./controls.js";
 import { bindMovePad } from "./movepad.js";
+import { OverlayView } from "./overlay-view.js";
 import { drawAxes } from "./overlay.js";
 export { startupStage } from "./startup.js";
 import { failStartup, finishStartup } from "./startup.js";
@@ -21,31 +22,15 @@ interface FrameOptions {
 type Photo = ReturnType<Renderer["photograph"]> & { kind: "photo" | "export"; name: string; supersample: number; finishing: boolean };
 export const TIER_NAMES = { voxel: "体素渲染器", basic: "基础渲染器", shading: "光影渲染器", accumulation: "累积渲染器" };
 const DEFAULT_EXPORT_PIXELS = 24e6;
-export function createView({ renderer, camera, settings, scene, switchBackend, onSettings, onStats, report = () => {} }: ViewOptions) {
-  const backend = element<HTMLAnchorElement>("render-backend");
-  backend.textContent = renderer.backend === "webgpu" ? "WebGPU" : "WebGL";
-  if (switchBackend) {
-    const next = renderer.backend === "webgpu" ? "webgl" : "webgpu";
-    if (next === "webgpu" && (!isSecureContext || !navigator.gpu)) {
-      backend.title = isSecureContext ? "当前浏览器未提供 WebGPU" : "使用本机地址或 HTTPS 可启用 WebGPU";
-    } else {
-      const url = new URL(location.href);
-      url.searchParams.set("backend", next);
-      backend.href = url.href;
-      backend.title = "切换到 " + (next === "webgpu" ? "WebGPU" : "WebGL") + " 并重新加载页面";
-      backend.setAttribute("aria-label", backend.title);
-    }
-  }
+export function createView({ renderer, camera, settings, scene, onSettings, onStats, report = () => {} }: ViewOptions) {
   const jump = (position: number[]) => { camera.position = position; };
-  const map = new FullscreenMap({ renderer, camera, jump });
+  const overlay = new OverlayView(renderer, element<HTMLCanvasElement>("map-overlay"));
+  const map = new FullscreenMap({ renderer, camera, jump, overlay: overlay.marks });
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
   settings.resolution = screenResolution(settings.resolution);
   if (settings.superResolution !== "cnn-xs" && settings.superResolution !== "cnn-s") settings.superResolution = "off";
   settings.saveSuperResolution2x ??= false;
-  const srSelect = element<HTMLSelectElement>("super-resolution");
-  srSelect.disabled = renderer.backend !== "webgpu";
-  if (srSelect.disabled) srSelect.title = "超分辨率需要 WebGPU";
   settings.accumulationFilter ??= "light";
   const debugPanel = mountRenderDebug(element("render-debug"), renderer.resetTiming);
   const renderInfo = element("render-info");
@@ -82,21 +67,19 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   function stopRendering(reason: string) {
     if (stopped) return;
     stopped = true;
-    if (renderer.backend === "webgpu") renderer.cancelAccumulation();
+    renderer.cancelAccumulation();
     taskStatus.hidden = true;
     element("photo-progress").hidden = true;
     element("fps").textContent = "绘制已停止";
     for (const id of ["photo", "export"]) element<HTMLButtonElement>(id).disabled = true;
     failStartup(reason + " 请刷新页面重试。如果仍无法连接显卡，请重启浏览器或桌面查看器。", "绘制已停止");
   }
-  if (renderer.backend === "webgpu") void renderer.failure.then(stopRendering);
+  void renderer.failure.then(stopRendering);
   /** 正在编译的档与开始时间。 */
   const compiling = new Map<Tier | "photo", { promise: Promise<void>; since: number }>();
   // 程序链接完成后，驱动仍可能在第一次实际绘制时耗时数秒。
   let firstStillFrameReady = false;
   let showingDepth = false;
-  /** 首次静止累积绘制之后插入的 GPU 栅栏。 */
-  let firstStillFrameFence: ReturnType<Renderer["fence"]> | null = null;
   /** 编译一档渲染器；已在编译或已经可用时不重复。失败时提示，之后再次需要时重试。
    * 提示先写进页面：渲染器会等它显示出来再开始编译，Windows 上编译期间页面可能停止刷新。 */
   function compileTier(tier: Tier, purpose?:"photo") {
@@ -148,7 +131,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
           : !showingDepth && settings.stillAccumulation && renderer.ready("accumulation") && !firstStillFrameReady && !map.isOverview
             ? "正在准备首个累积画面 · 视角静止时开始绘制"
             : "";
-    const since = renderer.backend === "webgpu" ? renderer.waitingSince : null;
+    const since = renderer.waitingSince;
     if (since !== null && now - since >= 10000)
       text = `正在等待显卡完成当前绘制，已等 ${Math.floor((now - since) / 1000)} 秒。如果持续没有进展，请刷新页面后降低绘制分辨率。`;
     if (taskStatus.textContent !== text) taskStatus.textContent = text;
@@ -204,13 +187,13 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       devicePixelRatio * scale,
       kind === "export" && scale <= 2 ? DEFAULT_EXPORT_PIXELS : Infinity,
     );
-    const saveSuperResolution2x = !srSelect.disabled && settings.superResolution !== "off" && settings.saveSuperResolution2x;
+    const saveSuperResolution2x = settings.superResolution !== "off" && settings.saveSuperResolution2x;
     if (saveSuperResolution2x && 2 * Math.max(width, height) > renderer.maxTextureSize) {
       hud.error("2× PNG 超过设备最大边长，请降低输出尺寸或关闭「保存 2× 超分原图」。");
       setPhotoButton();
       return;
     }
-    if (renderer.backend === "webgpu") renderer.cancelAccumulation();
+    renderer.cancelAccumulation();
     const pngScale = saveSuperResolution2x ? 2 : 1;
     element<HTMLOutputElement>("resolution-value").textContent = `${width * pngScale}×${height * pngScale}`;
     rate.reset();
@@ -229,6 +212,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       objects: currentView.objects,
     });
     const name = `${world.name || "天空"}-${new Date().toTimeString().slice(0, 8).replaceAll(":", "")}${kind === "export" ? `-${shownTier}` : ""}${saveSuperResolution2x ? "-2x" : ""}.png`;
+    overlay.hide();
     photo = Object.assign(film, { name, kind, supersample, finishing: false });
     setPhotoButton();
     showTaskStatus(performance.now());
@@ -276,13 +260,9 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     const world = scene();
     const elapsedSeconds = (now - (last ?? now)) / 1000;
     last = now;
-    if (firstStillFrameFence?.ready()) {
-      firstStillFrameFence.dispose();
-      firstStillFrameFence = null;
-      if (renderer.accumulated > 0) {
-        firstStillFrameReady = true;
-        report("accumulation-first-frame-ready");
-      }
+    if (!firstStillFrameReady && renderer.accumulated > 0) {
+      firstStillFrameReady = true;
+      report("accumulation-first-frame-ready");
     }
     if (now - statusAt > 100) showTaskStatus(now);
     if (photo) {
@@ -322,8 +302,10 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     const drawOptions = { ...debugPanel.drawOptions(), ...overrides };
     showingDepth = drawOptions.debug === 3;
     const superResolution = showingDepth ? "off" : settings.superResolution;
-    const displaySize = renderer.backend === "webgpu" && superResolution !== "off" ? screenSize : undefined;
+    const displaySize = superResolution !== "off" ? screenSize : undefined;
+    const overlayDepth = !view.overview && overlay.marks.needsDepth;
     const state = JSON.stringify([
+      overlayDepth,
       view,
       width,
       height,
@@ -343,13 +325,13 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
     let rendered = false;
     // 静止时一直累积，直到画面再次变化；没有样本上限。
     const accumulating = !showingDepth && settings.stillAccumulation && renderer.ready("accumulation");
-    if (view.overview && changed && renderer.backend === "webgpu") renderer.cancelAccumulation();
-    if (!view.overview && (changed || (accumulating && !firstStillFrameFence))) {
-      if (!changed && !firstStillFrameReady) report("accumulation-first-frame-start");
+    if (view.overview && changed) renderer.cancelAccumulation();
+    if (!view.overview && (changed || accumulating)) {
       rendered = renderer.draw(view.camera, {
         width,
         height,
         tier: shownTier,
+        depthOutput: overlayDepth || undefined,
         displaySize,
         superResolution,
         accumulate: !changed,
@@ -361,12 +343,13 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         ...drawOptions,
       });
       if (rendered && !changed && !firstStillFrameReady) {
-        firstStillFrameFence = renderer.fence();
+        report("accumulation-first-frame-start");
       }
       if (rendered && session && session.stats.loaded > 0) finishStartup();
     }
+    overlay.present(view.camera, rendered && changed, width / height, view.overview);
     if (changed && (rendered || view.overview)) {
-      if (rendered && renderer.backend === "webgpu") rate.track(renderer.frameDone);
+      if (rendered) rate.track(renderer.frameDone);
       else rate.complete(now);
       drawn = state;
     } else if (!changed) rate.idle();
@@ -376,7 +359,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       drawAxes(element<HTMLCanvasElement>("axes"), camera);
       element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
       const fps = rate.fps;
-      const tiles = renderer.backend === "webgpu" && renderer.tileProgress;
+      const tiles = renderer.tileProgress;
       // GPU 忙时本次刷新可能没有提交新样本，静止状态仍应显示当前累计数量。
       element<HTMLOutputElement>("fps").textContent = !changed && !rate.waiting
         ? accumulating && !view.overview
@@ -425,8 +408,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
         settings.timeFlow = false;
       }
     }
-    if (srSelect.disabled) srSelect.value = "off";
-    element<HTMLInputElement>("save-sr-2x").disabled = srSelect.disabled || settings.superResolution === "off";
+    element<HTMLInputElement>("save-sr-2x").disabled = settings.superResolution === "off";
     if (key === "saveSuperResolution2x") { onSettings?.(); return; }
     renderer.outputSettings.accumulationFilter = settings.accumulationFilter ?? "light";
     // 降噪和超分只影响输出。静止累积的下一帧直接用新设置显示，已有样本可继续使用。
@@ -449,6 +431,7 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
   }
   refreshSettings();
   return {
+    overlay: overlay.marks,
     debugStatus: debugPanel.status,
     hud, map, frame, refreshSettings, cancelPhoto, frames: rate.intervals,
     get fps() { return rate.fps; },
@@ -456,15 +439,16 @@ export function createView({ renderer, camera, settings, scene, switchBackend, o
       drawn = "";
       rate.reset();
       currentView = null;
+      overlay.reset();
       hud.world({ loaded });
       return map.setWorld(readChunks);
     },
     dispose() {
       stopped = true;
-      if (renderer.backend === "webgpu") renderer.cancelAccumulation();
+      renderer.cancelAccumulation();
+      overlay.reset();
       releasePresets();
       rate.reset();
-      firstStillFrameFence?.dispose();
       cancelPhoto();
     },
   };

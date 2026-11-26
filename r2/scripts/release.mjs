@@ -32,7 +32,7 @@ async function bundle(file, { format = "esm", define = {}, globalName } = {}) {
   return result.outputFiles[0].text;
 }
 const worker = await bundle("scene/worker.js", { format: "iife" });
-const shaderFiles = readdirSync(join(dist, "render")).filter((name) => /\.(wgsl|frag)$/.test(name));
+const shaderFiles = readdirSync(join(dist, "render")).filter((name) => name.endsWith(".wgsl"));
 const engine = {
   R2_SHADERS: JSON.stringify(Object.fromEntries(shaderFiles.map((name) => [name, text("render/" + name)]))),
   R2_SCENE_WORKER: JSON.stringify(worker),

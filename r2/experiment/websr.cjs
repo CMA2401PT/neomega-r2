@@ -14,7 +14,7 @@ const { launch, base } = require("./launch.cjs");
       const archive = await (await fetch("/r2/default-materials.zip")).arrayBuffer();
       const canvas = document.querySelector("canvas");
       const renderer = await api.createRenderer(canvas, {
-        useWebGPU: true, tier: "basic", readResource: api.openMaterialPack(new Uint8Array(archive)),
+        tier: "basic", readResource: api.openMaterialPack(new Uint8Array(archive)),
       });
       const world = new api.MemoryWorld();
       world.fill([0, 0, 0], [31, 1, 31], "minecraft:stone");

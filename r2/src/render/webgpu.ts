@@ -32,7 +32,7 @@ type Frame = DrawOptions & {
   writeDepth?: boolean;
   tileOrigin?: [number, number];
 };
-export async function createWebGPURenderer(
+export async function createRenderer(
   canvas: HTMLCanvasElement,
   { tier: initial = "shading", depthOutput = false, assets = "/r2/assets/", readResource, onProgress }: RendererOptions = {},
 ) {
@@ -428,18 +428,20 @@ export async function createWebGPURenderer(
       if (!o.accumulate || film?.width !== o.width || film?.height !== o.height) cancelAccumulation();
       // 每次只接受一张交互画面。GPU 忙时让宿主继续处理输入，下次绘制直接取最新相机。
       if (!programs.has(tier) || pendingFrame) return false;
+      const writeDepth = !o.accumulate && (o.depthOutput ?? depthOutput);
       if (!film || film.width !== o.width || film.height !== o.height) {
         film?.dispose();
         previewDepth = null;
-        film = frameFilm(device, fx, historyLayout, o.width, o.height, unusedDepth, depthOutput);
+        film = frameFilm(device, fx, historyLayout, o.width, o.height, unusedDepth);
         resetTiming();
       }
+      if (writeDepth) film.enableDepth();
       if (!o.accumulate) waterTime = o.time ?? 0;
       objects.store.update(o.time ?? 0, world?.origin ?? [0, 0, 0]);
       const stamp = sampleGeneration;
       const tiled = !!o.accumulate && film.width * film.height > FULL_SAMPLE_PIXELS;
       const currentFilm = film, target = film.next(), sample = samples;
-      const timingEpoch = epoch, opts = { ...o, time: waterTime, writeDepth: depthOutput && !o.accumulate };
+      const timingEpoch = epoch, opts = { ...o, time: waterTime, writeDepth };
       const view = { ...camera, position: camera.position.slice() };
       async function render(): Promise<void> {
         for (let tile = 0; ; tile++) {
@@ -453,7 +455,7 @@ export async function createWebGPURenderer(
             displayedFrame = currentFilm.displayImage(enc, denoise, model, o.displaySize ?? o, queries);
             present(enc, displayedFrame);
             submitTimedFrame(enc, timingEpoch);
-            if (!o.accumulate) previewDepth = currentFilm.depth;
+            if (!o.accumulate) previewDepth = writeDepth ? currentFilm.depth : null;
           } else device.queue.submit([enc.finish()]);
           await waitForDraw();
           if (disposed || fatal || stamp !== sampleGeneration) return;
@@ -664,11 +666,9 @@ export async function createWebGPURenderer(
     const readyError = await device.queue.onSubmittedWorkDone().then(() => fatal);
     if (readyError) throw Error(readyError);
     return {
-      backend: "webgpu" as const,
       /** 最近一次提交的预览深度，可在同一设备后续的合成指令中直接采样。 */
       get depth() { return previewDepth; },
       outputSettings,
-      gl: null,
       device,
       failure,
       cancelAccumulation,
@@ -728,14 +728,6 @@ export async function createWebGPURenderer(
         generation++;
         resetTiming();
       },
-      fence() {
-        let ready = false;
-        Promise.all([frameDone, device.queue.onSubmittedWorkDone()]).then(
-          () => (ready = true),
-          () => (ready = true),
-        );
-        return { ready: () => ready, dispose() {} };
-      },
       async pixels() {
         if (!displayedFrame) return new Uint8Array(0);
         return readTexture(device, displayedFrame, 4, true);
@@ -764,3 +756,5 @@ export async function createWebGPURenderer(
     throw e;
   }
 }
+
+export type * from "./options.ts";

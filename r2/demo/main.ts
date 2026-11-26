@@ -22,7 +22,7 @@ const settings: ViewSettings = {
 };
 input("far-radius").min = "8";
 const renderer = await createRenderer(canvas, {
-  assets: "/assets/", tier: settings.tier, useWebGPU: params.get("backend") !== "webgl",
+  assets: "/assets/", tier: settings.tier,
   onProgress: ({ label }) => startupStage(label),
 });
 
@@ -141,8 +141,8 @@ function fragmentReferences(): number {
 const r2 = {
   specialEnabled: true,
   fixedTime: null as number | null,
-  gl: renderer.gl,
   renderer,
+  overlay: view.overlay,
   loadScene,
   setCamera,
   resetTiming() {

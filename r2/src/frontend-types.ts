@@ -17,9 +17,9 @@ export interface MountOptions extends Scene {
   /** 宿主编写的帮助 HTML，显示在通用操作说明与“关于 neOmega R2”之间。 */
   helpHTML?: string;
   registry?: ObjectRegistry;
-  useWebGPU?: boolean;
 }
 export interface Frontend {
+  readonly overlay: import("./overlay-types.ts").SceneOverlay;
   setScene(scene: Scene): Promise<void>;
   moveCamera(camera: CameraPosition): void;
   setMaterialPack(input: MaterialInput, limit?: number): Promise<void>;

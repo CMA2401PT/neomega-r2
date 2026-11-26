@@ -4,7 +4,7 @@
 export type PreviewTier = "voxel" | "basic" | "shading";
 /** 四档绘制器；accumulation 在光影之上加软阴影与漫反射反弹，静止累积与拍照专用。 */
 export type Tier = PreviewTier | "accumulation";
-/** WebGPU 输出使用的 2× 超分模型。WebGL 始终按目标尺寸绘制。 */
+/** 输出画面可用的 2× 超分模型。 */
 export type SuperResolution = "off" | "cnn-xs" | "cnn-s";
 export type AccumulationFilter = "off" | "light" | "medium" | "high";
 
@@ -27,8 +27,6 @@ export function createOutputSettings() {
 export interface RendererOptions {
   /** 为交互预览保留可采样的 R32F 深度纹理，供宿主叠加世界空间 UI。默认关闭。 */
   depthOutput?: boolean;
-  /** 默认使用 WebGPU；显式关闭以使用 WebGL 2。 */
-  useWebGPU?: boolean;
   /** 资源目录的 URL，以 / 结尾。 */
   assets?: string;
   /** 按文件名提供模型与贴图。目录版离线播放器还用此回调提供着色器；独立 JS 自带着色器。 */
@@ -76,9 +74,11 @@ export function frameExposure(sunHeight: number, ev = 0, adapt = true): number {
 }
 
 export interface DrawOptions extends LightingOptions {
+  /** 本次预览需要输出深度。省略时使用创建渲染器时的设置。 */
+  depthOutput?: boolean;
   /** width、height 决定射线采样尺寸。WebGPU 可在显示前对最终画面做一次超分增强。 */
   superResolution?: SuperResolution;
-  /** 超分增强作用的屏幕像素尺寸。省略时使用渲染宽高。 */
+  /** 开启超分时显示画布的像素尺寸。 */
   displaySize?: { width: number; height: number };
   width: number;
   height: number;
@@ -90,7 +90,7 @@ export interface DrawOptions extends LightingOptions {
   debug?: number;
   hierarchy?: boolean;
   fragments?: boolean;
-  /** 绘制后读回一个像素，等待 GPU 完成。 */
+  /** 等待前一帧完成再提交，并在本次绘制完成后返回结果。 */
   synchronize?: boolean;
 }
 

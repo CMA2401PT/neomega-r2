@@ -96,7 +96,6 @@ export function frameFilm(
   width: number,
   height: number,
   unusedDepth: GPUTextureView,
-  depthOutput = false,
 ) {
   let sr: ReturnType<typeof createWebSR> | undefined;
   let upscaledFilter: AccumulationFilter | undefined;
@@ -129,15 +128,13 @@ export function frameFilm(
       [2, fx.sampler],
     ]),
   );
-  const depthTexture = depthOutput ? target("r32float", [width, height]) : null;
-  const depth = depthTexture && { texture: depthTexture, width, height };
-  const depthView = depthTexture?.createView() ?? unusedDepth;
+  let depth: { texture: GPUTexture; width: number; height: number } | null = null;
   const images = [0, 1].map(() => target("rgba32float", [width, height]).createView());
   const frames = images.map((hdr, i) => ({
     hdr,
     width,
     height,
-    history: group(device, historyLayout, [[0, images[1 - i]], [1, depthView]]),
+    history: group(device, historyLayout, [[0, images[1 - i]], [1, unusedDepth]]),
     pre: group(device, fx.pre.getBindGroupLayout(0), [[0, hdr]]),
     show: group(device, fx.show.getBindGroupLayout(0), [
       [0, hdr],
@@ -199,7 +196,17 @@ export function frameFilm(
   return {
     width,
     height,
-    depth,
+    get depth() { return depth; },
+    /** 第一次需要深度时补上纹理，颜色、累积和超分仍沿用原有资源。 */
+    enableDepth() {
+      if (depth) return;
+      const texture = target("r32float", [width, height]);
+      const view = texture.createView();
+      frames.forEach((frame, i) => {
+        frame.history = group(device, historyLayout, [[0, images[1 - i]], [1, view]]);
+      });
+      depth = { texture, width, height };
+    },
     /** 同一轮合成的屏幕与 PNG 共用超分纹理，下一轮仍从 HDR 历史开始采样。 */
     displayImage(
       enc: GPUCommandEncoder,

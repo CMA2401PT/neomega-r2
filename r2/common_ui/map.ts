@@ -1,5 +1,6 @@
 // 全屏地图只提供相机和输入；近处复用主射线渲染器，远处用区块位图显示存档分布。
 import { cameraBasis, cameraRay, type Camera, type Renderer, type WorldSession } from "/r2/index.js";
+import type { OverlayItem, OverlayMarker, SceneOverlay } from "/r2/overlay-types.js";
 import { element, closePopovers } from "./hud.js";
 
 /** 把地图像素投影到水平参考面，拖动与光标缩放因此保持同一世界锚点。 */
@@ -44,7 +45,11 @@ export class FullscreenMap {
   private session: WorldSession | null = null;
   private readChunks?: () => ArrayBuffer | Promise<ArrayBuffer>;
   private chunksRequest = 0;
-  constructor({ camera, renderer, jump }: {camera: Camera; renderer: Renderer; jump(position: number[]): void}) {
+  private readonly overlay: SceneOverlay;
+  private arrow?: OverlayMarker;
+  private faceMarks: OverlayItem[] = [];
+  constructor({ camera, renderer, jump, overlay }: {camera: Camera; renderer: Renderer; jump(position: number[]): void; overlay: SceneOverlay}) {
+    this.overlay = overlay;
     this.mainCamera = camera;
     this.renderer = renderer;
     this.jump = jump;
@@ -261,6 +266,10 @@ export class FullscreenMap {
     this.pitch = (-70 * Math.PI) / 180;
     this.span = Math.min(320, this.farRadius * 16 / Math.max(1, innerWidth / innerHeight));
     this.selection = this.pending = null;
+    this.arrow?.remove();
+    this.arrow = this.overlay.marker(this.mainCamera.position, {
+      points: [[12,0],[-7,-7],[-3,0],[-7,7]], fill: "#0b6b6b", stroke: "#fff", strokeWidth: 3, alwaysVisible: true,
+    });
     element<HTMLOutputElement>("map-selection").textContent = "单击方块选点";
     element<HTMLButtonElement>("map-jump").disabled = true;
     document.body.classList.add("map-open");
@@ -272,6 +281,10 @@ export class FullscreenMap {
   /** 收起时保留主相机原来的位置与方向。 */
   hide() {
     this.pickRequest++;
+    this.arrow?.remove();
+    this.arrow = undefined;
+    for (const mark of this.faceMarks) mark.remove();
+    this.faceMarks = [];
     this.open = false;
     this.isOverview = false;
     this.gesture = null;
@@ -335,6 +348,8 @@ export class FullscreenMap {
   select(selection: Awaited<ReturnType<Renderer["pick"]>>) {
     this.pickRequest++;
     this.selection = selection;
+    for (const mark of this.faceMarks) mark.remove();
+    this.faceMarks = [];
     element<HTMLButtonElement>("map-jump").disabled = !selection;
     if (!selection) {
       element<HTMLOutputElement>("map-selection").textContent = "未命中方块";
@@ -343,6 +358,12 @@ export class FullscreenMap {
     const axis = selection.normal
       .map(Math.abs)
       .indexOf(Math.max(...selection.normal.map(Math.abs)));
+    const center = selection.position.map((v,i) => v + 0.5 + (i === axis ? 0.5 * Math.sign(selection.normal[i]) : 0));
+    this.faceMarks = [
+      this.overlay.blockFace(selection, { fill: "#ffd76c88", stroke: "#fff", strokeWidth: 4 }),
+      this.overlay.blockFace(selection, { fill: "transparent", stroke: "#795400", strokeWidth: 2 }),
+      this.overlay.marker(center, { width: 10, height: 10, fill: "#ffd76c", stroke: "#795400" }),
+    ];
     const face = [
       ["西面", "东面"],
       ["底面", "顶面"],
@@ -381,7 +402,11 @@ export class FullscreenMap {
       this.pending = null;
       this.pick(camera,pixel);
     }
-    this.drawOverlay();
+    const position = [...this.mainCamera.position];
+    if (this.isOverview) position[1] = this.center[1];
+    this.arrow?.setPosition(position);
+    this.arrow?.setDirection(cameraBasis(this.mainCamera).forward);
+    this.drawBackground();
   }
   /** 叠加标记与区块占用使用同一个投影，旋转后仍与地形对齐。 */
   screen(point: number[]) {
@@ -420,8 +445,8 @@ export class FullscreenMap {
     }
     this.occupancy = { key, x: low[0] * 512, z: low[1] * 512, canvas };
   }
-  /** 占用图整体变换，射线尺度时画布仅保留位置和选点标记。 */
-  drawOverlay() {
+  /** 远处绘制区块占用底图，近处保留透明画布处理地图输入。 */
+  drawBackground() {
     const canvas = this.canvas,
       ctx = this.context,
       ratio = devicePixelRatio;
@@ -458,66 +483,5 @@ export class FullscreenMap {
       ctx.fillStyle = "#526d67";
       ctx.fillText("区块占用图 · 单击定位并放大", 18, 28);
     }
-    if (this.selection && !this.isOverview) {
-      const p = this.selection.position.map((v) => v + 0.5),
-        normal = this.selection.normal;
-      const axis = normal
-        .map(Math.abs)
-        .indexOf(Math.max(...normal.map(Math.abs)));
-      p[axis] += normal[axis] > 0 ? 0.51 : -0.51;
-      const axes = [0, 1, 2].filter((i) => i !== axis);
-      const corners = [
-        [-1, -1],
-        [1, -1],
-        [1, 1],
-        [-1, 1],
-      ].map(([a, b]) => {
-        const point = [...p];
-        point[axes[0]] += a * 0.5;
-        point[axes[1]] += b * 0.5;
-        return this.screen(point);
-      });
-      ctx.beginPath();
-      corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
-      ctx.fillStyle = "#ffd76c88";
-      ctx.fill();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = "#fff";
-      ctx.stroke();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#795400";
-      ctx.stroke();
-      const [x, y] = this.screen(p);
-      ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffd76c";
-      ctx.fill();
-      ctx.stroke();
-    }
-    const player = [...this.mainCamera.position];
-    if (this.isOverview) player[1] = this.center[1];
-    const [x, y] = this.screen(player);
-    const forward = cameraBasis(this.mainCamera).forward;
-    const ahead = this.screen(player.map((v, i) => v + forward[i] * 10));
-    const angle = Math.atan2(ahead[1] - y, ahead[0] - x);
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.moveTo(12, 0);
-    ctx.lineTo(-7, -7);
-    ctx.lineTo(-3, 0);
-    ctx.lineTo(-7, 7);
-    ctx.closePath();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "#fff";
-    ctx.stroke();
-    ctx.fillStyle = "#0b6b6b";
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "#163e3b";
-    ctx.stroke();
-    ctx.restore();
   }
 }

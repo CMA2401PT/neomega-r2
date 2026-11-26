@@ -22,7 +22,6 @@
     const renderer = await createRenderer(canvas, {
       readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
       depthOutput: true,
-      useWebGPU: new URLSearchParams(location.search).get("backend") !== "webgl",
     });
 
     // 无限海面可以直接绘制。这里用它提供一个有深度的表面，地平线上方则是天空。

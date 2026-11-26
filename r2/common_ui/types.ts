@@ -37,8 +37,6 @@ export interface ViewOptions {
   camera: Camera;
   settings: ViewSettings;
   scene(): { name?: string; ocean?: number; connection?: { state: string } };
-  /** 宿主支持通过 ?backend=webgl 或 webgpu 重载页面。 */
-  switchBackend?: boolean;
   onSettings?(): void;
   onStats?(value: ViewStats): void;
   report?(event: string, detail?: Record<string, unknown>): void;

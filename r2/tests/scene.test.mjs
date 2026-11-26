@@ -4,7 +4,7 @@ import { prepareRegion, unpack, decodeRegion, modelOf } from "../src/scene/prepa
 import { WordAllocator } from "../src/render/allocator.ts";
 import { ObjectStore } from "../src/objects/store.ts";
 import { ObjectRegistry } from "../src/objects/registry.ts";
-import { WorldGPU } from "../src/render/world-gpu.ts";
+import { RegionDirectory } from "../src/render/region-directory.ts";
 const catalog = {
   fragmentReach: 1,
   models: [
@@ -133,26 +133,13 @@ test("区域地址反复回收后恢复完整容量", () => {
     assert.deepEqual(allocator.free, [{ start: 1, length: 8192 }]);
   }
 });
-function fakeGL() {
-  let next = 0;
-  return new Proxy(
-    { createTexture: () => ++next },
-    {
-      get: (target, key) =>
-        key in target
-          ? target[key]
-          : typeof key === "string" && key.toUpperCase() === key
-            ? key
-            : () => {},
-    },
-  );
-}
+
 test("循环目录移动不重新分配区域，释放后父层也清空", () => {
-  const gpu = new WorldGPU(
-    fakeGL(),
-    { get: (n) => n },
-    { capacityWords: 4096 },
-  );
+  class Directory extends RegionDirectory {
+    uploadWords() {}
+    uploadDirectory() {}
+  }
+  const gpu = new Directory({ capacityWords: 4096 });
   const prepared = prepareRegion({
     x: -1,
     z: 0,
@@ -184,8 +171,7 @@ test("循环目录移动不重新分配区域，释放后父层也清空", () =>
   assert(gpu.levels.every((l) => l.data.every((v) => v === 0)));
 });
 test("不同类型共用实例层，旧候选句柄不指向回收后新部件", async () => {
-  const gl = fakeGL(),
-    store = new ObjectStore(gl, { get: (n) => n }),
+  const store = new ObjectStore({ image() {}, rows() {}, dispose() {} }),
     registry = new ObjectRegistry().register("actor", () => ({
       texture: {
         width: 1,

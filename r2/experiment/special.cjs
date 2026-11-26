@@ -17,7 +17,7 @@ fs.mkdirSync(out, { recursive: true });
       errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-    await page.goto(base + "/?scene=special&backend=webgl");
+    await page.goto(base + "/?scene=special");
     await page.waitForFunction(
       () => globalThis.r2?.state.ready && r2.state.times.length >= 30,
       null,
@@ -27,8 +27,8 @@ fs.mkdirSync(out, { recursive: true });
       await page.evaluate(() => r2.resetTiming());
       await page.waitForFunction(() => r2.state.times.length >= 15);
       return Buffer.from(
-        await page.evaluate(() => {
-          const pixels = r2.pixels();
+        await page.evaluate(async () => {
+          const pixels = await r2.pixels();
           let value = "";
           for (let i = 0; i < pixels.length; i += 8192)
             value += String.fromCharCode(...pixels.subarray(i, i + 8192));
@@ -114,7 +114,6 @@ fs.mkdirSync(out, { recursive: true });
       else assert.notDeepEqual(on, off, probe.name);
       probes.push({ ...probe, on, off });
     }
-    assert.equal(await page.evaluate(() => r2.gl.getError()), 0);
     assert.deepEqual(errors, []);
     fs.writeFileSync(
       path.join(out, "results.json"),

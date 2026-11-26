@@ -1,6 +1,7 @@
 // 实例只改变局部求交；命中排序、透明裁切和光照仍由公共射线管线负责。
 uniform bool uObjectsEnabled;
-uniform sampler2D uObjectData,uObjectAtlas;
+layout(binding=16) uniform texture2D uObjectData;
+layout(binding=17) uniform texture2D uObjectAtlas;
 vec4 objectWord(int at){return texelFetch(uObjectData,ivec2(at%1024,at/1024),0);}
 void intersectObject(uint handle,float begin,float end,inout Hit hit){
  if(!uObjectsEnabled)return;
@@ -15,6 +16,6 @@ void intersectObject(uint handle,float begin,float end,inout Hit hit){
  bool plus=entering?d[axis]<0.0:d[axis]>0.0;vec3 p=(o+d*t-minimum.xyz)/(maximum.xyz-minimum.xyz);
  vec2 uv=axis==0?vec2(p.z,1.0-p.y):axis==1?p.xz:vec2(p.x,1.0-p.y);vec4 region=objectWord(at+6+axis*2+int(plus));
  // 图集只有第 0 级；显式选级避免在非一致射线循环中请求屏幕导数。
- vec4 texel=textureLod(uObjectAtlas,region.xy+clamp(uv,vec2(.00001),vec2(.99999))*region.zw,0.0);if(texel.a<.1)return;
+ vec4 texel=textureLod(sampler2D(uObjectAtlas,tiles),region.xy+clamp(uv,vec2(.00001),vec2(.99999))*region.zw,0.0);if(texel.a<.1)return;
  faceTests++;vec3 normal=vec3(0);normal[axis]=plus?1.0:-1.0;hit.t=t;hit.color=linearColor(texel.rgb);hit.alpha=1.0;vec3 n=normalize(transpose(mat3(inverseModel))*normal);hit.material=plainMaterial(dot(n,ray)>0.0?-n:n);hit.unlit=false;
 }

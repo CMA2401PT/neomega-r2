@@ -4,7 +4,7 @@ import type { TextureSet } from "../render/textures.ts";
 import type { RegionDirectory } from "../render/region-directory.ts";
 import type { WorkerRequest, WorkerResponse } from "../scene/worker.ts";
 import type { ObjectDescriptor, PreparedR2Region } from "../contracts.ts";
-import type { createRenderer } from "../render/renderer.ts";
+import type { createRenderer } from "../render/webgpu.ts";
 
 type Renderer = Awaited<ReturnType<typeof createRenderer>>;
 

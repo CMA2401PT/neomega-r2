@@ -50,7 +50,7 @@ export interface ObjectRecipe {
   pose: (time: number, partIndex: number) => ObjectPose;
 }
 
-/** 外观实现无需接触 WebGL 或存档读取。 */
+/** 外观实现无需接触 GPU 或存档读取。 */
 export type ObjectFactory = (
   descriptor: ObjectDescriptor,
 ) => ObjectRecipe | Promise<ObjectRecipe>;

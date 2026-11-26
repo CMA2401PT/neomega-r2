@@ -11,7 +11,7 @@ fs.mkdirSync(out, { recursive: true });
 /** 等当前场景显示完整，再积累 count 帧 GPU 计时。 */
 const settle = (page, count) =>
   page.waitForFunction((count) => r2.state.ready && r2.state.times.length >= count, count, { timeout: 90000 });
-const read = (page) => page.evaluate(() => Array.from(r2.pixels()));
+const read = (page) => page.evaluate(async () => Array.from(await r2.pixels()));
 
 (async () => {
   const browser = await launch();
@@ -21,7 +21,7 @@ const read = (page) => page.evaluate(() => Array.from(r2.pixels()));
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-    await page.goto(new URL("?backend=webgl",base).href);
+    await page.goto(base);
     await page.waitForFunction(() => globalThis.r2, null, { timeout: 90000 });
     await settle(page, 60);
     // 编辑跨过多次 HUD 刷新，并在三个输入框间移动焦点，再跳转。
@@ -58,7 +58,6 @@ const read = (page) => page.evaluate(() => Array.from(r2.pixels()));
       for (let i = 0; i < pixels.length; i += 4)
         if (pixels[i] === 255 && pixels[i + 1] === 0 && pixels[i + 2] === 255) overflows++;
       assert.equal(overflows, 0, name + " 出现遍历超限");
-      assert.equal(await page.evaluate(() => r2.gl.getError()), 0);
       await page.screenshot({ path: path.join(out, name + ".png") });
       await page.evaluate(() => {
         document.querySelector("#hierarchy").checked = false;

@@ -19,7 +19,6 @@ export async function start(options: MountOptions): Promise<Frontend> {
   const readResource = openMaterialPack(Uint8Array.from(atob(R2_DEFAULT_MATERIALS), (c) => c.charCodeAt(0)));
   const renderer = await createRenderer(element<HTMLCanvasElement>("view"), {
     readResource,
-    useWebGPU: options.useWebGPU ?? (isSecureContext && !!navigator.gpu),
     onProgress: ({ label }) => startupStage(label),
   });
   const bookURL = URL.createObjectURL(await (await readResource("book.png")).blob());
@@ -105,7 +104,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
     if (options.actions) element("host-actions").append(options.actions);
     await setScene(options);
     frame = requestAnimationFrame(draw);
-    return { moveCamera, setScene, setMaterialPack: materials.apply, dispose };
+    return { overlay: view.overlay, moveCamera, setScene, setMaterialPack: materials.apply, dispose };
   } catch (error) {
     dispose();
     throw error;
