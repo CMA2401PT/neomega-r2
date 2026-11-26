@@ -12,7 +12,7 @@ test("区域错误持续显示，恢复或切换世界后清除", async (t) => {
     textContent = "";
     dataset = {};
     style = {};
-    options = [{ value: "native" }];
+    options = [{ value: "1" }];
     classes = new Set();
     classList = { remove: (name) => this.classes.delete(name), add: (name) => this.classes.add(name) };
     addEventListener() {}
@@ -44,7 +44,7 @@ test("区域错误持续显示，恢复或切换世界后清除", async (t) => {
     }
   });
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const hud = createHUD({ settings: { resolution: "native" }, jump() {}, changed() {} });
+  const hud = createHUD({ settings: { resolution: "1" }, jump() {}, changed() {} });
   const stats = { failed: 1, failure: "区域 (0, 0) 加载失败：不支持数字 ID 格式", pending: 0, nearPending: 0, loaded: 0, wanted: 1 };
   const notice = document.getElementById("notice"), loading = document.getElementById("loading");
   hud.error(stats.failure);

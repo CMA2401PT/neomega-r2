@@ -35,7 +35,7 @@ const { launch, base } = require("./launch.cjs");
     // 场景以半分辨率求交，叠加层仍使用显示像素。
     await ui.evaluate(() => {
       const resolution = document.querySelector("#resolution");
-      resolution.value = "native-0.5";
+      resolution.value = "0.5";
       resolution.dispatchEvent(new Event("change"));
     });
     await ui.waitForFunction(() => document.querySelector("#resolution-value").textContent === "320×200");

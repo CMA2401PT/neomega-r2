@@ -27,16 +27,16 @@ export async function start(options: MountOptions): Promise<Frontend> {
   const settings: ViewSettings = {
     nearRadius: 4,
     farRadius: 8,
-    resolution: "native",
+    resolution: "1",
     speed: 32,
     tier: "shading",
     time: 10,
     timeFlow: false,
     fog: true,
     stillAccumulation: false,
-    photoScale: 2,
+    photoScale: 1,
     photoSupersample: 1,
-    exportScale: 2,
+    exportScale: 1,
     exportSupersample: 1,
   };
   const camera: Camera = { position: [8, 8, 20], yaw: 0, pitch: -0.35 };

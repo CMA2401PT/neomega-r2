@@ -4,11 +4,10 @@ import { appearanceDefaults, type Appearance } from "./appearance.js";
 import { element, settingInputs } from "./hud.js";
 import type { ViewSettings } from "./types.js";
 
-/** 旧版的数字字符串按 CSS 窗口尺寸取样，换算为本显示器上的物理像素倍数。 */
-export function screenResolution(value: string): string {
-  if (!["0.5", "0.75", "1", "1.5", "2"].includes(value)) return value;
-  const scale = Number(value) / devicePixelRatio;
-  return scale === 1 ? "native" : "native-" + scale;
+/** 沿用保存的倍率。旧版用 native 表示 1×，用 native-N 表示 N×。 */
+export function windowResolution(value: string): string {
+  if (value === "native") return "1";
+  return value.startsWith("native-") ? value.slice(7) : value;
 }
 
 const libraryKey = "neomega-r2-render-presets";
@@ -50,13 +49,12 @@ function decode(value: unknown): Preset {
   if (!("accumulationFilter" in s)) s.accumulationFilter = "off";
   if (!("superResolution" in s) || s.superResolution === "cnn-m") s.superResolution = "off";
   s.saveSuperResolution2x ??= false;
-  if (typeof s.resolution === "string") s.resolution = screenResolution(s.resolution);
+  if (typeof s.resolution === "string") s.resolution = windowResolution(s.resolution);
   function check(id: string, value: unknown) {
     const input = element<HTMLInputElement | HTMLSelectElement>(id);
     let valid: boolean;
     if (id === "resolution") {
-      valid = value === "native" || (typeof value === "string" && value.startsWith("native-") &&
-        Number.isFinite(Number(value.slice(7))) && Number(value.slice(7)) > 0);
+      valid = typeof value === "string" && Number.isFinite(Number(value)) && Number(value) > 0;
     } else if (input instanceof HTMLSelectElement) {
       valid = typeof value === (id === "accumulation-filter" || id === "super-resolution" ? "string" : "number") && [...input.options].some(o => o.value === String(value));
     } else if (input.type === "checkbox") valid = typeof value === "boolean";

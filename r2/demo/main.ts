@@ -16,9 +16,9 @@ const canvas = document.querySelector<HTMLCanvasElement>("#view")!,
   input = (id: string) => document.querySelector<HTMLInputElement>("#" + id)!,
   params = new URLSearchParams(location.search);
 const settings: ViewSettings = {
-  nearRadius: 4, farRadius: 8, speed: 32, resolution: "native", tier: "shading",
-  time: 10, timeFlow: false, fog: true, stillAccumulation: false, photoScale: 2, photoSupersample: 1,
-  exportScale: 2, exportSupersample: 1,
+  nearRadius: 4, farRadius: 8, speed: 32, resolution: "1", tier: "shading",
+  time: 10, timeFlow: false, fog: true, stillAccumulation: false, photoScale: 1, photoSupersample: 1,
+  exportScale: 1, exportSupersample: 1,
 };
 input("far-radius").min = "8";
 const renderer = await createRenderer(canvas, {

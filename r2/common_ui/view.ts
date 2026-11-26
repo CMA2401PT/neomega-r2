@@ -1,6 +1,6 @@
 import { appearanceDefaults, bindAppearance, lighting } from "./appearance.js";
 import { mountRenderDebug } from "./render-debug.js";
-import { bindPresets, screenResolution } from "./presets.js";
+import { bindPresets, windowResolution } from "./presets.js";
 import { FrameRate } from "./frame-rate.js";
 import { createHUD, element } from "./hud.js";
 import { FullscreenMap } from "./map.js";
@@ -28,7 +28,7 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
   const map = new FullscreenMap({ renderer, camera, jump, overlay: overlay.marks });
   const controls = new FlightControls(element<HTMLCanvasElement>("view"), camera);
   bindMovePad(element("movepad"), controls);
-  settings.resolution = screenResolution(settings.resolution);
+  settings.resolution = windowResolution(settings.resolution);
   if (settings.superResolution !== "cnn-xs" && settings.superResolution !== "cnn-s") settings.superResolution = "off";
   settings.saveSuperResolution2x ??= false;
   settings.accumulationFilter ??= "light";
@@ -60,6 +60,15 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       Math.sqrt(pixelLimit / (innerWidth * innerHeight)),
     );
     return { width: Math.max(1, Math.round(innerWidth * factor)), height: Math.max(1, Math.round(innerHeight * factor)) };
+  }
+  const sizeReadout = element<HTMLOutputElement>("resolution-value");
+  let sampleWidth = 0, sampleHeight = 0;
+  /** 显示当前画面的采样宽高，开启超分时仍沿用射线采样尺寸。 */
+  function showSampleSize(width: number, height: number) {
+    if (width === sampleWidth && height === sampleHeight) return;
+    sampleWidth = width;
+    sampleHeight = height;
+    sizeReadout.textContent = `${width}×${height}`;
   }
   // 预览之外的各档启动时不编译；第一次需要时在后台编译，期间画面继续使用已有的档。
   const taskStatus = element<HTMLOutputElement>("task-status");
@@ -175,7 +184,7 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
   addEventListener("keydown", (event) => {
     if (event.key === "Escape" && (photo || photoWaiting)) cancelPhoto();
   });
-  /** 拍照用累积渲染器，导出用当前预览档。两者都按屏幕实际像素和各自的尺寸倍数取图。
+  /** 拍照用累积渲染器，导出用当前预览档。两者都按窗口宽高和各自的倍率取图。
    * 两者都拍最近一帧的视图，地图打开时就是俯视画面。 */
   function startPhoto(kind: Photo["kind"]) {
     if (stopped) return;
@@ -184,7 +193,7 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
     if (!currentView) return;
     const scale = kind === "photo" ? settings.photoScale : settings.exportScale;
     const { width, height } = frameSize(
-      devicePixelRatio * scale,
+      scale,
       kind === "export" && scale <= 2 ? DEFAULT_EXPORT_PIXELS : Infinity,
     );
     const saveSuperResolution2x = settings.superResolution !== "off" && settings.saveSuperResolution2x;
@@ -194,8 +203,6 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       return;
     }
     renderer.cancelAccumulation();
-    const pngScale = saveSuperResolution2x ? 2 : 1;
-    element<HTMLOutputElement>("resolution-value").textContent = `${width * pngScale}×${height * pngScale}`;
     rate.reset();
     const supersample = kind === "export" ? settings.exportSupersample : settings.photoSupersample;
     const film = renderer.photograph(currentView.camera, {
@@ -212,6 +219,7 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       objects: currentView.objects,
     });
     const name = `${world.name || "天空"}-${new Date().toTimeString().slice(0, 8).replaceAll(":", "")}${kind === "export" ? `-${shownTier}` : ""}${saveSuperResolution2x ? "-2x" : ""}.png`;
+    showSampleSize(width, height);
     overlay.hide();
     photo = Object.assign(film, { name, kind, supersample, finishing: false });
     setPhotoButton();
@@ -295,7 +303,7 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
     session?.focus(view.center, { ...settings, nearPosition: camera.position });
     session?.publish();
     map.refresh(session);
-    const { width, height } = frameSize(devicePixelRatio * (settings.resolution === "native" ? 1 : Number(settings.resolution.slice(7))));
+    const { width, height } = frameSize(Number(settings.resolution));
     const screenSize = frameSize(devicePixelRatio);
     const light = lighting(appearance, settings.time),
       objects = view.objects;
@@ -342,6 +350,7 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
         objects,
         ...drawOptions,
       });
+      if (rendered) showSampleSize(width, height);
       if (rendered && !changed && !firstStillFrameReady) {
         report("accumulation-first-frame-start");
       }
@@ -357,7 +366,6 @@ export function createView({ renderer, camera, settings, scene, onSettings, onSt
       syncAngles();
       hud.position(camera.position);
       drawAxes(element<HTMLCanvasElement>("axes"), camera);
-      element<HTMLOutputElement>("resolution-value").textContent = `${width}×${height}`;
       const fps = rate.fps;
       const tiles = renderer.tileProgress;
       // GPU 忙时本次刷新可能没有提交新样本，静止状态仍应显示当前累计数量。

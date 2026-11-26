@@ -113,9 +113,9 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
       const input = element<HTMLInputElement | HTMLSelectElement>(id);
       if (key === "fog" || key === "saveSuperResolution2x") (input as HTMLInputElement).checked = !!settings[key];
       else if (key === "resolution" && input instanceof HTMLSelectElement) {
-        // 旧窗口倍数在非整数像素比的显示器上可能对应一个自定义屏幕倍数。
+        // 旧参数组可能含有菜单之外的自定义倍率。
         if (![...input.options].some(option => option.value === settings.resolution))
-          input.add(new Option("屏幕尺寸 " + Number(settings.resolution.slice(7)).toFixed(3) + "×", settings.resolution));
+          input.add(new Option("窗口尺寸 " + Number(Number(settings.resolution).toFixed(3)) + "×", settings.resolution));
         input.value = settings.resolution;
       }
       else input.value = String(settings[key]);

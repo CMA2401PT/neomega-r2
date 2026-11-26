@@ -107,7 +107,7 @@
     <canvas id="map-overlay" tabindex="0" aria-label="全屏地图" hidden></canvas>
     <div id="readouts" class="chrome">
       <canvas id="axes" aria-hidden="true"></canvas
-      ><output id="resolution-value"></output><output id="fps">FPS —</output>
+      ><output id="resolution-value" aria-label="采样宽高"></output><output id="fps">FPS —</output>
     </div>
     <output id="loading" role="status"></output>
     <section id="startup-status" class="panel" role="status" aria-live="polite">
@@ -560,13 +560,13 @@
           <p class="hint">近景启用特殊对象，远景覆盖完整静态模型。</p>
           <h3>画质</h3>
           <label class="setting">渲染分辨率<select id="resolution">
-              <option value="native-0.5">屏幕尺寸 0.5×</option>
-              <option value="native-0.75">屏幕尺寸 0.75×</option>
-              <option value="native">屏幕尺寸 1×</option>
-              <option value="native-1.5">屏幕尺寸 1.5×</option>
-              <option value="native-2">屏幕尺寸 2×</option>
-              <option value="native-3">屏幕尺寸 3×</option>
-              <option value="native-4">屏幕尺寸 4×</option>
+              <option value="0.5">窗口尺寸 0.5×</option>
+              <option value="0.75">窗口尺寸 0.75×</option>
+              <option value="1">窗口尺寸 1×</option>
+              <option value="1.5">窗口尺寸 1.5×</option>
+              <option value="2">窗口尺寸 2×</option>
+              <option value="3">窗口尺寸 3×</option>
+              <option value="4">窗口尺寸 4×</option>
             </select></label>
           <label class="setting">超分画质增强<select id="super-resolution">
               <option value="off">关闭</option>
@@ -589,10 +589,10 @@
           <p class="hint">开启超分后可用。导出和拍照默认保存所选尺寸；勾选后 PNG 的宽高各翻倍。</p>
           <h3><svg><use href="#i-export" /></svg>导出当前画面</h3>
           <label class="setting">输出尺寸<select id="export-scale" aria-label="导出当前画面输出尺寸">
-              <option value="1">屏幕尺寸 1×</option>
-              <option value="2">屏幕尺寸 2×</option>
-              <option value="3">屏幕尺寸 3×</option>
-              <option value="4">屏幕尺寸 4×</option>
+              <option value="1">窗口尺寸 1×</option>
+              <option value="2">窗口尺寸 2×</option>
+              <option value="3">窗口尺寸 3×</option>
+              <option value="4">窗口尺寸 4×</option>
             </select></label>
           <label class="setting">超采样<select id="export-supersample" aria-label="导出当前画面超采样">
               <option value="1">关闭（1×1）</option>
@@ -602,10 +602,10 @@
           <p class="hint">用当前预览渲染器重绘。超采样在每个像素内多次取样，平滑方块轮廓。4×4 采满 16 轮后自动保存。</p>
           <h3><svg><use href="#i-camera" /></svg>拍照</h3>
           <label class="setting">输出尺寸<select id="photo-scale" aria-label="拍照输出尺寸">
-              <option value="1">屏幕尺寸 1×</option>
-              <option value="2">屏幕尺寸 2×</option>
-              <option value="3">屏幕尺寸 3×</option>
-              <option value="4">屏幕尺寸 4×</option>
+              <option value="1">窗口尺寸 1×</option>
+              <option value="2">窗口尺寸 2×</option>
+              <option value="3">窗口尺寸 3×</option>
+              <option value="4">窗口尺寸 4×</option>
             </select></label>
           <label class="setting">超采样<select id="photo-supersample" aria-label="拍照超采样">
               <option value="1">关闭（1×1）</option>
