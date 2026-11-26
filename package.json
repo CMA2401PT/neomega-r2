@@ -1,0 +1,23 @@
+{
+  "name": "neomega-r2-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "r2-core",
+    "r2-link",
+    "assets-utils",
+    "r2-frontend"
+  ],
+  "scripts": {
+    "build": "npm -w r2-core run build && npm -w r2-link run build && npm -w assets-utils run build && npm -w r2-frontend run build",
+    "check": "npm -w r2-core run check && npm -w r2-link run check && npm -w assets-utils run check && npm -w r2-frontend run check",
+    "test": "npm -w r2-core test && npm -w r2-link test && npm -w assets-utils test && npm -w r2-frontend test",
+    "demo": "npm run build && node r2-frontend/scripts/serve.mjs"
+  },
+  "devDependencies": {
+    "@webgpu/types": "0.1.74",
+    "adm-zip": "0.6.1",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

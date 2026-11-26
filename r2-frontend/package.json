@@ -1,0 +1,33 @@
+{
+  "name": "neomega-r2-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "R2 合成后处理管线与共享查看界面",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./compositor": {
+      "types": "./dist/compositor.d.ts",
+      "import": "./dist/compositor.js"
+    },
+    "./ui": {
+      "types": "./dist/ui.d.ts",
+      "import": "./dist/ui.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc --noEmit && tsc --noEmit -p demo",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "neomega-r2-core": "*",
+    "neomega-r2-materials": "*"
+  }
+}

@@ -38,23 +38,27 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: neomega-r2/r2/package-lock.json
+          cache-dependency-path: neomega-r2/package-lock.json
       - run: npm ci
-        working-directory: neomega-r2/r2
+        working-directory: neomega-r2
       - name: 从原始模型与贴图生成两个材质包
         working-directory: neomega-r2/assets-utils
         run: |
           go generate
           go test ./...
       - name: 构建并验证独立入口
-        working-directory: neomega-r2/r2
+        working-directory: neomega-r2
         run: |
           npm run build
           npm run check
           npm test
           mkdir -p "$RUNNER_TEMP/r2-browser"
-          cp dist/{r2-core.js,r2-frontend.js,r2-link.js,default-materials.zip,material-info.zip} "$RUNNER_TEMP/r2-browser/"
-          cp ../assets-utils/sourceassets/THIRD_PARTY_NOTICES.txt "$RUNNER_TEMP/r2-browser/"
+          cp r2-core/dist/release/r2-core.js "$RUNNER_TEMP/r2-browser/"
+          cp r2-link/dist/release/r2-link.js "$RUNNER_TEMP/r2-browser/"
+          cp assets-utils/dist/release/r2-materials.js "$RUNNER_TEMP/r2-browser/"
+          cp assets-utils/{default-materials.zip,material-info.zip} "$RUNNER_TEMP/r2-browser/"
+          cp r2-frontend/dist/release/r2-frontend.js "$RUNNER_TEMP/r2-browser/"
+          cp assets-utils/sourceassets/THIRD_PARTY_NOTICES.txt "$RUNNER_TEMP/r2-browser/"
       - uses: actions/upload-artifact@v6
         with:
           name: r2-browser
@@ -94,4 +98,4 @@ jobs:
             echo "main 已更新，跳过旧构建的上传。"
             exit 0
           fi
-          "$RUNNER_TEMP/cos-sdk/bin/python" r2/scripts/publish-cos.py r2-browser
+          "$RUNNER_TEMP/cos-sdk/bin/python" scripts/publish-cos.py r2-browser

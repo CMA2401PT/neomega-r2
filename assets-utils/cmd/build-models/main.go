@@ -282,7 +282,7 @@ func generate() error {
 			}
 		}
 	}
-	cmd := exec.Command("node", "../r2/scripts/material-packs.mjs", output)
+	cmd := exec.Command("node", "./scripts/material-packs.mjs", output)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>从一帧渲染取得颜色、深度与拾取</title>
+  <style>
+    body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui; }
+    canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+  </style>
+  <h1>一帧的颜色、深度与拾取</h1>
+  <canvas width="640" height="360"></canvas>
+  <p>移动指针查看像素颜色与深度；点按画面可调用射线拾取查询方块坐标与法线。</p>
+  <output>正在绘制海面…</output>
+  <script type="module">
+    import { createRenderer } from "./r2-core.js";
+    import { openMaterialPack } from "./r2-materials.js";
+
+    // 在 neomega-r2 根目录运行 npm run demo，打开 http://127.0.0.1:2415/release/color-depth.html。
+    // 独立部署时，把本页、r2-core.js、r2-materials.js 和 default-materials.zip 放到同一目录。
+    const canvas = document.querySelector("canvas");
+    const output = document.querySelector("output");
+    const pack = await fetch("./default-materials.zip");
+    const renderer = await createRenderer({
+      readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
+      depthOutput: true,
+    });
+
+    // 无限海面可以直接绘制。这里用它提供一个有深度的表面，地平线上方则是天空。
+    const camera = { position: [0, 8, 0], yaw: 0, pitch: -0.2 };
+    const { width, height } = canvas;
+    await renderer.render(camera, { width, height, ocean: 0, synchronize: true });
+
+    // 在下一次 render 之前同时取出两份数据，两份数组均从左上角逐行排列。
+    // rgba 是每像素四个字节的 Uint8Array，depth 是每像素一个格数的 Float32Array。
+    const [rgba, depth] = await Promise.all([renderer.pixels(), renderer.depthPixels()]);
+    const ctx = canvas.getContext("2d");
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), width, height), 0, 0);
+
+    function showPixel(x, y, picked = "") {
+      const i = y * width + x;
+      const [r, g, b] = rgba.subarray(4 * i, 4 * i + 3);
+      const distance = depth[i] < 0 ? "天空（−1）" : depth[i].toFixed(2) + " 格";
+      output.textContent = `像素 (${x}, ${y}) · RGB (${r}, ${g}, ${b}) · 深度 ${distance}${picked}`;
+    }
+    showPixel(Math.floor(width / 2), Math.floor(height / 2));
+
+    function coords(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.floor((event.clientX - rect.left) * width / rect.width),
+        y: Math.floor((event.clientY - rect.top) * height / rect.height),
+      };
+    }
+    canvas.addEventListener("pointermove", event => {
+      const { x, y } = coords(event);
+      if (x >= 0 && x < width && y >= 0 && y < height) showPixel(x, y);
+    });
+    canvas.addEventListener("pointerdown", async event => {
+      const { x, y } = coords(event);
+      if (x < 0 || x >= width || y < 0 || y >= height) return;
+      const hit = await renderer.pick(camera, { width, height, x, y });
+      const info = hit ? ` · 拾取方块 [${hit.position.join(", ")}] 法线 [${hit.normal.join(", ")}]` : " · 未命中方块";
+      showPixel(x, y, info);
+    });
+    window.addEventListener("pagehide", event => { if (!event.persisted) renderer.dispose(); });
+  </script>
+</html>

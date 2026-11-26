@@ -1,5 +1,8 @@
 .DS_Store
-/r2/node_modules/
-/r2/dist/
-/r2/demo/dist/
+/node_modules/
+/r2-core/dist/
+/r2-link/dist/
+/assets-utils/dist/
+/r2-frontend/dist/
+/r2-frontend/demo/dist/
 /assets-utils/assets/
