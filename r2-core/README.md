@@ -3,7 +3,7 @@
 `r2-core` 是 R2 的**纯离屏 WebGPU 射线渲染核心**与**世界会话层**，**零运行时第三方依赖**。它隐藏了循环体素目录、层次空域跳跃、跨格片段、光线反弹与动态对象求交等全部渲染细节，只向调用方暴露一组清晰的核心能力：
 
 1. **离屏帧输出（RGB + Depth）**：调用 `renderer.render(camera, options)`，产出左上角原点的 `rgba8unorm` 颜色纹理 `renderer.frame.color` 与可选 `r32float` 深度纹理 `renderer.frame.depth`（或通过 `pixels()` / `depthPixels()` 读回数组）。
-2. **射线拾取（`pick`）**：查询指定像素命中的世界整数方块坐标与面法线。
+2. **射线拾取（`pick`）**：查询指定像素命中的方块坐标与面法线。启用对象拾取后，还能取得命中对象的稳定标识。
 3. **离屏多采样抓取（`createCapture`）**：以超采样网格与多轮反弹逐块累积高质量画面，输出同样遵循 `FrameOutput` 契约，供上层降噪、超分或保存为 PNG。
 4. **世界会话与基础数据源**：`WorldSession`、`DataSource`、`MemoryWorld` 与 `ObjectRegistry`。
 
@@ -75,7 +75,12 @@ renderer.render({ position: [8, 6, 20], yaw: 0, pitch: -0.4 }, { width: 1280, he
 ### 区域编码与活动对象
 
 - 自定义数据源可使用 `encodeRegion` 与 `blockHash` 编码 16×16×16 子区块（XZY 排列），实现见 [src/source/memory.ts](src/source/memory.ts) 与 [src/source/hash.ts](src/source/hash.ts)。
-- 浏览器前端把需要绘制的部件转换为 `ObjectDescriptor`。核心通过 `ObjectRegistry` 找到对应工厂，接收几何、贴图和位姿。主视图拾取时传入 `objects: true`，可取得跨格部件所属方块的坐标。内置外观见 [前端特殊方块](../r2-frontend/src/special-blocks/)。
+
+对象用场景内唯一的 `key` 标识，可以放在带小数的世界坐标上。数据源按对象原点所在的近景区域提交。核心用覆盖整个动画的局部包围盒，把部件登记到它们可能出现的格子。射线从其他格子击中部件时，也能找回同一个对象。现有的[前端特殊方块](../r2-frontend/src/special-blocks/)同样通过这个接口绘制。
+
+用 `ObjectRegistry.register(kind, factory)` 注册对象的局部几何、贴图和位姿。在 `MemoryWorld` 中，调用 `world.addObject(descriptor)` 后用 `world.commit()` 发布。移动时沿用 `key`、`kind` 和 `data`，只改 `position`。改变局部外观时提交新的 `data` 值。移除时调用 `world.removeObject(key)` 并再次发布。自定义数据源通过 `sink.objects(x, z, descriptors)` 提交区域快照，跨区域移动时需要更新新旧两个区域。
+
+用 `renderer.pick(camera, { width, height, x, y, objects: true })` 拾取对象。命中对象时，`hit.objectKey` 是提交时的标识，`hit.position` 是对象原点所在格。命中地形时，`hit.position` 是所属方块坐标。
 
 ## 构建与测试
 

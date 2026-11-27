@@ -537,7 +537,7 @@ export async function createRenderer(
       pixel: { width: number; height: number; x: number; y: number; objects?: boolean; voxel?: boolean },
     ): Promise<PickResult | null> {
       const tier =
-        !pixel.voxel && (programs.has("basic") || programs.has("shading") || programs.has("accumulation"))
+        !pixel.voxel && (pixel.objects || programs.has("basic") || programs.has("shading") || programs.has("accumulation"))
           ? "basic-pick"
           : "voxel-pick";
       await compileProgram(tier);
@@ -547,6 +547,8 @@ export async function createRenderer(
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
       });
       try {
+        // 宿主可以在两帧之间移动对象并立即拾取，位姿应当与当前空间目录使用同一世界原点。
+        if (pixel.objects) objects.store.update(waterTime, world?.origin ?? [0, 0, 0]);
         prepare(
           camera,
           tier,
@@ -575,7 +577,7 @@ export async function createRenderer(
           if (objects.store.version !== objectVersion) return null;
           for (const object of objects.store.objects.values()) {
             if (object.slots.some(part => part.slot === owner - 1))
-              return { position: object.descriptor.position.map(Math.floor), normal };
+              return { objectKey: object.descriptor.key, position: object.descriptor.position.map(Math.floor), normal };
           }
           return null;
         }

@@ -213,6 +213,27 @@ test("不同类型共用实例层，旧候选句柄不指向回收后新部件",
   const next = store.references()[0].ids[0];
   assert.equal(old & 4095, next & 4095);
   assert.notEqual(old, next);
+  // 新区域先收到同一个对象时应接管它。随后撤回旧区域，不能回收新位置的部件。
+  const changed = [];
+  const move = (region, x) => store.setRegion(region, [
+    { key: "new", kind: "actor", position: [x, 0, 0] },
+  ], registry, ref => changed.push(ref.bounds));
+  await move("c", 128.25);
+  assert.deepEqual(changed, [
+    [[1, 0, 0], [2, 1, 1]],
+    [[128.25, 0, 0], [129.25, 1, 1]],
+  ]);
+  store.removeRegion("b");
+  assert.deepEqual(store.references()[0].ids, [next]);
+  changed.length = 0;
+  const version = store.version;
+  await move("c", 128.75);
+  assert.ok(store.version > version);
+  assert.deepEqual(store.references()[0].owner, [128.75, 0, 0]);
+  assert.deepEqual(changed, [], "位姿已移动，但格子覆盖没有改变");
+  store.removeRegion("c", ref => changed.push(ref.bounds));
+  assert.deepEqual(changed, [[[128.75, 0, 0], [129.75, 1, 1]]]);
+  assert.deepEqual(store.references(), []);
   store.clear();
   assert.equal(store.images.size, 0);
   assert(store.tiles.every((v) => v === 0));

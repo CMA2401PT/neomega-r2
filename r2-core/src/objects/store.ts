@@ -9,13 +9,34 @@ interface AtlasImage {
   width: number;
   height: number;
   refs: number;
-  name: string;
+  name: string | Uint8Array;
 }
 interface StoredObject {
+  region: string;
   descriptor: ObjectDescriptor;
+  reference: ObjectReference;
   recipe: ObjectRecipe;
   image: AtlasImage;
   slots: Array<{ slot: number; id: number }>;
+}
+
+/** 包围盒用世界坐标，部件几何仍保留在对象自己的坐标系中。 */
+function objectReference(descriptor: ObjectDescriptor, recipe: ObjectRecipe, ids: number[]): ObjectReference {
+  return {
+    key: descriptor.key,
+    owner: descriptor.position,
+    replace: !!descriptor.replace,
+    bounds: recipe.bounds.map(p => p.map((v, i) => v + descriptor.position[i])),
+    ids,
+  };
+}
+
+/** 半开包围盒覆盖的格子不变时，移动只需要上传位姿。替换本格的对象还需比较它覆盖的本体。 */
+function sameCells(a: ObjectReference, b: ObjectReference): boolean {
+  return a.replace === b.replace &&
+    (!a.replace || a.owner.every((v, i) => Math.floor(v) === Math.floor(b.owner[i]))) &&
+    a.bounds[0].every((v, i) => Math.floor(v) === Math.floor(b.bounds[0][i])) &&
+    a.bounds[1].every((v, i) => Math.ceil(v) === Math.ceil(b.bounds[1][i]));
 }
 
 const SIDE = 2048,
@@ -39,13 +60,13 @@ export class ObjectStore {
   private uploads: ObjectUploads;
   objects = new Map<string, StoredObject>();
   regions = new Map<string, Set<string>>();
-  images = new Map<string, AtlasImage>();
+  images = new Map<string | Uint8Array, AtlasImage>();
   tiles = new Uint8Array(32 * 32);
   free = Array.from({ length: SLOTS }, (_, i) => SLOTS - 1 - i);
   generations = new Uint32Array(SLOTS);
   data = new Float32Array(SLOTS * STRIDE);
   high = 0;
-  // 对象增删时加一；动画本身不改变它。
+  // 对象增删、移动或更换外观时递增。
   version = 0;
   /** 宿主可整体关闭对象绘制；undefined 视为开启。 */
   enabled: boolean | undefined;
@@ -55,8 +76,8 @@ export class ObjectStore {
     this.uploads = uploads;
     this.textureBytes = this.data.byteLength + SIDE * SIDE * 4;
   }
-  async image(source: ObjectTexture, key: string): Promise<AtlasImage> {
-    const name = source.url ?? source.cacheKey ?? key;
+  async image(source: ObjectTexture): Promise<AtlasImage> {
+    const name = source.url ?? source.cacheKey ?? source.pixels!;
     let cached = this.images.get(name);
     if (cached) {
       cached.refs++;
@@ -89,69 +110,104 @@ export class ObjectStore {
     this.images.set(name, cached);
     return cached;
   }
-  /** 更新拥有者区域的实例，返回候选是否改变；无变化时宿主不必重建静态区域。 */
-  async setRegion(key: string, descriptors: ObjectDescriptor[], registry: ObjectRegistry): Promise<boolean> {
-    const previous = this.regions.get(key) ?? new Set<string>();
+  /** 同一 key 保留身份。移动只更新位姿和覆盖到的格子，只有外观变化才重新申请部件。 */
+  async setRegion(
+    region: string,
+    descriptors: ObjectDescriptor[],
+    registry: ObjectRegistry,
+    invalidate?: (reference: ObjectReference) => void,
+    current: () => boolean = () => true,
+  ): Promise<boolean> {
+    const version = this.version;
+    const members = new Set(this.regions.get(region));
+    this.regions.set(region, members);
     const wanted = new Set(descriptors.map(d => d.key));
-    const changed = previous.size !== wanted.size || [...previous].some(name => !wanted.has(name));
-    if (!changed) return false;
-    // 先释放已撤销的对象，使新文字能复用旧贴图的位置。
-    const installed = new Set<string>();
-    this.regions.set(key, installed);
-    for (const name of previous) {
-      if (wanted.has(name)) installed.add(name);
-      else this.remove(name);
-    }
-    try {
-      for (const descriptor of descriptors) {
-        if (installed.has(descriptor.key)) continue;
-        const recipe = await registry.create(descriptor);
-        if (this.regions.get(key) !== installed) throw new DOMException("区域已经卸载", "AbortError");
-        if (recipe.parts.length > this.free.length) throw Error("特殊对象部件空间不足");
-        const image = await this.image(recipe.texture, descriptor.key);
-        if (this.regions.get(key) !== installed) {
-          this.releaseImage(image);
-          throw new DOMException("区域已经卸载", "AbortError");
+    for (const name of members)
+      if (!wanted.has(name)) this.remove(name, invalidate);
+
+    for (const descriptor of descriptors) {
+      const old = this.objects.get(descriptor.key);
+      if (old && old.descriptor.kind === descriptor.kind && Object.is(old.descriptor.data, descriptor.data)) {
+        // 新区域的快照可能先到；转移归属后，旧区域的撤回只能删除它仍拥有的对象。
+        if (old.region !== region) {
+          this.regions.get(old.region)?.delete(descriptor.key);
+          members.add(descriptor.key);
+          old.region = region;
         }
-        const slots: StoredObject["slots"] = [];
-        for (const part of recipe.parts) {
-          const slot = this.free.pop()!;
-          const generation = ++this.generations[slot];
-          slots.push({
-            slot,
-            id: (0x80000000 | (generation << 12) | slot) >>> 0,
-          });
-          this.high = Math.max(this.high, slot + 1);
-          const at = slot * STRIDE;
-          this.data.set([...part.minimum, generation], at + 16);
-          this.data.set([...part.maximum, part.unlitFaces ?? 0], at + 20);
-          for (let face = 0; face < 6; face++) {
-            const uv = part.faces[face];
-            this.data.set(
-              [(image.x * TILE + uv[0]) / SIDE, (image.y * TILE + uv[1]) / SIDE, uv[2] / SIDE, uv[3] / SIDE],
-              at + 24 + face * 4,
-            );
-          }
+        if (descriptor.position.every((v, i) => v === old.descriptor.position[i]) &&
+            !!descriptor.replace === !!old.descriptor.replace) continue;
+        const previous = old.reference;
+        old.descriptor = { ...descriptor, position: [...descriptor.position] };
+        old.reference = objectReference(old.descriptor, old.recipe, previous.ids);
+        if (!sameCells(previous, old.reference)) {
+          invalidate?.(previous);
+          invalidate?.(old.reference);
         }
-        this.objects.set(descriptor.key, { descriptor, recipe, image, slots });
-        installed.add(descriptor.key);
         this.version++;
+        continue;
       }
-    } catch (error) {
-      if (this.regions.get(key) === installed) this.removeRegion(key);
-      throw error;
+
+      const snapshot: ObjectDescriptor = { ...descriptor, position: [...descriptor.position] };
+      const recipe = await registry.create(snapshot);
+      if (!current() || this.regions.get(region) !== members) return this.version !== version;
+      const image = await this.image(recipe.texture);
+      if (!current() || this.regions.get(region) !== members) {
+        this.releaseImage(image);
+        return this.version !== version;
+      }
+      // 加载贴图期间旧区域可能已卸载。提交时按仍存在的部件计算可用槽位。
+      const installed = this.objects.get(snapshot.key);
+      if (recipe.parts.length > this.free.length + (installed?.slots.length ?? 0)) {
+        this.releaseImage(image);
+        throw Error("特殊对象部件空间不足");
+      }
+      if (installed) this.remove(snapshot.key, invalidate);
+      const slots = this.allocateParts(recipe, image);
+      const reference = objectReference(snapshot, recipe, slots.map(part => part.id));
+      this.objects.set(snapshot.key, { region, descriptor: snapshot, reference, recipe, image, slots });
+      members.add(descriptor.key);
+      invalidate?.(reference);
+      this.version++;
     }
-    return true;
+    return this.version !== version;
   }
-  remove(name: string): void {
+
+  /** 将局部几何和图集坐标写入部件槽，格子中的引用只持有带代数的句柄。 */
+  private allocateParts(recipe: ObjectRecipe, image: AtlasImage): StoredObject["slots"] {
+    const slots: StoredObject["slots"] = [];
+    for (const part of recipe.parts) {
+      const slot = this.free.pop()!;
+      const generation = ++this.generations[slot];
+      slots.push({
+        slot,
+        id: (0x80000000 | (generation << 12) | slot) >>> 0,
+      });
+      this.high = Math.max(this.high, slot + 1);
+      const at = slot * STRIDE;
+      this.data.set([...part.minimum, generation], at + 16);
+      this.data.set([...part.maximum, part.unlitFaces ?? 0], at + 20);
+      for (let face = 0; face < 6; face++) {
+        const uv = part.faces[face];
+        this.data.set(
+          [(image.x * TILE + uv[0]) / SIDE, (image.y * TILE + uv[1]) / SIDE, uv[2] / SIDE, uv[3] / SIDE],
+          at + 24 + face * 4,
+        );
+      }
+    }
+    return slots;
+  }
+
+  remove(name: string, invalidate?: (reference: ObjectReference) => void): void {
     const object = this.objects.get(name);
     if (!object) return;
+    this.regions.get(object.region)?.delete(name);
     for (const { slot } of object.slots) {
       this.data[slot * STRIDE + 19] = 0;
       this.free.push(slot);
     }
     this.releaseImage(object.image);
     this.objects.delete(name);
+    invalidate?.(object.reference);
     this.version++;
   }
   private releaseImage(image: AtlasImage): void {
@@ -161,22 +217,18 @@ export class ObjectStore {
       this.images.delete(image.name);
     }
   }
-  removeRegion(key: string): boolean {
-    const changed = (this.regions.get(key)?.size || 0) > 0;
-    for (const name of this.regions.get(key) || []) this.remove(name);
+  /** 撤下此区域仍拥有的对象，同时通知所有覆盖过的区域刷新候选。 */
+  removeRegion(key: string, invalidate?: (reference: ObjectReference) => void): boolean {
+    const version = this.version;
+    for (const name of this.regions.get(key) ?? []) this.remove(name, invalidate);
     this.regions.delete(key);
-    return changed;
+    return this.version !== version;
   }
+
   references(animatedOnly = false): ObjectReference[] {
     return [...this.objects.values()]
       .filter(({ recipe }) => !animatedOnly || recipe.animated !== false)
-      .map(({ descriptor, recipe, slots }) => ({
-        key: descriptor.key,
-        owner: descriptor.position,
-        replace: descriptor.replace || false,
-        bounds: recipe.bounds.map((p) => p.map((v, i) => v + descriptor.position[i])),
-        ids: slots.map((v) => v.id),
-      }));
+      .map(object => object.reference);
   }
   update(time: number, origin: number[]): void {
     for (const { descriptor, recipe, slots } of this.objects.values())

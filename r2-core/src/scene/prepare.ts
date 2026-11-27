@@ -205,17 +205,14 @@ export function prepareRegion({
       }
   for (const object of objects) {
     const [low, high] = object.bounds;
-    if (
-      high[0] <= x * 128 ||
-      low[0] >= (x + 1) * 128 ||
-      high[2] <= z * 128 ||
-      low[2] >= (z + 1) * 128
-    )
-      continue;
-    for (let cz = Math.floor(low[2]); cz < Math.ceil(high[2]); cz++)
-      for (let cy = Math.floor(low[1]); cy < Math.ceil(high[1]); cy++)
-        for (let cx = Math.floor(low[0]); cx < Math.ceil(high[0]); cx++)
-          add([cx, cy, cz], object.ids);
+    // 只枚举当前区域内的交集，大对象跨越区域时不会重复遍历整个包围盒。
+    const x0 = Math.max(x * 128, Math.floor(low[0])), x1 = Math.min((x + 1) * 128, Math.ceil(high[0]));
+    const y0 = Math.max(-64, Math.floor(low[1])), y1 = Math.min(448, Math.ceil(high[1]));
+    const z0 = Math.max(z * 128, Math.floor(low[2])), z1 = Math.min((z + 1) * 128, Math.ceil(high[2]));
+    if (x0 < x1 && z0 < z1)
+      for (let cz = z0; cz < z1; cz++)
+        for (let cy = y0; cy < y1; cy++)
+          for (let cx = x0; cx < x1; cx++) add([cx, cy, cz], object.ids);
     if (object.replace && inside(object.owner)) {
       const position = object.owner.map((v) => Math.floor(v / 16)),
         key = sectionKey(position);

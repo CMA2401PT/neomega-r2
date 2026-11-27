@@ -3,7 +3,7 @@ import type { ObjectRegistry } from "../objects/registry.ts";
 import type { TextureSet } from "../render/textures.ts";
 import type { RegionDirectory } from "../render/region-directory.ts";
 import type { WorkerRequest, WorkerResponse } from "../scene/worker.ts";
-import type { BlockEntity, ObjectDescriptor, PreparedR2Region } from "../contracts.ts";
+import type { BlockEntity, ObjectDescriptor, ObjectReference, PreparedR2Region } from "../contracts.ts";
 import type { Renderer } from "../render/renderer.ts";
 
 /** r2region 坐标：每格横跨 8×8 个区块（chunk），r2region (x, z) 覆盖方块 [128x, 128x+128)。 */
@@ -33,7 +33,7 @@ export interface WantChange {
 export interface WorldSink {
   /** 区域的方块数据，编码见 README 的「区域编码」；null 表示这个区域没有方块。 */
   region(x: number, z: number, data: ArrayBuffer | null): void;
-  /** 提交近景对象。缩小范围时可先用 complete=false 撤下远去的对象，等完整数据到达再结束等待。 */
+  /** 按对象原点提交区域快照。移动沿用 key，跨区时更新两区。complete=false 表示稍后还会补齐。 */
   objects(x: number, z: number, descriptors: ObjectDescriptor[], complete?: boolean): void;
   /** 订阅区域内完整的原始方块实体；前端按方块状态解释。 */
   blockEntities?(x: number, z: number, entries: BlockEntity[]): void;
@@ -223,6 +223,25 @@ export class WorldSession {
         if (entry?.visible) this.dirty(entry);
       }
   }
+  /** 对象可以跨任意多个区域。只让包围盒覆盖到的可见区域重新收集格子引用。 */
+  private dirtyObject = ({ bounds: [low, high], replace, owner }: ObjectReference): void => {
+    const { origin, size } = this.gpu;
+    const x0 = Math.floor(Math.max(low[0], origin[0]) / 128);
+    const z0 = Math.floor(Math.max(low[2], origin[2]) / 128);
+    const x1 = Math.ceil(Math.min(high[0], origin[0] + size[0]) / 128);
+    const z1 = Math.ceil(Math.min(high[2], origin[2] + size[2]) / 128);
+    for (let z = z0; z < z1; z++)
+      for (let x = x0; x < x1; x++) {
+        const entry = this.entries.get(regionKey(x, z));
+        if (entry?.visible) this.dirty(entry);
+      }
+    if (replace) {
+      const x = Math.floor(owner[0] / 128), z = Math.floor(owner[2] / 128);
+      if (x >= x0 && x < x1 && z >= z0 && z < z1) return;
+      const entry = this.entries.get(regionKey(x, z));
+      if (entry?.visible) this.dirty(entry);
+    }
+  };
   private priority(entry: RegionCoord): number {
     return Math.hypot(entry.x * 8 + 4 - this.farCenter[0], entry.z * 8 + 4 - this.farCenter[2]);
   }
@@ -275,7 +294,7 @@ export class WorldSession {
     for (const [key, entry] of this.entries)
       if (!wanted.has(key)) {
         this.gpu.remove(key);
-        this.objects.removeRegion(key);
+        this.objects.removeRegion(key, this.dirtyObject);
         this.entries.delete(key);
         dropped.push(key);
         change.regions.remove.push({ x: entry.x, z: entry.z });
@@ -315,7 +334,7 @@ export class WorldSession {
           change.objects.add.push({ x: entry.x, z: entry.z, center: [...center], radius: nearRadius });
         else {
           change.objects.remove.push({ x: entry.x, z: entry.z });
-          if (this.objects.removeRegion(key)) this.dirtyNeighbors(entry.x, entry.z);
+          this.objects.removeRegion(key, this.dirtyObject);
           entry.objectsLoaded = "";
         }
         entry.objectRequest++;
@@ -349,24 +368,17 @@ export class WorldSession {
   private async receiveObjects(x: number, z: number, descriptors: ObjectDescriptor[], complete: boolean): Promise<void> {
     const entry = this.entries.get(regionKey(x, z));
     if (this.disposed || !entry || !entry.objectSignature) return;
-    const signature = entry.objectSignature;
+    const signature = entry.objectSignature, request = entry.objectRequest;
+    const current = () => !this.disposed && this.entries.get(entry.key) === entry && entry.objectRequest === request;
     try {
       await this.textureChange?.promise;
-      if (this.disposed || this.entries.get(entry.key) !== entry || entry.objectSignature !== signature) return;
-      const changed = await this.objects.setRegion(entry.key, descriptors, this.registry);
-      if (this.disposed) return;
-      if (this.entries.get(entry.key) !== entry || entry.objectSignature !== signature) {
-        this.objects.removeRegion(entry.key);
-        this.dirtyNeighbors(entry.x, entry.z);
-        return;
-      }
-      entry.objectsLoaded = complete ? signature : "";
-      if (changed) this.dirtyNeighbors(entry.x, entry.z);
+      if (!current()) return;
+      await this.objects.setRegion(entry.key, descriptors, this.registry, this.dirtyObject, current);
+      if (current()) entry.objectsLoaded = complete ? signature : "";
     } catch (error) {
-      if ((error as Error)?.name !== "AbortError" && !this.disposed) {
-        // 近景部件的容量或素材错误只影响外观；基础区域依旧可以发布。
+      if ((error as Error)?.name !== "AbortError" && current()) {
+        // 已就绪的对象仍可绘制，下一份区域快照可以重试失败的对象。
         entry.objectsLoaded = signature;
-        this.dirtyNeighbors(x, z);
         this.onError(`区域 (${x}, ${z}) 的近景外观加载失败：${error}`);
       }
     } finally {

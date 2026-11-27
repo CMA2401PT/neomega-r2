@@ -96,9 +96,9 @@ export class MemoryWorld {
   /** 加入或替换特殊对象（同一 key 替换）；对象按位置所在的区块交给近景。 */
   addObject(descriptor: ObjectDescriptor): void {
     const old = this.descriptors.get(descriptor.key);
-    if (old) this.changed.objects.add(regionOf(old.position[0], old.position[2]));
-    this.descriptors.set(descriptor.key, descriptor);
+    this.descriptors.set(descriptor.key, { ...descriptor, position: [...descriptor.position] });
     this.changed.objects.add(regionOf(descriptor.position[0], descriptor.position[2]));
+    if (old) this.changed.objects.add(regionOf(old.position[0], old.position[2]));
   }
 
   removeObject(key: string): void {

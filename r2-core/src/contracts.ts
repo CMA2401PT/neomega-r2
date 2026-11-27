@@ -26,6 +26,8 @@ export interface FrameOutput {
 
 /** 单像素射线拾取结果。 */
 export interface PickResult {
+  /** 命中活动对象时返回它的稳定标识。position 仍是对象原点所在格，方块命中则是方块坐标。 */
+  objectKey?: string;
   position: number[];
   normal: number[];
 }
@@ -38,9 +40,11 @@ export interface BlockEntity {
 
 /** 特殊对象描述；data 由同类型工厂解释。 */
 export interface ObjectDescriptor {
+  /** 场景内唯一，移动或更换外观时沿用。 */
   key: string;
   kind: string;
   position: Vec3;
+  /** 局部外观参数。修改外观时提交新值，仅移动时沿用原值以复用几何与贴图。 */
   data?: unknown;
   replace?: boolean;
 }
