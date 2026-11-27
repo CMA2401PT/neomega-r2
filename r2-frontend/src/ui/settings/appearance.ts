@@ -1,6 +1,6 @@
 // 镜头与布光使用同一份设置；颜色选择器显示 sRGB，照明计算使用线性 RGB。
 import type { Camera, LightingOptions } from "neomega-r2-core";
-import { element } from "./dom.ts";
+import { element } from "../layout/dom.ts";
 
 export const appearanceDefaults = {
   fov: 65, exposureEV: 0, autoExposure: true,

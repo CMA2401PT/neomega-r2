@@ -1,27 +1,10 @@
 // HUD 负责坐标编辑、面板锚定、时间按钮与临时提示；不持有渲染器或存档请求。
 import type { SessionStats } from "neomega-r2-core";
-import type { ViewSettings } from "./types.ts";
+import { settingInputs, type ViewSettings } from "../settings/settings.ts";
 import { closePopovers, element } from "./dom.ts";
-import { bindSettingsSheet } from "./settings-sheet.ts";
+import { bindSettingsSheet } from "../settings/settings-sheet.ts";
 
 export { closePopovers, element };
-
-/** 可随参数组保存的显示与操作控件，以同一份映射读写界面和文件。 */
-export const settingInputs = [
-  ["near-radius", "nearRadius"],
-  ["far-radius", "farRadius"],
-  ["resolution", "resolution"],
-  ["speed", "speed"],
-  ["fog", "fog"],
-  ["super-resolution", "superResolution"],
-  ["accumulation-filter", "accumulationFilter"],
-  ["save-sr-2x", "saveSuperResolution2x"],
-  ["photo-scale", "photoScale"],
-  ["photo-supersample", "photoSupersample"],
-  ["export-scale", "exportScale"],
-  ["export-supersample", "exportSupersample"],
-  ["time", "time"],
-] as const;
 
 /** 让界面事件通过回调交给宿主，读数只在用户没有编辑时跟随相机。 */
 export function createHUD({ settings, jump, changed }: { settings: ViewSettings; jump(position: number[]): void; changed(key?: keyof ViewSettings): void }) {

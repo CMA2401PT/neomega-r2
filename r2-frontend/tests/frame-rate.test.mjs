@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FrameRate } from "../src/ui/frame-rate.ts";
+import { FrameRate } from "../src/ui/viewport/frame-rate.ts";
 
 test("慢帧完整计入最近两秒，静止时间不计入下一次移动", () => {
   const rate = new FrameRate();

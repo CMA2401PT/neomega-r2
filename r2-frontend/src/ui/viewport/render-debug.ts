@@ -1,4 +1,4 @@
-import { element } from "./dom.ts";
+import { element } from "../layout/dom.ts";
 
 /** 让共享查看器从调试页读取当前的射线诊断选项。 */
 export function mountRenderDebug(panel: HTMLElement, onChange?: () => void) {

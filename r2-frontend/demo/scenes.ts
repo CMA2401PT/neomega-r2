@@ -1,4 +1,4 @@
-import type { MemoryWorld } from "neomega-r2-core";
+import type { MinecraftMemoryWorld as MemoryWorld } from "neomega-r2-mc";
 
 /** 验证场景：在内存世界里摆方块，给出初始相机。方块用 Java 状态字符串写，与存档走同一条哈希与准备路径。 */
 export interface Scene {
@@ -54,7 +54,7 @@ export const scenes: Record<string, Scene> = {
       const normals = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
       const entries = normals.map((normal, facing) => {
         const position = [40.5, 3.5, 40.5].map((v, i) => (v + normal[i] * 17 / 32) + "d");
-        return `{id:"minecraft:item_frame",UUID:[I;0,0,0,${facing}],Facing:${facing}b,Pos:[${position}]}`;
+        return [String(facing), `{id:"minecraft:item_frame",UUID:[I;0,0,0,${facing}],Facing:${facing}b,Pos:[${position}]}`] as const;
       });
       world.setEntities([2, 0, 2], entries);
     },
@@ -68,7 +68,7 @@ export const scenes: Record<string, Scene> = {
       world.fill([39, 3, 40], [41, 3, 40], quartz);
       const entries = ["sea_lantern", "diamond_sword", "oak_stairs"].map((item, index) => {
         const x = 39.5 + index;
-        return `{id:"minecraft:item_frame",UUID:[I;1,0,0,${index}],Pos:[${x}d,3.5d,41.03125d],Facing:3b,Item:{id:"minecraft:${item}",count:1}}`;
+        return [item, `{id:"minecraft:item_frame",UUID:[I;1,0,0,${index}],Pos:[${x}d,3.5d,41.03125d],Facing:3b,Item:{id:"minecraft:${item}",count:1}}`] as const;
       });
       world.setEntities([2, 0, 2], entries);
     },

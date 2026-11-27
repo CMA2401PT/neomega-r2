@@ -21,17 +21,6 @@ const tscBin = join(dirname(require.resolve("typescript/package.json")), "bin/ts
 rmSync(dist, { recursive: true, force: true });
 execFileSync(process.execPath, [tscBin, "-p", root], { stdio: "inherit" });
 
-// 固定素材与实现一起交付，目录版、在线查看器和单文件播放器共用相同的图片。
-for (const directory of ["special-blocks/book", "special-blocks/pot", "special-blocks/banner", "special-blocks/sign", "entities/item-frame", "items"]) {
-  await build({
-    entryPoints: [join(root, "src", directory, "assets.ts")],
-    outfile: join(dist, directory, "assets.js"),
-    bundle: true,
-    format: "esm",
-    loader: { ".png": "dataurl", ".gz": "dataurl" },
-  });
-}
-
 // 为工作区 ESM 引用直接注入 WebSR 权重，保持源码独立运行能力。
 const srModule = join(dist, "compositor/websr.js");
 const websrLicense = readFileSync(join(root, "vendor/websr/LICENSE"), "utf8").trim();
@@ -48,9 +37,9 @@ const sr = transformSync(readFileSync(join(root, "src/compositor/websr.ts"), "ut
 writeFileSync(srModule, sr.code + "//# sourceMappingURL=websr.js.map\n");
 writeFileSync(srModule + ".map", sr.map);
 
-const layoutHTML = readFileSync(join(root, "src/ui/layout.html"), "utf8");
-const materialControlsHTML = readFileSync(join(root, "src/ui/material-controls.html"), "utf8");
-const styleCSS = readFileSync(join(root, "src/ui/style.css"), "utf8");
+const layoutHTML = readFileSync(join(root, "src/ui/layout/layout.html"), "utf8");
+const materialControlsHTML = readFileSync(join(root, "src/ui/settings/material-controls.html"), "utf8");
+const styleCSS = readFileSync(join(root, "src/ui/layout/style.css"), "utf8");
 
 async function bundle(entry, { format = "esm", define = {}, globalName, externalDeps = false } = {}) {
   const result = await build({
@@ -72,6 +61,7 @@ async function bundle(entry, { format = "esm", define = {}, globalName, external
       ? [{
           name: "external-r2-deps",
           setup(b) {
+            b.onResolve({ filter: /^neomega-r2-mc$/ }, () => ({ path: "./r2-mc.js", external: true }));
             b.onResolve({ filter: /^neomega-r2-core$/ }, () => ({ path: "./r2-core.js", external: true }));
             b.onResolve({ filter: /^neomega-r2-materials$/ }, () => ({ path: "./r2-materials.js", external: true }));
           },
@@ -81,10 +71,10 @@ async function bundle(entry, { format = "esm", define = {}, globalName, external
   return result.outputFiles[0].text;
 }
 
-const sourceNotice = ["LICENSE", "src/special-blocks/NOTICE.md", "src/special-blocks/sign/UNIFONT-LICENSE.txt"]
+const sourceNotice = ["LICENSE", "../r2-mc/src/special-blocks/NOTICE.md", "../r2-mc/src/special-blocks/sign/UNIFONT-LICENSE.txt", "../r2-mc/src/items/THIRD_PARTY_NOTICES.txt"]
   .map(file => readFileSync(join(root,file),"utf8").trim()).join("\n\n");
 mkdirSync(web, { recursive: true });
-copyFileSync(join(root, "src/ui/style.css"), join(web, "style.css"));
+copyFileSync(join(root, "src/ui/layout/style.css"), join(web, "style.css"));
 
 const webFrontend = await bundle("ui.js", {
   externalDeps: true,
@@ -97,7 +87,7 @@ const webFrontend = await bundle("ui.js", {
 writeFileSync(join(web, "r2-frontend.js"), `/*!\n${sourceNotice}\n\n${websrLicense}\n*/\n${webFrontend}`);
 
 // 单文件播放器复用依赖包已经编好的着色器和 Worker。
-const player = await bundle("ui/player.js", {
+const player = await bundle("ui/player/player.js", {
   format: "iife",
   globalName: "R2Player",
   define: {

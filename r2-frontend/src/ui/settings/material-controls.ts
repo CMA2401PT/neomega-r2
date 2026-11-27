@@ -1,6 +1,6 @@
 import type { TextureSet } from "neomega-r2-core";
 import { compileMaterialPack, materialDirectory, type MaterialInput } from "neomega-r2-materials";
-import { element } from "./dom.ts";
+import { element } from "../layout/dom.ts";
 
 declare const R2_MATERIAL_CONTROLS: string | undefined;
 

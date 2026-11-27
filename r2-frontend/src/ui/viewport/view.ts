@@ -1,21 +1,23 @@
+import type { ViewerWorld } from "../player/world.ts";
 import type { Camera, RenderOptions, Renderer, Tier, WorldSession } from "neomega-r2-core";
 import type { CaptureSession } from "neomega-r2-core";
-import { createCompositor } from "../compositor/compositor.ts";
-import { SceneMarks, type Stamp } from "../compositor/scene-overlay.ts";
-import { appearanceDefaults, bindAppearance, lighting } from "./appearance.ts";
+import { createCompositor } from "../../compositor/compositor.ts";
+import { SceneMarks, type Stamp } from "../../compositor/scene-overlay.ts";
+import { appearanceDefaults, bindAppearance, lighting } from "../settings/appearance.ts";
 import { drawAxes } from "./axes.ts";
-import { FlightControls } from "./controls.ts";
-import { element } from "./dom.ts";
+import { FlightControls } from "../navigation/controls.ts";
+import { element } from "../layout/dom.ts";
 import { FrameRate } from "./frame-rate.ts";
-import { createHUD } from "./hud.ts";
-import { FullscreenMap } from "./map.ts";
-import { bindMovePad } from "./movepad.ts";
-import { bindPresets, windowResolution } from "./presets.ts";
+import { createHUD } from "../layout/hud.ts";
+import { FullscreenMap } from "../navigation/map.ts";
+import { bindMovePad } from "../navigation/movepad.ts";
+import { bindPresets, windowResolution } from "../settings/presets.ts";
 import { mountRenderDebug } from "./render-debug.ts";
-import { createStartup } from "./startup.ts";
+import { createStartup } from "../layout/startup.ts";
 import type { ViewOptions } from "./types.ts";
 
-export type { ViewOptions, ViewSettings, ViewStats } from "./types.ts";
+export type { ViewSettings } from "../settings/settings.ts";
+export type { ViewOptions, ViewStats } from "./types.ts";
 
 interface FrameOptions {
   continuous?: boolean;
@@ -42,12 +44,12 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   const marks = new SceneMarks();
   const jump = (position: number[]) => { camera.position = position; };
   const map = new FullscreenMap({ renderer, camera, jump, overlay: marks });
-  let activeSession: WorldSession | null = null;
+  let inspection: ViewerWorld | null = null;
   let pickRequest = 0;
   const entityDialog = element<HTMLDialogElement>("block-entity");
   const controls = new FlightControls(viewCanvas, camera, event => {
-    const source = activeSession?.source;
-    if (!source?.snbtAt || map.open) return;
+    const current = inspection;
+    if (!current || map.open) return;
     const request = ++pickRequest;
     const rect = viewCanvas.getBoundingClientRect();
     const pixel = {
@@ -58,11 +60,11 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       objects: true,
       voxel: shownTier === "voxel",
     };
-    void renderer.pick(structuredClone(displayedCamera ?? camera), pixel).then(hit => {
-      if (!hit || request !== pickRequest || activeSession?.source !== source || map.open) return;
-      const snbt = source.snbtAt?.(hit.position, hit.objectKey);
+    void current.pick(structuredClone(displayedCamera ?? camera), pixel).then(hit => {
+      if (!hit || request !== pickRequest || inspection !== current || map.open) return;
+      const snbt = current.snbt(hit);
       if (snbt === undefined) return;
-      element("block-entity-title").textContent = (hit.objectKey?.startsWith("entity/") ? "实体 SNBT · " : "方块 SNBT · ") + hit.position.join(", ");
+      element("block-entity-title").textContent = (hit.entityId !== undefined ? "实体 SNBT · " : "方块 SNBT · ") + hit.position.join(", ");
       element("block-entity-text").textContent = snbt;
       entityDialog.showModal();
     }).catch(error => hud.error(String(error)));
@@ -320,8 +322,9 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     return overlayStamps;
   }
 
-  function frame(now: number, session: WorldSession | null, options?: FrameOptions) {
-    activeSession = session;
+  function frame(now: number, world: ViewerWorld | WorldSession | null, options?: FrameOptions) {
+    inspection = world && "session" in world ? world : null;
+    const session = world && "session" in world ? world.session : world;
     if (stopped) return;
     try {
       drawFrame(now, session, options);
@@ -540,7 +543,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     setWorld(loaded: boolean, readChunks?: () => ArrayBuffer | Promise<ArrayBuffer>) {
       pickRequest++;
       entityDialog.close();
-      activeSession = null;
+      inspection = null;
       drawn = "";
       rate.reset();
       currentView = null;
@@ -552,7 +555,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       return map.setWorld(readChunks);
     },
     dispose() {
-      activeSession = null;
+      inspection = null;
       pickRequest++;
       entityDialog.close();
       stopped = true;

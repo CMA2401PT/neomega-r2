@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHUD } from "../src/ui/hud.ts";
+import { createHUD } from "../src/ui/layout/hud.ts";
 
 // 内存 DOM 只提供 HUD 实际使用的控件；假时钟验证五秒后仍显示错误，不依赖浏览器端口。
 test("区域错误持续显示，恢复或切换世界后清除", async (t) => {

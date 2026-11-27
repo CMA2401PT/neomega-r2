@@ -1,15 +1,14 @@
+import { createViewerWorld, type ViewerWorld } from "./world.ts";
 import {
   createRenderer,
-  type WorldSession,
   type Camera,
 } from "neomega-r2-core";
-import { element, mountLayout } from "./dom.ts";
-import type { Frontend, MountOptions, Scene } from "./frontend-types.ts";
-import { materialControls } from "./material-controls.ts";
-import { createStartup } from "./startup.ts";
-import type { ViewSettings } from "./types.ts";
-import { blockWorldSession } from "../special-blocks/source.ts";
-import { createView } from "./view.ts";
+import { element, mountLayout } from "../layout/dom.ts";
+import type { Frontend, MountOptions, Scene } from "./types.ts";
+import { materialControls } from "../settings/material-controls.ts";
+import { createStartup } from "../layout/startup.ts";
+import type { ViewSettings } from "../settings/settings.ts";
+import { createView } from "../viewport/view.ts";
 
 
 /** 在隔离文档中挂载标准查看界面；换场景只替换会话与地图数据。 */
@@ -45,7 +44,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
   let scene: Scene = options;
   element<HTMLInputElement>("far-radius").min = "8";
   const view = createView({ renderer, camera, settings, startup, scene: () => scene });
-  let session: WorldSession | undefined,
+  let world: ViewerWorld | undefined,
     frame = 0,
     closed = false;
   let changes = Promise.resolve();
@@ -60,7 +59,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
   }
   const materials = materialControls(element("material-controls"), (set) =>
     changeSceneState(async () => {
-      if (session) await session.setTextures(set);
+      if (world) await world.session.setTextures(set);
       else renderer.setTextures(set);
     }),
     { loadRecipe: options.loadRecipe },
@@ -72,9 +71,9 @@ export async function start(options: MountOptions): Promise<Frontend> {
   function setScene(next: Scene) {
     return changeSceneState(async () => {
       await view.cancelPhoto();
-      if (!session || next.source !== scene.source) {
-        session?.dispose();
-        session = blockWorldSession(renderer, next.source, {
+      if (!world || next.source !== scene.source) {
+        world?.session.dispose();
+        world = createViewerWorld(renderer, next.source, {
           registry:options.registry,
           onError: (message) => view.hud.error(message),
         });
@@ -87,7 +86,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
     });
   }
   function draw(now: number) {
-    view.frame(now, session ?? null);
+    view.frame(now, world ?? null);
     frame = requestAnimationFrame(draw);
   }
   function dispose() {
@@ -95,7 +94,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
     cancelAnimationFrame(frame);
     materials.dispose();
     view.dispose();
-    session?.dispose();
+    world?.session.dispose();
     renderer.dispose();
   }
   try {

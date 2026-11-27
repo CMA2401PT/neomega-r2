@@ -1,11 +1,9 @@
 // 演示页：使用 MemoryWorld 与共享 UI 演示方块、光影、地图与活动部件。
 import {
   createRenderer,
-  memorySource,
-  MemoryWorld,
-  type WorldSession,
 } from "neomega-r2-core";
-import { blockWorldSession, createStartup, createView, element, mountLayout, type ViewSettings } from "neomega-r2-frontend/ui";
+import { MinecraftMemoryWorld as MemoryWorld, minecraftMemorySource } from "neomega-r2-mc";
+import { createViewerWorld, type ViewerWorld, createStartup, createView, element, mountLayout, type ViewSettings } from "neomega-r2-frontend/ui";
 import { scenes } from "./scenes.ts";
 
 mountLayout();
@@ -39,7 +37,7 @@ try {
   for (const [name, scene] of Object.entries(scenes)) select.add(new Option(scene.label, name));
 
   let world = new MemoryWorld();
-  let session: WorldSession | null = null;
+  let displayed: ViewerWorld | null = null;
   let sceneName = "";
   const camera = { position: [0, 0, 0], yaw: 0, pitch: 0 };
 
@@ -62,7 +60,7 @@ try {
 
   function fragmentReferences(): number {
     let count = 0;
-    for (const region of session?.gpu.regions.values() ?? []) count += region.stats.fragmentReferences;
+    for (const region of displayed?.session.gpu.regions.values() ?? []) count += region.stats.fragmentReferences;
     return count;
   }
 
@@ -77,12 +75,12 @@ try {
   function loadScene(name: string) {
     const scene = scenes[name];
     if (!scene) throw Error("未知场景 " + name);
-    session?.dispose();
+    displayed?.session.dispose();
     sceneName = name;
     select.value = name;
     world = new MemoryWorld();
     scene.build(world);
-    session = blockWorldSession(renderer, memorySource(world), {
+    displayed = createViewerWorld(renderer, minecraftMemorySource(world), {
       onError: (message) => (status.textContent = message),
     });
     setCamera(scene.camera, scene.target);
@@ -95,11 +93,11 @@ try {
 
   function render(now: number) {
     requestAnimationFrame(render);
-    if (session) view.frame(now, session);
+    if (displayed) view.frame(now, displayed);
   }
   window.addEventListener("pagehide", () => {
     view.dispose();
-    session?.dispose();
+    displayed?.session.dispose();
     renderer.dispose();
   });
   requestAnimationFrame(render);

@@ -1,5 +1,5 @@
 // 设置面板贴在屏幕一侧并按页签分组，打开时收起底栏和方向键，把画面尽量留给渲染结果。
-import { element } from "./dom.ts";
+import { element } from "../layout/dom.ts";
 
 /** 横屏贴右侧；右侧放不下工具栏加面板时占满整列；竖屏或窄窗口改为底部抽屉。 */
 type SheetLayout = "side" | "side-full" | "bottom";

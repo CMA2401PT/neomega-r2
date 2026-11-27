@@ -1,4 +1,4 @@
-import type { Frontend, MountOptions } from "./frontend-types.ts";
+import type { Frontend, MountOptions } from "./types.ts";
 
 declare const R2_VIEW_HTML: string;
 declare const R2_VIEW_SCRIPT: string;

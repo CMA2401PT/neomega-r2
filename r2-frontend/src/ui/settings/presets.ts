@@ -1,9 +1,8 @@
 // 参数组在不同世界之间复用同一套画面设置。坐标属于世界，材质资源由宿主管理。
 import type { Camera } from "neomega-r2-core";
 import { appearanceDefaults, type Appearance } from "./appearance.ts";
-import { element } from "./dom.ts";
-import { settingInputs } from "./hud.ts";
-import type { ViewSettings } from "./types.ts";
+import { element } from "../layout/dom.ts";
+import { settingInputs, type ViewSettings } from "./settings.ts";
 
 /** 沿用保存的倍率。旧版用 native 表示 1×，用 native-N 表示 N×。 */
 export function windowResolution(value: string): string {
