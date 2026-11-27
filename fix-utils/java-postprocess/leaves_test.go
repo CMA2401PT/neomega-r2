@@ -3,11 +3,10 @@ package fixer
 import (
 	"strconv"
 	"testing"
-
 )
 
 func TestLeafDistances(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	chunk := airChunk(t)
 	chunk[cell(8, 1, 8)] = stateBlock(t, "oak_log", nil)
 	for y := 2; y <= 8; y++ {
@@ -40,7 +39,7 @@ func TestLeafDistances(t *testing.T) {
 }
 
 func TestLeafBoundaryDistances(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	for _, pos := range []position{
 		{x: 0, y: 8, z: 8}, {x: 5, y: 8, z: 8}, {x: 6, y: 8, z: 8},
 		{x: 9, y: 8, z: 8}, {x: 10, y: 8, z: 8}, {x: 15, y: 8, z: 8},
@@ -63,7 +62,7 @@ func TestLeafBoundaryDistances(t *testing.T) {
 }
 
 func TestLeafLogFamilies(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	for _, test := range []struct{ name, distance string }{
 		{name: "oak_log", distance: "1"},
 		{name: "stripped_oak_wood", distance: "1"},
@@ -86,10 +85,7 @@ func TestLeafLogFamilies(t *testing.T) {
 }
 
 func TestLeafDistancesAcrossSections(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	lower, upper := palette(airChunk(t)), palette(airChunk(t))
 	lower.Set(localIndex(8, -1, 8), stateBlock(t, "oak_log", nil))
 	leaves := stateBlock(t, "oak_leaves", map[string]string{"persistent": "false", "distance": "7"})

@@ -12,6 +12,10 @@ export interface Scene {
   ocean?: number;
 }
 export interface MountOptions extends Scene {
+  /** 从宿主选择的材质包读取一个渲染文件。 */
+  readResource: (name: string) => Promise<Response>;
+  /** 用户换材质时才加载同版本的合成配方。 */
+  loadRecipe: (signal: AbortSignal) => Promise<Uint8Array>;
   actions?: HTMLElement;
   /** 宿主编写的帮助 HTML，显示在通用操作说明与“关于 neOmega R2”之间。 */
   helpHTML?: string;

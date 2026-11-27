@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultAssets } from "../../assets-utils/scripts/default-assets.mjs";
+import AdmZip from "adm-zip";
+import { join } from "node:path";
 import { loadTextureSet } from "../src/render/textures.ts";
 import { materialTextures } from "../src/render/resources.ts";
 import { prepareRegion } from "../src/scene/prepare.ts";
 
-test("WebGPU 材质保留面贴图的格式、布局与 mip，并在释放时销毁所有纹理", async (t) => {
+test("WebGPU 材质保留面贴图的格式、布局与 mip，并在释放时销毁所有纹理", {skip: !process.env.R2_GENERATED && "需要 R2_GENERATED 中的材质包"}, async (t) => {
+  const defaultAssets = new AdmZip(join(process.env.R2_GENERATED,"browser-materials/default-materials.zip"));
   const set = await loadTextureSet(async (name) => new Response(defaultAssets.readFile("assets/" + name)));
   const textures = [], writes = [];
   // Node 没有浏览器的 GPU 设备。记录生产代码提交的纹理描述和上传数据。

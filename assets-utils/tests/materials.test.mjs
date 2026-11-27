@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "node:test";
+import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { encode } from "fast-png";
 import { buildTextures } from "../src/build.ts";
@@ -7,12 +8,12 @@ import { unpackMaterials } from "../src/archive.ts";
 import { replacementReader } from "../src/tiles.ts";
 import { blockHash, modelOf } from "neomega-r2-core";
 
-const archive = (name) =>
-  unpackMaterials(readFileSync(new URL("../" + name, import.meta.url)));
-const recipe = archive("material-info.zip"),
-  defaults = archive("default-materials.zip");
-const manifest = JSON.parse(new TextDecoder().decode(recipe["textures.json"]));
-const states = new Uint32Array(defaults["states.bin"].buffer);
+const root = process.env.R2_GENERATED;
+const archive = (name) => unpackMaterials(readFileSync(join(root, "browser-materials", name)));
+const recipe = root && archive("material-info.zip");
+const defaults = root && archive("default-materials.zip");
+const manifest = root && JSON.parse(new TextDecoder().decode(recipe["textures.json"]));
+const states = root && new Uint32Array(defaults["states.bin"].buffer);
 function png(w, h, color) {
   const data = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data.set(color(x, y), (y * w + x) * 4);
@@ -30,7 +31,7 @@ function pixel(set, file, id, x = 0, y = 0, level = 0) {
   offset += ((id * size + y) * size + x) * 4;
   return [...new Uint8Array(set.files.get(file), offset, 4)];
 }
-test("合成信息独立发布；从基表重建的默认材质与分发包逐字节一致", () => {
+test("合成信息独立发布；从基表重建的默认材质与分发包逐字节一致", {skip: !root && "需要 R2_GENERATED 中的材质包"}, () => {
   assert.equal(Object.keys(recipe).length, 5);
   assert.equal(Object.keys(defaults).length, 14);
   const set = buildTextures(recipe, {});
@@ -53,7 +54,7 @@ test("合成信息独立发布；从基表重建的默认材质与分发包逐�
     assert.ok(bytes.every((v, j) => j % 4 !== 3 || v === 255));
   }
 });
-test("Java 自选包保留数据通道，并同步更新裁切、图集、缩小层与动画首帧", () => {
+test("Java 自选包保留数据通道，并同步更新裁切、图集、缩小层与动画首帧", {skip: !root && "需要 R2_GENERATED 中的材质包"}, () => {
   const base = "assets/minecraft/textures/block/";
   const pack = Object.fromEntries(
     Object.entries({
@@ -96,7 +97,7 @@ test("Java 自选包保留数据通道，并同步更新裁切、图集、缩小
     assert.equal(records[manifest.quads.indexOf("minecraft:block/dandelion") * 28 + 14], 0);
   }
 });
-test("基岩高度图只采首帧，MER 常量转为高光通道", () => {
+test("基岩高度图只采首帧，MER 常量转为高光通道", {skip: !root && "需要 R2_GENERATED 中的材质包"}, () => {
   const read = replacementReader({
     "Pack/textures/blocks/brick.texture_set.json": new TextEncoder().encode(
       JSON.stringify({

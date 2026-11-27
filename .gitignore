@@ -6,3 +6,6 @@
 /r2-frontend/dist/
 /r2-frontend/demo/dist/
 /assets-utils/assets/
+/scripts/release-browser/dist/
+/assets-utils/generated/
+/fix-utils/example/generated/

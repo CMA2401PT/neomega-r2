@@ -9,10 +9,7 @@ import (
 
 func TestFilteredPassesMatchFullScan(t *testing.T) {
 	// 参考驱动强制每轮逐格取值再筛选，独立验证调色板索引路径与跳过 section 的行为。
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	full := *f
 	full.passes = make([]pass, len(f.passes))
 	changedByPass := make([]int, len(f.passes))
@@ -134,10 +131,7 @@ func mixedTargetChunk(t *testing.T, pos testChunkPos) Column {
 
 func TestFixWithoutTargetsSharesAllPalettes(t *testing.T) {
 	// 无关 section 连同带有已弃用目标条目的调色板都不应因筛选而复制。
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	center := make(map[int32]*paletteBlocks)
 	for index, name := range []string{"air", "stone", "mushroom_stem", "oak_fence_gate"} {
 		center[int32(index-2)] =
@@ -159,7 +153,7 @@ func TestPassTargetsRefreshBetweenPasses(t *testing.T) {
 	// 后一轮必须看见新加入的状态索引；没有目标的 pass 不应被调用。
 	air, stone := stateBlock(t, "air", nil), stateBlock(t, "stone", nil)
 	blocks := uniformBlocks(4096, air)
-	f := &Fixer{passes: []pass{
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults, passes: []pass{
 		{
 			cares: func(block ir.IRBlock) bool { return block == air },
 			run: func(view snapshot) map[position]ir.IRBlock {

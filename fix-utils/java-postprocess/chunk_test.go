@@ -8,10 +8,7 @@ import (
 
 func TestChunkDoorsAndOwnership(t *testing.T) {
 	// 两半跨越负高度 section，必须先收齐整根柱子的修改才能交换互补属性。
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	lower, upper := palette(airChunk(t)), palette(airChunk(t))
 	var original [2]ir.IRBlock
 	for i, half := range []string{"lower", "upper"} {
@@ -55,7 +52,7 @@ func TestChunkNeighbourCoordinates(t *testing.T) {
 		neighbours[side] = map[int32]*paletteBlocks{-2: blocks}
 	}
 	center := map[int32]*paletteBlocks{-2: palette(airChunk(t))}
-	f := &Fixer{passes: []pass{
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults, passes: []pass{
 		{
 			cares: func(ir.IRBlock) bool { return true },
 			run: func(view snapshot) map[position]ir.IRBlock {
@@ -88,10 +85,7 @@ func TestChunkNeighbourCoordinates(t *testing.T) {
 
 func TestChunkRedstoneAcrossTwoAxes(t *testing.T) {
 	// 西邻居的上一 section 可以排除坡道；缺这份数据时仍保留输入形状。
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	wire := stateBlock(t, "redstone_wire", map[string]string{
 		"power": "11", "north": "up", "east": "up", "south": "up", "west": "up",
 	})

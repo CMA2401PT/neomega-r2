@@ -3,10 +3,7 @@ package fixer
 import "testing"
 
 func TestSnowyGround(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, ground := range []string{"grass_block", "mycelium", "podzol"} {
 		for _, test := range []struct {
 			above, input, want string
@@ -29,10 +26,7 @@ func TestSnowyGround(t *testing.T) {
 }
 
 func TestSnowyGroundAcrossSubchunkBoundary(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	chunk := airChunk(t)
 	chunk[cell(4, 15, 4)] = stateBlock(t, "grass_block", map[string]string{"snowy": "false"})
 	up := airChunk(t)

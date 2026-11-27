@@ -5,14 +5,10 @@ import (
 	"testing"
 
 	"neomega-blocks/ir"
-	java "neomega-blocks/presets/java/v1"
 )
 
 func TestFixSectionIncompleteStairs(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, test := range []struct {
 		name   string
 		source ir.IRBlock
@@ -32,7 +28,7 @@ func TestFixSectionIncompleteStairs(t *testing.T) {
 			fixed := fixPalette(f, blocks, [6]*paletteBlocks{})
 			got := fixed.Get(pos)
 			assertBlock(t, got, stateBlock(t, "oak_stairs", test.states))
-			if _, ok := java.HashToBlock(java.BlockToHash(got)); !ok {
+			if _, ok := testStates.HashToBlock(got.Tidy().Hash()); !ok {
 				t.Fatalf("incomplete output: %s", got)
 			}
 			assertBlock(t, blocks.Get(pos), test.source)
@@ -45,10 +41,7 @@ func TestFixSectionIncompleteStairs(t *testing.T) {
 
 func TestFixCompletesPalettesWithoutChangingInputs(t *testing.T) {
 	// 邻居补全后的朝向参与拐角判断，但调用方仍持有原始调色板。
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	centerBlocks, northBlocks := palette(airChunk(t)), palette(airChunk(t))
 	pos, northPos := localIndex(8, 8, 0), localIndex(8, 8, 15)
 	centerBlocks.Set(pos, "minecraft:oak_stairs []")
@@ -67,7 +60,7 @@ func TestFixCompletesPalettesWithoutChangingInputs(t *testing.T) {
 	}
 
 	// 没有规则修改时，入口补全产生的新调色板也要出现在结果中。
-	completed := fixColumn(&Fixer{}, center, ChunkNeighbours{N: north})
+	completed := fixColumn(&Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}, center, ChunkNeighbours{N: north})
 	assertBlock(t, completed[0].Get(pos), stateBlock(t, "oak_stairs", nil))
 	if completed[0] == centerBlocks {
 		t.Fatal("completion was lost without rule changes")
@@ -75,10 +68,7 @@ func TestFixCompletesPalettesWithoutChangingInputs(t *testing.T) {
 }
 
 func TestFixSectionCompletesNeighbourPalette(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	blocks, north := palette(airChunk(t)), palette(airChunk(t))
 	pos, northPos := localIndex(8, 8, 0), localIndex(8, 8, 15)
 	blocks.Set(pos, stateBlock(t, "oak_stairs", nil))
@@ -91,7 +81,7 @@ func TestFixSectionCompletesNeighbourPalette(t *testing.T) {
 
 func TestFixSectionPreservesUnchangedPalette(t *testing.T) {
 	// 完整状态和无法识别的自定义方块都无需复制或改写。
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	for _, source := range []ir.IRBlock{
 		stateBlock(t, "oak_stairs", nil),
 		`minecraft:oak_stairs ["shape"="straight","half"="bottom","facing"="north"]`,

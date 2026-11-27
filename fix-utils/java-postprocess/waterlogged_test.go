@@ -4,10 +4,7 @@ import "testing"
 
 func TestWaterloggedRepairs(t *testing.T) {
 	// 含水只改变完整状态的 hash，邻接修复仍应识别方块并保留这项属性。
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	chunk := airChunk(t)
 	chunk[cell(8, 8, 8)] = stateBlock(t, "oak_stairs", map[string]string{
 		"facing": "north", "shape": "straight", "waterlogged": "true",

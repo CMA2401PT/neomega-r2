@@ -7,13 +7,15 @@ import (
 	"testing"
 
 	"neomega-blocks/ir"
-	java "neomega-blocks/presets/java/v1"
 	"neomega-view-utils/fixer/solidtable"
 )
 
 func stateBlock(t *testing.T, name string, overrides map[string]string) ir.IRBlock {
 	t.Helper()
-	properties, ok := java.BlockProperties(name)
+	if testStates == nil {
+		t.Skip("设置 NEOMEGA_BLOCK_TABLES 以运行使用版本资源的修复用例")
+	}
+	properties, ok := testSchema.BlockProperties(name)
 	if !ok {
 		t.Fatalf("unknown block %s", name)
 	}
@@ -26,8 +28,8 @@ func stateBlock(t *testing.T, name string, overrides map[string]string) ir.IRBlo
 		states = states.Set(key, value)
 	}
 	block := ir.IRBlock(name + " " + string(states)).Tidy()
-	hash := java.BlockToHash(block)
-	if _, ok := java.HashToBlock(hash); !ok {
+	hash := block.Tidy().Hash()
+	if _, ok := testStates.HashToBlock(hash); !ok {
 		t.Fatalf("state absent from preset: %s", block)
 	}
 	return block
@@ -53,10 +55,7 @@ func assertBlock(t *testing.T, got, want ir.IRBlock) {
 }
 
 func TestFenceConnections(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	chunk := airChunk(t)
 	fence := stateBlock(t, "oak_fence", nil)
 	chunk[cell(2, 3, 4)], chunk[cell(3, 3, 4)] = fence, fence
@@ -83,10 +82,7 @@ func TestFenceConnections(t *testing.T) {
 }
 
 func TestConnectionFamilies(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, test := range []struct {
 		name      string
 		block     string
@@ -146,10 +142,7 @@ func TestBoundaryConnections(t *testing.T) {
 		{name: "south", side: 5, current: cell(4, 7, 15), adjacent: cell(4, 7, 0)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			f, err := New()
-			if err != nil {
-				t.Fatal(err)
-			}
+			f := fixtureFixer()
 			chunk, adjacent := airChunk(t), airChunk(t)
 			chunk[test.current], adjacent[test.adjacent] = fence, fence
 			var neighbours sectionNeighbours
@@ -161,9 +154,9 @@ func TestBoundaryConnections(t *testing.T) {
 
 			// 只给一面实心，区分朝向当前格与背向当前格的查询。
 			adjacent[test.adjacent] = stone
-			f.solid = solidtable.Table{java.BlockToHash(stone): 1 << (test.side ^ 1)}
+			f.solid = solidtable.Table{stone.Tidy().Hash(): 1 << (test.side ^ 1)}
 			assertBlock(t, fixSection(f, chunk, neighbours)[test.current], want)
-			f.solid = solidtable.Table{java.BlockToHash(stone): 1 << test.side}
+			f.solid = solidtable.Table{stone.Tidy().Hash(): 1 << test.side}
 			assertBlock(t, fixSection(f, chunk, neighbours)[test.current], fence)
 		})
 	}
@@ -174,7 +167,7 @@ func TestPassesAccumulate(t *testing.T) {
 	stone := stateBlock(t, "stone", nil)
 	fence := stateBlock(t, "oak_fence", nil)
 	third, fourth := position{y: 3}, position{y: 4}
-	f := &Fixer{passes: []pass{
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults, passes: []pass{
 		{
 			cares: func(ir.IRBlock) bool { return true },
 			run: func(view snapshot) map[position]ir.IRBlock {

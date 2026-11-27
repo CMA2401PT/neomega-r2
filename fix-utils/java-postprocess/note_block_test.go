@@ -1,12 +1,11 @@
 package fixer
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestNoteBlockInstrument(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, test := range []struct{ below, instrument string }{
 		{below: "gold_block", instrument: "bell"},
 		{below: "clay", instrument: "flute"},
@@ -57,7 +56,7 @@ func TestNoteBlockInstrument(t *testing.T) {
 }
 
 func TestNoteBlockHeadInstrument(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	for _, test := range []struct{ head, instrument string }{
 		{head: "zombie_head", instrument: "zombie"},
 		{head: "skeleton_skull", instrument: "skeleton"},
@@ -82,7 +81,7 @@ func TestNoteBlockHeadInstrument(t *testing.T) {
 }
 
 func TestNoteBlockMissingNeighbours(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	chunk, adjacent := airChunk(t), airChunk(t)
 	chunk[cell(8, 0, 8)] = stateBlock(t, "note_block", map[string]string{"instrument": "bell"})
 	changes := runPass(noteBlockTarget, f.noteBlockInstrument, chunk, sectionNeighbours{})

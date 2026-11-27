@@ -9,9 +9,9 @@ R2 在浏览器的 WebGPU 上以射线渲染 Minecraft 方块世界。本仓库�
 | [r2-core](r2-core/README.md) | **渲染核心**（零运行时依赖）：纯离屏 WebGPU 射线渲染器（RGB 纹理、Depth 纹理、`pick`、`createCapture`）、`WorldSession`、`DataSource`、`MemoryWorld`、`ObjectRegistry`。 | `neomega-r2-core` | `r2-core.js` |
 | [r2-link](r2-link/README.md) | **浏览器端协议客户端**（零运行时依赖）：通过 WebSocket 连接 `go-link` 数据源，将订阅与区域/对象消息接入 `WorldSession`。 | `neomega-r2-link` | `r2-link.js` |
 | [assets-utils](assets-utils/README.md) | **材质资源与编译**：Go 生成方块状态表、几何基表与原始配方；TS 负责制作默认包、解压 ZIP 与浏览器端材质编译。 | `neomega-view-utils/r2assets` / `neomega-r2-materials` | `r2-materials.js`、`default-materials.zip`、`material-info.zip` |
-| [r2-frontend](r2-frontend/README.md) | **合成后处理与共享界面**：① `compositor`（单画布降噪、WebSR 2× 超分、基于深度图的图层混合、PNG 导出）；② 共享 HUD/地图/设置与 `mount()`。Go 宿主嵌入精简 `dist/web/`。 | `neomega-r2-frontend` | `r2-frontend.js` |
+| [r2-frontend](r2-frontend/README.md) | **合成后处理与共享界面**：① `compositor`（单画布降噪、WebSR 2× 超分、基于深度图的图层混合、PNG 导出）；② 共享 HUD/地图/设置与 `mount()`。Go 宿主装配所需网页后自行嵌入。 | `neomega-r2-frontend` | `r2-frontend.js` |
 | [go-link](go-link/README.md) | **Go 端协议服务端**：实现 R2Link v2 服务端会话、`effector` 与 `blockactor`。 | `neomega-r2link` | — |
-| [fix-utils](fix-utils/README.md) | 按周围方块补全 Java 方块属性，提供邻接规则使用的实心表。 | `neomega-view-utils/fixer` | — |
+| [fix-utils](fix-utils/README.md) | 按周围方块补全 Java 方块属性，读取宿主提供的六面实心表。 | `neomega-view-utils/fixer` | — |
 
 数据流向自底向上：
 
@@ -45,19 +45,15 @@ DataSource (MemoryWorld / r2linkSource)
 
 ```sh
 npm ci
-(cd assets-utils && go generate)
 npm run build
 npm run check
+python3 assets-utils/resourcegen/generate.py --java 26.3
+export R2_GENERATED="$PWD/assets-utils/generated/26.3"
+export NEOMEGA_BLOCK_TABLES="$R2_GENERATED/java-blocks"
 npm test
-go test ./r2-frontend/... ./go-link/... ./fix-utils/... ./assets-utils/...
+go test ./go-link/... ./fix-utils/... ./assets-utils/...
 ```
 
-启动本地演示服务：
-
-```sh
-npm run demo
-```
-
-构建 Go 宿主前需先执行 `npm run build`，它会生成 `r2-frontend/dist/web/`（由 Go 包 `neomega-r2-frontend` 嵌入）。
+[浏览器发布说明](scripts/release-browser/README.md)给出独立播放器、Go 宿主网页及本地演示的装配命令。
 
 主分支构建成功后，GitHub Actions 会调用 [scripts/publish-cos.py](scripts/publish-cos.py) 将 `r2-browser` 上传至腾讯云 COS（需要 secrets `T_COS_SECRET_ID` 与 `T_COS_SECRET_KEY`，可选覆盖 `T_COS_SERVICE_URL` 和 `T_COS_ACCESS_URL`）。

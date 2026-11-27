@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"neomega-blocks/ir"
-	java "neomega-blocks/presets/java/v1"
 )
 
 var horizontal = [...]struct {
@@ -29,7 +28,7 @@ func (f *Fixer) connections(view snapshot) map[position]ir.IRBlock {
 	for pos, block := range view.targetBlocks() {
 		name := block.ShortName()
 		fence := isFence(name)
-		properties, _ := java.BlockProperties(block.NameWithNameSpace())
+		properties, _ := f.schema.BlockProperties(block.NameWithNameSpace())
 		states := block.States()
 		for _, direction := range horizontal {
 			if _, exists := properties[direction.name]; !exists {

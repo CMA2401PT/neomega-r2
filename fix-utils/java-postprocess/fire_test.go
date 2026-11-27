@@ -1,17 +1,13 @@
 package fixer
 
 import (
-	java "neomega-blocks/presets/java/v1"
 	"testing"
 
 	"neomega-view-utils/fixer/solidtable"
 )
 
 func TestFireConnections(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	stone := stateBlock(t, "stone", nil)
 	for _, test := range []struct {
 		name     string
@@ -45,9 +41,9 @@ func TestFireConnections(t *testing.T) {
 			}
 			if test.name != "air" {
 				// 单面实心才能分辨是否取了邻居朝回火的面。
-				oneFace := &Fixer{solid: solidtable.Table{java.BlockToHash(stone): 1 << (test.side ^ 1)}}
+				oneFace := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults, solid: solidtable.Table{stone.Tidy().Hash(): 1 << (test.side ^ 1)}}
 				assertBlock(t, runPass(fireTarget, oneFace.fireConnections, chunk, sectionNeighbours{})[cell(8, 8, 8)], want)
-				oneFace.solid[java.BlockToHash(stone)] = 1 << test.side
+				oneFace.solid[stone.Tidy().Hash()] = 1 << test.side
 				states[test.name] = "false"
 				assertBlock(t, runPass(fireTarget, oneFace.fireConnections, chunk, sectionNeighbours{})[cell(8, 8, 8)], stateBlock(t, "fire", states))
 			}

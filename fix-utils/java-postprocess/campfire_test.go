@@ -3,10 +3,7 @@ package fixer
 import "testing"
 
 func TestCampfireSignal(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, name := range []string{"campfire", "soul_campfire"} {
 		for _, test := range []struct{ below, signal string }{
 			{below: "hay_block", signal: "true"},

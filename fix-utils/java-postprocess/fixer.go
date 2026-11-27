@@ -3,11 +3,9 @@ package fixer
 import (
 	"iter"
 
+	"neomega-blocks/blockconv"
 	"neomega-blocks/ir"
-	converts "neomega-blocks/presets/block-converts/v1"
-	java "neomega-blocks/presets/java/v1"
 	"neomega-view-utils/fixer/solidtable"
-	javasolid "neomega-view-utils/fixer/solidtable/preset"
 )
 
 // HorizontalBounds 按 X、Z 给出中心的水平范围，Min 包含、Max 不包含。
@@ -42,17 +40,16 @@ type pass struct {
 }
 
 type Fixer struct {
+	schema blockconv.Schema
+	states *blockconv.WaterloggedStates
+	canon  *blockconv.CanonBlock[ir.IRBlock]
 	solid  solidtable.Table
 	passes []pass
 }
 
-func New() (*Fixer, error) {
-	// 独立加载面位数据即可完成邻接判断，无需几何运行时。
-	solid, err := javasolid.Bundled()
-	if err != nil {
-		return nil, err
-	}
-	f := &Fixer{solid: solid}
+// New 使用宿主选定的状态、默认属性和六面实心表构造邻接修复器。
+func New(solid solidtable.Table, schema blockconv.Schema, states *blockconv.WaterloggedStates, canon *blockconv.CanonBlock[ir.IRBlock]) *Fixer {
+	f := &Fixer{solid: solid, schema: schema, states: states, canon: canon}
 	f.passes = []pass{
 		{cares: connectionTarget, run: f.connections},
 		{cares: fireTarget, run: f.fireConnections},
@@ -65,7 +62,7 @@ func New() (*Fixer, error) {
 		{cares: campfireTarget, run: f.campfireSignal},
 		{cares: noteBlockTarget, run: f.noteBlockInstrument},
 	}
-	return f, nil
+	return f
 }
 
 // Fix 返回中心格子的最终修改，输入和邻居均不写入；调用方决定如何保存修改。
@@ -75,7 +72,7 @@ func (f *Fixer) Fix(input Input) map[[3]int]ir.IRBlock {
 	complete := func(state ir.IRBlock) ir.IRBlock {
 		value, found := completed[state]
 		if !found {
-			value = completeBlock(state)
+			value = f.completeBlock(state)
 			completed[state] = value
 		}
 		return value
@@ -152,15 +149,15 @@ func (view snapshot) targetBlocks() iter.Seq2[position, ir.IRBlock] {
 	}
 }
 
-func completeBlock(block ir.IRBlock) ir.IRBlock {
+func (f *Fixer) completeBlock(block ir.IRBlock) ir.IRBlock {
 	// 默认属性表不保留通用含水标记，补全时需单独传递原值。
-	if _, ok := java.HashToBlock(java.BlockToHash(block)); ok {
+	if _, ok := f.states.HashToBlock(block.Tidy().Hash()); ok {
 		return block
 	}
 	states := block.States()
 	waterlogged, wet := states.Get("waterlogged")
 	source := ir.IRBlock(block.NameWithNameSpace() + " " + string(states.Delete("waterlogged")))
-	completed, ok := converts.JavaCanon(source)
+	completed, ok := f.canon.Convert(source)
 	if !ok {
 		return block
 	}
@@ -175,7 +172,7 @@ func (f *Fixer) faces(block ir.IRBlock, cache map[ir.IRBlock]uint8) uint8 {
 	if faces, exists := cache[block]; exists {
 		return faces
 	}
-	faces := f.solid[java.BlockToHash(block)]
+	faces := f.solid[block.Tidy().Hash()]
 	cache[block] = faces
 	return faces
 }

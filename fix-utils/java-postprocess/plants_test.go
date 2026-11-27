@@ -3,10 +3,7 @@ package fixer
 import "testing"
 
 func TestPlantHeads(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, test := range []struct {
 		name string
 		dy   int

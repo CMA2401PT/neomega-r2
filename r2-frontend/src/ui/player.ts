@@ -5,7 +5,6 @@ import {
   WorldSession,
   type Camera,
 } from "neomega-r2-core";
-import { openMaterialPack } from "neomega-r2-materials";
 import { element, mountLayout } from "./dom.ts";
 import type { Frontend, MountOptions, Scene } from "./frontend-types.ts";
 import { materialControls } from "./material-controls.ts";
@@ -13,7 +12,6 @@ import { createStartup } from "./startup.ts";
 import type { ViewSettings } from "./types.ts";
 import { createView } from "./view.ts";
 
-declare const R2_DEFAULT_MATERIALS: string;
 
 /** 在隔离文档中挂载标准查看界面；换场景只替换会话与地图数据。 */
 export async function start(options: MountOptions): Promise<Frontend> {
@@ -24,7 +22,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
     helpExtra: options.helpHTML ?? "",
   });
   const startup = createStartup();
-  const readResource = openMaterialPack(Uint8Array.from(atob(R2_DEFAULT_MATERIALS), (c) => c.charCodeAt(0)));
+  const {readResource} = options;
   const renderer = await createRenderer({
     readResource,
     onProgress: ({ label }) => startup.stage(label),
@@ -69,6 +67,7 @@ export async function start(options: MountOptions): Promise<Frontend> {
       if (session) await session.setTextures(set);
       else renderer.setTextures(set);
     }),
+    { loadRecipe: options.loadRecipe },
   );
   function moveCamera(next: NonNullable<Scene["camera"]>) {
     Object.assign(camera, next, { position: [...next.position] });

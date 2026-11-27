@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: CMA2401PT/neomega-blocks
-          ref: 9e6d41fb90ede80d51e16135c177a8c14757a93d
+          ref: 18b38b1b396f66e18d3f17af2d2385d345d5d1d0
           path: neomega-blocks
           persist-credentials: false
       - uses: actions/checkout@v6
@@ -41,24 +41,22 @@ jobs:
           cache-dependency-path: neomega-r2/package-lock.json
       - run: npm ci
         working-directory: neomega-r2
-      - name: 从原始模型与贴图生成两个材质包
+      - uses: astral-sh/setup-uv@v7
+      - name: 生成 Java 资源并检验各主题
         working-directory: neomega-r2/assets-utils
         run: |
-          go generate
+          python3 resourcegen/generate.py --java 26.3 --out "$RUNNER_TEMP/resources"
+          export R2_GENERATED="$RUNNER_TEMP/resources/26.3"
+          echo "R2_GENERATED=$R2_GENERATED" >> "$GITHUB_ENV"
           go test ./...
-      - name: 构建并验证独立入口
+          (cd ../fix-utils && NEOMEGA_BLOCK_TABLES="$R2_GENERATED/java-blocks" go test ./...)
+      - name: 构建并验证浏览器发布入口
         working-directory: neomega-r2
         run: |
           npm run build
           npm run check
           npm test
-          mkdir -p "$RUNNER_TEMP/r2-browser"
-          cp r2-core/dist/release/r2-core.js "$RUNNER_TEMP/r2-browser/"
-          cp r2-link/dist/release/r2-link.js "$RUNNER_TEMP/r2-browser/"
-          cp assets-utils/dist/release/r2-materials.js "$RUNNER_TEMP/r2-browser/"
-          cp assets-utils/{default-materials.zip,material-info.zip} "$RUNNER_TEMP/r2-browser/"
-          cp r2-frontend/dist/release/r2-frontend.js "$RUNNER_TEMP/r2-browser/"
-          cp assets-utils/sourceassets/THIRD_PARTY_NOTICES.txt "$RUNNER_TEMP/r2-browser/"
+          node scripts/release-browser/assemble.mjs standalone "$RUNNER_TEMP/r2-browser" "$R2_GENERATED/browser-materials"
       - uses: actions/upload-artifact@v6
         with:
           name: r2-browser

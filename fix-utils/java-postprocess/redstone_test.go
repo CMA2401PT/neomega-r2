@@ -1,12 +1,11 @@
 package fixer
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestRedstoneConnections(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	wire := stateBlock(t, "redstone_wire", map[string]string{
 		"power": "7", "north": "up", "east": "up", "south": "up", "west": "up",
 	})
@@ -132,7 +131,7 @@ func TestRedstoneConnections(t *testing.T) {
 }
 
 func TestRedstoneBoundaries(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	wire := stateBlock(t, "redstone_wire", map[string]string{
 		"power": "11", "north": "up", "east": "up", "south": "up", "west": "up",
 	})
@@ -182,7 +181,7 @@ func TestRedstoneMissingDiagonal(t *testing.T) {
 	for side := range neighbours {
 		neighbours[side] = airChunk(t)
 	}
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	if _, changed := runPass(redstoneTarget, f.redstoneConnections, chunk, neighbours)[cell(0, 15, 8)]; changed {
 		t.Fatal("wire changed without the diagonal subchunk needed above the west neighbour")
 	}

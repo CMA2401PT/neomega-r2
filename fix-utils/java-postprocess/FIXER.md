@@ -11,7 +11,7 @@ NEMC，要经 `neomega-blocks` 的 NEMC→Java 转换才得到 Java 状态，这
 固定 16³ 的存储寻址、整列与单 section 适配、复制和写回由应用层 `neomega-converter/fixpalette` 完成。
 core 不接收旧 Palette，也不规定数据如何分块。
 它只改方块状态，不碰几何，也不依赖几何运行时。
-状态属性通过 `ir.IRBlock` 查询与改写，属性表和实心表的 hash 查询使用 `neomega-blocks/presets/java/v1`。
+状态属性通过 `ir.IRBlock` 查询与改写，状态、属性域与六面实心表由应用传入。
 
 这份文档讲三件 README 的使用说明不讲的事：**哪些方块需要修、依据是什么**，**已经实现
 了哪些修复**，以及**哪些还没搞定、难在哪**。想知道怎么调用，看本仓库
@@ -20,9 +20,9 @@ core 不接收旧 Palette，也不规定数据如何分块。
 ## 哪些方块需要修，依据是什么
 
 「需要修」不是凭印象定的，而是来自一个往返分析工具：
-`neomega-blocks/third_party/gen_resource/java-roundtrip`。它枚举全部 Java 状态，
+`neomega-blocks/examples/java-roundtrip`。它枚举全部 Java 状态，
 逐个做 Java→NEMC→Java 的往返，把回来的状态和原状态对比——对不上的，就是转换链在这个
-方块上丢了信息。结论写入该目录的 `tmp/REPORT.md`；生成命令见 [生成工具说明](../../../neomega-blocks/third_party/gen_resource/README.md)。
+方块上丢了信息。命令把结论写到标准输出；生成命令见 [生成工具说明](../../../neomega-blocks/resourcegen/README.md)。
 
 报告本身只说明「转换后对不上」，不单独证明 Bedrock 表达不了，也不保证 fixer 一定能
 恢复。能不能恢复，取决于丢掉的信息能否从邻居关系推导，或从伙伴格保留的状态中取得。
@@ -56,8 +56,7 @@ core 不接收旧 Palette，也不规定数据如何分块。
 加一类新修复，就写一对 `cares` 和 `run` 函数，在 `New()` 的 `f.passes` 列表里登记。`run` 内部用 `view.targetBlocks()` 遍历驱动已筛选的目标格，无需再次指定筛选函数。列表顺序就是
 执行顺序。
 
-pass 判断「邻居那一面算不算实心」时查的是**实心表**（`neomega-view-utils/fixer/solidtable/preset` 内嵌的
-`geometry.nvsolid`，由 viewer-assets 的统一建表器产出，`New()` 默认加载）。表里每个 hash 存六个 bit，对应 west/east/
+pass 判断「邻居那一面算不算实心」时查的是**实心表**（应用从 R2 建表器生成的 `geometry.nvsolid` 加载）。表里每个 hash 存六个 bit，对应 west/east/
 down/up/north/south 六个方向该面是否被不透明矩形完整覆盖。栅栏和 fire 要靠它判断「这面
 是实心墙，该附着上去」。注意它是**渲染语义**上的实心，不等于红石意义上的导电——这个区别
 是红石线只能做保守版的原因之一。

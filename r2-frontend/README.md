@@ -4,15 +4,14 @@
 
 1. **合成与后处理管线 (`neomega-r2-frontend/compositor`)**：在**单张 `<canvas>`** 上接收 `r2-core` 输出的 RGB 与深度纹理，按需串联 **3×3 双边降噪** → **WebSR 2× 超分** → **基于深度图的外部 2D/3D 标记图层混合（DepthOverlay）** → **上屏 / PNG 编码导出**。
 2. **共享查看界面 (`neomega-r2-frontend` / `neomega-r2-frontend/ui`)**：包含相机飞行控制、全屏正交地图与区块占用概览、坐标跳转、参数组管理、设置抽屉、渲染信息与材质包切换。支持两种集成方式：
-   - **开箱即用 `mount()`**：单文件 `r2-frontend.js` 内嵌默认材质与着色器，通过隔离 `iframe` 直接挂载完整播放器（适合单页 HTML）。
+   - **开箱即用 `mount()`**：发布脚本为单文件 `r2-frontend.js` 注入选定的材质，通过隔离 `iframe` 直接挂载完整播放器（适合单页 HTML）。
    - **宿主内联挂载 `mountLayout()` + `createView()`**：在宿主页面内挂载标准布局与插槽（Viewer、离线播放器、Demo 共用）。
 
 ## 运行本地演示
 
-在 `neomega-r2` 仓库根目录运行：
+先按[浏览器发布说明](../scripts/release-browser/README.md)生成 web 与 standalone 两套文件，再在仓库根目录运行：
 
 ```sh
-npm ci
 npm run demo
 ```
 
@@ -95,9 +94,25 @@ const blob = await compositor.renderToPNG(renderer.frame!, {
 
 参考实现见 [demo/main.ts](demo/main.ts) 与 [apps/neomega-viewer-r2/web/app.ts](../../apps/neomega-viewer-r2/web/app.ts)。
 
-## Go 嵌入与构建产物说明
+## 宿主选择材质
 
-执行 `npm run build` 后会产出两类用途完全隔离的产物：
+通过 npm 包直接调用 `mount` 时，传入 `readResource(name)` 和 `loadRecipe(signal)`。前者供渲染器按文件名读取纹理与模型，后者只在用户切换材质时读取配套的合成配方。WebSR 模型参数随前端编译。
 
-- **`dist/web/`**（通过 [embed.go](embed.go) 嵌入 Go 宿主）：包含外链 `./r2-core.js` 与 `./r2-materials.js` 的精简 `r2-frontend.js`、`r2-core.js`、`r2-link.js`、`r2-materials.js`、`style.css` 与按需读取的 `material-info.zip`，**不重复内嵌默认材质包或双份脚本**。
-- **`dist/release/`**：面向独立静态站点的单文件自包含 `r2-frontend.js` 与 HTML 示例，不进入 Go 二进制。
+```ts
+import { mount } from "neomega-r2-frontend";
+import { openMaterialPack } from "neomega-r2-materials";
+
+const pack = await fetch("./default-materials.zip");
+if (!pack.ok) throw Error("默认材质加载失败");
+await mount(container, {
+  source,
+  readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
+  async loadRecipe(signal) {
+    const response = await fetch("./material-info.zip", { signal });
+    if (!response.ok) throw Error("材质配方加载失败");
+    return new Uint8Array(await response.arrayBuffer());
+  },
+});
+```
+
+包内构建输出可注入资源的 `dist/index.js`，并把内联 UI 的脚本和样式写入 `dist/web/`。Go 应用通过[发布脚本](../scripts/release-browser/README.md)组合各包的网页产物，然后用自己的 `go:embed` 提供静态文件。

@@ -6,14 +6,10 @@ import (
 	"testing"
 
 	"neomega-blocks/ir"
-	converts "neomega-blocks/presets/block-converts/v1"
 )
 
 func TestDoorRoundtripRepair(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, name := range []string{"oak_door", "spruce_door", "birch_door", "iron_door"} {
 		for _, facing := range []string{"north", "east", "south", "west"} {
 			for _, hinge := range []string{"left", "right"} {
@@ -47,10 +43,7 @@ func TestDoorRoundtripRepair(t *testing.T) {
 }
 
 func TestDoorAcrossSubchunkBoundary(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	lower, upper := airChunk(t), airChunk(t)
 	positions := [2]int{cell(4, 15, 9), cell(4, 0, 9)}
 	var original [2]ir.IRBlock
@@ -74,10 +67,7 @@ func TestDoorAcrossSubchunkBoundary(t *testing.T) {
 }
 
 func TestDoorRequiresMatchingPartner(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, half := range []string{"lower", "upper"} {
 		partnerHalf, partnerY := "upper", 8
 		if half == "upper" {
@@ -107,10 +97,7 @@ func TestDoorRequiresMatchingPartner(t *testing.T) {
 }
 
 func TestDoorKeepsEachHalfPowered(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	chunk := airChunk(t)
 	lower := cell(4, 7, 9)
 	upper := cell(4, 8, 9)
@@ -135,11 +122,14 @@ func TestDoorKeepsEachHalfPowered(t *testing.T) {
 
 func roundtripDoorBlock(t *testing.T, block ir.IRBlock) ir.IRBlock {
 	t.Helper()
-	bedrock, ok := converts.ConvertFromJava(block)
+	if testJavaToBedrock == nil {
+		t.Skip("此用例需要 Java 与 Bedrock 双向方块表")
+	}
+	bedrock, ok := testJavaToBedrock.Convert(block)
 	if !ok {
 		t.Fatalf("Java conversion failed: %s", block)
 	}
-	converted, ok := converts.ConvertToJava(bedrock)
+	converted, ok := testBedrockToJava.Convert(bedrock)
 	if !ok {
 		t.Fatalf("Bedrock conversion failed: %s", bedrock)
 	}

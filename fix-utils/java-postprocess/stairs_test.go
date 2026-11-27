@@ -7,10 +7,7 @@ import (
 )
 
 func TestStairCorners(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, orientation := range []struct {
 		facing, left, right string
 		dx, dz              int
@@ -52,10 +49,7 @@ func TestStairCorners(t *testing.T) {
 }
 
 func TestStairShapeSelection(t *testing.T) {
-	f, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fixtureFixer()
 	for _, test := range []struct {
 		name, frontFacing, frontHalf, backFacing, backHalf, want string
 	}{
@@ -82,7 +76,7 @@ func TestStairShapeSelection(t *testing.T) {
 }
 
 func TestStairUnknownFacing(t *testing.T) {
-	f := &Fixer{}
+	f := &Fixer{states: testStates, schema: testSchema, canon: testJavaDefaults}
 	for _, source := range []ir.IRBlock{
 		`minecraft:oak_stairs ["half"="bottom"]`,
 		`minecraft:oak_stairs ["facing"=1,"half"="bottom"]`,

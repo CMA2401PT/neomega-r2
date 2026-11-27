@@ -3,11 +3,11 @@ import { compileMaterialPack, materialDirectory, type MaterialInput } from "neom
 import { element } from "./dom.ts";
 
 declare const R2_MATERIAL_CONTROLS: string | undefined;
-declare const R2_MATERIAL_INFO: string | undefined;
+
 
 export interface MaterialControlsOptions {
-  /** 运行时按需拉取合成信息包（例如 Viewer 提供的 /r2/material-info.zip），避免把配方内嵌进主脚本。 */
-  recipeURL?: string;
+  /** 用户切换材质时调用，宿主可以读取网络或本地配方。 */
+  loadRecipe: (signal: AbortSignal) => Promise<Uint8Array>;
   initialLimit?: number;
   controlsHTML?: string;
 }
@@ -16,7 +16,7 @@ export interface MaterialControlsOptions {
 export function materialControls(
   container: HTMLElement,
   install: (set: TextureSet, input: Exclude<MaterialInput, File[]>, limit: number) => Promise<void>,
-  options: MaterialControlsOptions = {},
+  options: MaterialControlsOptions,
 ) {
   const html = options.controlsHTML ?? (typeof R2_MATERIAL_CONTROLS !== "undefined" ? R2_MATERIAL_CONTROLS : "");
   if (!html) throw Error("缺少材质控制面板模板");
@@ -33,14 +33,7 @@ export function materialControls(
 
   async function loadRecipe(signal: AbortSignal): Promise<Uint8Array> {
     if (cachedRecipe) return cachedRecipe;
-    if (typeof R2_MATERIAL_INFO !== "undefined") {
-      cachedRecipe = Uint8Array.from(atob(R2_MATERIAL_INFO), (c) => c.charCodeAt(0));
-      return cachedRecipe;
-    }
-    const url = options.recipeURL ?? "/r2/material-info.zip";
-    const response = await fetch(url, { signal });
-    if (!response.ok) throw Error("无法加载合成信息包：" + response.status);
-    cachedRecipe = new Uint8Array(await response.arrayBuffer());
+    cachedRecipe = await options.loadRecipe(signal);
     return cachedRecipe;
   }
 

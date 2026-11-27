@@ -1,4 +1,4 @@
-// Package r2assets 提供 R2 渲染核心使用的资源包：预生成的默认资源与模型目录读取。
+// Package r2assets 提供 R2 渲染核心使用的资源包：材质归档与模型目录读取。
 // 渲染核心只依赖资源包的文件格式，不导入本包；宿主用本包生成或提供资源。
 package r2assets
 
@@ -7,8 +7,6 @@ import (
 
 	"neomega-view-utils/r2assets/internal/modeldata"
 )
-
-//go:generate go run ./cmd/build-models
 
 // Fragment 指向模型伸进相邻格子的部分。
 type Fragment = modeldata.Fragment
@@ -19,8 +17,8 @@ type Model = modeldata.Model
 // Catalog 保存稳定的状态映射和当前材质下的共享模型。
 type Catalog = modeldata.Catalog
 
-func OpenCatalog() (*Catalog, error) {
-	data, err := Files.ReadFile("assets/catalog.json")
+func (a *Archive) OpenCatalog() (*Catalog, error) {
+	data, err := a.ReadFile("assets/catalog.json")
 	if err != nil {
 		return nil, err
 	}
@@ -30,8 +28,8 @@ func OpenCatalog() (*Catalog, error) {
 }
 
 // OpenStates 读取方块哈希到模型的表；数据源发送的调色板条目按此表解释，表外的哈希画成空气。
-func OpenStates() (map[uint32]uint32, error) {
-	data, err := Files.ReadFile("assets/states.bin")
+func (a *Archive) OpenStates() (map[uint32]uint32, error) {
+	data, err := a.ReadFile("assets/states.bin")
 	if err != nil {
 		return nil, err
 	}

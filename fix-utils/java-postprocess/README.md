@@ -16,23 +16,20 @@ fixer 根据已有 Java 状态和周围方块，补全默认属性并重算邻�
 ## 使用
 
 下面直接以坐标表提供方块，不需要子区块。
-在 fix-utils 模块内保存程序，执行 `go run <程序路径>`：
+应用先装配修复器，再把它传给负责遍历坐标的代码。下面的函数接收装配好的实例。
 
 ```go
-package main
+package example
 
 import (
     "fmt"
     "iter"
-    "log"
 
     "neomega-blocks/ir"
     fixer "neomega-view-utils/fixer/java-postprocess"
 )
 
-func main() {
-    f, err := fixer.New()
-    if err != nil { log.Fatal(err) }
+func showChanges(f *fixer.Fixer) {
     blocks := map[[3]int]ir.IRBlock{
         {0, 0, 0}: "minecraft:oak_fence []",
         {1, 0, 0}: "minecraft:oak_fence []",
@@ -61,5 +58,5 @@ func main() {
 转换导出与存档浏览共用这个适配，core 不依赖旧存储类型。
 
 修复规则及近似限制见 [FIXER.md](FIXER.md)。
-实心表由 [统一建表器](../../viewer-assets/cmd/build-tables/README.md) 生成。
+实心表由 [统一建表器](../../assets-utils/resourcegen/README.md) 生成。
 存档遍历、写回、实体与诊断保留由 [neomega-converter](../../../apps/neomega-converter/README.md) 完成。
