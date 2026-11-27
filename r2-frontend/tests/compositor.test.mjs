@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { filterParameters } from "../src/compositor/denoise.ts";
-import { SceneMarks } from "../src/compositor/scene-overlay.ts";
+import { SceneMarks } from "../src/layers/scene-overlay.ts";
 
 class FakeOffscreenCanvas {
   constructor(width, height) {

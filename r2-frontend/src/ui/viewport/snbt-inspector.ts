@@ -1,4 +1,4 @@
-import type { OverlayItem, SceneOverlay } from "../../compositor/overlay-types.ts";
+import type { OverlayItem, SceneOverlay } from "../../layers/overlay-types.ts";
 import { element } from "../layout/dom.ts";
 import type { ViewerWorld } from "../player/world.ts";
 

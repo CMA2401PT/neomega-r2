@@ -2,7 +2,7 @@ import type { ViewerWorld } from "../player/world.ts";
 import type { Camera, RenderOptions, Renderer, Tier, WorldSession } from "neomega-r2-core";
 import type { CaptureSession } from "neomega-r2-core";
 import { createCompositor } from "../../compositor/compositor.ts";
-import { SceneMarks, type Stamp } from "../../compositor/scene-overlay.ts";
+import { createViewerLayers } from "./scene-layers.ts";
 import { appearanceDefaults, bindAppearance, lighting } from "../settings/appearance.ts";
 import { drawAxes } from "./axes.ts";
 import { FlightControls } from "../navigation/controls.ts";
@@ -37,15 +37,15 @@ interface PhotoJob {
 export const TIER_NAMES = { voxel: "体素渲染器", basic: "基础渲染器", shading: "光影渲染器", accumulation: "累积渲染器" };
 const DEFAULT_EXPORT_PIXELS = 24e6;
 
-export function createView({ renderer, camera, settings, startup: externalStartup, scene, onSettings, onStats, report = () => {} }: ViewOptions) {
+export function createView({ renderer, camera, settings, startup: externalStartup, scene, onSettings, onStats, report = () => { } }: ViewOptions) {
   const startup = externalStartup ?? createStartup();
   const viewCanvas = element<HTMLCanvasElement>("view");
   const mapCanvas = element<HTMLCanvasElement>("map-overlay");
   const compositor = createCompositor(renderer.device, viewCanvas);
-  const marks = new SceneMarks();
+  const layers = createViewerLayers(renderer.device, compositor.format);
   const jump = (position: number[]) => { camera.position = position; };
-  const map = new FullscreenMap({ renderer, camera, jump, overlay: marks });
-  const inspector = createSNBTInspector(marks, () => map.open);
+  const map = new FullscreenMap({ renderer, camera, jump, overlay: layers.overlay });
+  const inspector = createSNBTInspector(layers.overlay, () => map.open);
   const controls = new FlightControls(viewCanvas, camera, event => {
     const rect = viewCanvas.getBoundingClientRect();
     const pixel = {
@@ -87,8 +87,6 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   let photo: PhotoJob | null = null, photoWaiting = false;
   let displayedCamera: Camera | undefined;
   let displayedAspect = 1;
-  let overlayKey = "";
-  let overlayStamps: Stamp[] = [];
 
   function frameSize(scale: number, pixelLimit = Infinity) {
     const factor = Math.min(
@@ -151,7 +149,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
         drawn = "";
         showTaskStatus(performance.now());
       });
-    promise.catch(() => {});
+    promise.catch(() => { });
     compiling.set(key, { promise, since });
     showTaskStatus(since);
     return promise;
@@ -209,7 +207,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     setPhotoButton();
     compileTier("accumulation", "photo").then(() => {
       if (photoWaiting) startPhoto("photo");
-    }, () => {});
+    }, () => { });
   };
   element<HTMLButtonElement>("export").onclick = () => {
     if (photo) return cancelPhoto();
@@ -252,8 +250,6 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     });
     const name = `${world.name || "天空"}-${new Date().toTimeString().slice(0, 8).replaceAll(":", "")}${kind === "export" ? `-${shownTier}` : ""}${saveSuperResolution2x ? "-2x" : ""}.png`;
     showSampleSize(width, height);
-    overlayStamps = [];
-    overlayKey = "";
     photo = { capture, name, kind, tier, supersample, finishing: false };
     setPhotoButton();
     showTaskStatus(performance.now());
@@ -292,23 +288,6 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       setPhotoButton();
       showTaskStatus(performance.now());
     }
-  }
-
-  function updateStamps(camera: Camera, overview: boolean, aspect: number): Stamp[] {
-    const width = innerWidth,
-      height = innerHeight;
-    if (!marks.size || (!overview && !renderer.frame?.depth && marks.needsDepth)) {
-      overlayKey = "";
-      overlayStamps = [];
-      return overlayStamps;
-    }
-    const ratio = Math.min(devicePixelRatio, renderer.maxTextureSize / Math.max(width, height));
-    const key = JSON.stringify([camera, marks.version, width, height, ratio, aspect, overview]);
-    if (key !== overlayKey) {
-      overlayStamps = marks.stamps(camera, width, height, ratio, overview, aspect);
-      overlayKey = key;
-    }
-    return overlayStamps;
   }
 
   function frame(now: number, world: ViewerWorld | WorldSession | null, options?: FrameOptions) {
@@ -374,7 +353,8 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     const drawOptions = { ...debugPanel.drawOptions(), ...overrides };
     showingDepth = drawOptions.debug === 3;
     const superResolution = showingDepth ? "off" : (settings.superResolution ?? "off");
-    const overlayDepth = !view.overview && marks.needsDepth;
+    const activeLayers = view.overview ? [] : layers.active();
+    const overlayDepth = activeLayers.some(layer => layer.needsSceneDepth);
     const state = JSON.stringify([
       overlayDepth,
       view,
@@ -423,26 +403,25 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       if (rendered && session && session.stats.loaded > 0) startup.finish();
     }
     if (view.overview) {
-      const stamps = updateStamps(view.camera, true, innerWidth / innerHeight);
+      const stamps = layers.overview(view.camera, innerWidth, innerHeight);
       const ctx = mapCanvas.getContext("2d")!;
       for (const { image, rect: [x, y, w, h] } of stamps) {
         ctx.drawImage(image, x, y, w, h);
       }
     } else if (renderer.frame && displayedCamera) {
-      const stamps = updateStamps(displayedCamera, false, displayedAspect);
       const denoise = renderer.accumulated > 0 && !showingDepth ? (settings.accumulationFilter ?? "light") : "off";
       const displaySize = superResolution !== "off"
         ? screenSize
-        : stamps.length
+        : activeLayers.length
           ? { width: Math.max(width, screenSize.width), height: Math.max(height, screenSize.height) }
           : undefined;
       compositor.present(renderer.frame, {
         denoise,
         superResolution,
         displaySize,
-        overlay: stamps.length
-          ? { stamps, cssWidth: innerWidth, cssHeight: innerHeight, perspective: displayedCamera.ortho === undefined }
-          : null,
+        layers: activeLayers.length
+          ? { items: activeLayers, camera: displayedCamera, aspect: displayedAspect, cssWidth: innerWidth, cssHeight: innerHeight }
+          : undefined,
       });
     }
     if (changed && (rendered || view.overview)) {
@@ -460,7 +439,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
         ? accumulating && !view.overview
           ? `静止（累积 ${renderer.accumulated} 样本${tiles ? ` · 当前 ${tiles.done}/${tiles.total} 块` : ""}）`
           : "静止"
-        : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)}FPS`;
+        : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)}`;
       if (session) {
         const stats = session.stats,
           times = renderer.times.sort((a, b) => a - b),
@@ -525,7 +504,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   }
   refreshSettings();
   return {
-    overlay: marks,
+    overlay: layers.overlay,
     debugStatus: debugPanel.status,
     hud, map, frame, refreshSettings, cancelPhoto, frames: rate.intervals,
     get fps() { return rate.fps; },
@@ -535,9 +514,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       rate.reset();
       currentView = null;
       displayedCamera = undefined;
-      overlayKey = "";
-      overlayStamps = [];
-      marks.clear();
+      layers.clear();
       hud.world({ loaded });
       return map.setWorld(readChunks);
     },
@@ -546,13 +523,14 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       stopped = true;
       startup.finish();
       renderer.cancelAccumulation();
-      marks.clear();
+      layers.clear();
       releasePresets();
       rate.reset();
       cancelPhoto();
       map.dispose();
       controls.dispose();
       events.abort();
+      layers.dispose();
       compositor.dispose();
     },
   };

@@ -1,5 +1,7 @@
 /// <reference types="@webgpu/types" />
-import type { Stamp } from "./scene-overlay.ts";
+import type { LayerView, SceneLayer } from "../compositor/scene-layer.ts";
+import { sceneOcclusion } from "./scene-depth.ts";
+import type { SceneMarks, Stamp } from "./scene-overlay.ts";
 
 function parameters(
   stamp: Stamp,
@@ -18,9 +20,8 @@ function parameters(
   ]);
 }
 
-// 共面选框与地形的交点由不同投影路径求得，给两端相同的格数容差。
-const DEPTH_BIAS = 0.003;
 const wgsl = `
+${sceneOcclusion}
 struct Params { rect:vec4f, plane:vec4f }
 @group(0) @binding(0) var<uniform> p:Params;
 @group(0) @binding(1) var ink:texture_2d<f32>;
@@ -37,15 +38,13 @@ struct V { @builtin(position) pos:vec4f, @location(0) uv:vec2f, @location(1) scr
   if(p.plane.w>0){
     let d=dot(p.plane.xyz,vec3f(v.screen,1));
     let z=select(d,1/d,p.plane.w==2);
-    let size=vec2i(textureDimensions(scene));
-    let hit=textureLoad(scene,clamp(vec2i(v.screen*vec2f(size)),vec2i(0),size-1),0).r;
-    if(hit>=0 && z>hit+${DEPTH_BIAS}){discard;}
+    if(occluded(scene, v.screen, z)){discard;}
   }
   return color;
 }`;
 
 /** 在主合成通道内按深度测试与预乘透明度绘制 2D 标记图层。 */
-export function createOverlayPass(device: GPUDevice, format: GPUTextureFormat) {
+export function createMarkLayer(device: GPUDevice, format: GPUTextureFormat, marks: SceneMarks): SceneLayer & { dispose(): void } {
   const fragment = GPUShaderStage.FRAGMENT;
   const layout = device.createBindGroupLayout({
     entries: [
@@ -75,11 +74,8 @@ export function createOverlayPass(device: GPUDevice, format: GPUTextureFormat) {
   const emptyDepthView = emptyDepth.createView();
 
   let entries: { texture: GPUTexture; params: GPUBuffer; group: GPUBindGroup }[] = [];
-  let prevStamps: Stamp[] | undefined,
-    prevDepth: GPUTexture | null | undefined,
-    prevWidth = 0,
-    prevHeight = 0,
-    prevPerspective = false;
+  let projection = "";
+  let previousDepth: GPUTextureView | null | undefined;
 
   function release() {
     for (const { texture, params } of entries) {
@@ -90,53 +86,46 @@ export function createOverlayPass(device: GPUDevice, format: GPUTextureFormat) {
   }
 
   return {
-    prepare(stamps: Stamp[], depth: GPUTexture | null, cssWidth: number, cssHeight: number, perspective: boolean) {
-      if (
-        stamps === prevStamps &&
-        depth === prevDepth &&
-        cssWidth === prevWidth &&
-        cssHeight === prevHeight &&
-        perspective === prevPerspective
-      ) {
-        return;
+    get revision() { return marks.version; },
+    get needsSceneDepth() { return marks.needsDepth; },
+    draw(pass: GPURenderPassEncoder, view: LayerView) {
+      const { camera, cssWidth, cssHeight, aspect, sceneDepth } = view;
+      const ratio = Math.min(devicePixelRatio, device.limits.maxTextureDimension2D / Math.max(cssWidth, cssHeight));
+      const key = JSON.stringify([camera, marks.version, cssWidth, cssHeight, aspect, ratio]);
+      if (projection !== key || previousDepth !== sceneDepth) {
+        release();
+        const stamps = marks.stamps(camera, cssWidth, cssHeight, ratio, !sceneDepth, aspect);
+        for (const s of stamps) {
+          const size = [s.image.width, s.image.height];
+          const texture = device.createTexture({
+            size,
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+          });
+          device.queue.copyExternalImageToTexture(
+            { source: s.image },
+            { texture, premultipliedAlpha: true },
+            size,
+          );
+          const params = device.createBuffer({
+            size: 32,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+          });
+          device.queue.writeBuffer(params, 0, parameters(s, cssWidth, cssHeight, camera.ortho === undefined));
+          const group = device.createBindGroup({
+            layout,
+            entries: [
+              { binding: 0, resource: { buffer: params } },
+              { binding: 1, resource: texture.createView() },
+              { binding: 2, resource: sceneDepth ?? emptyDepthView },
+              { binding: 3, resource: sampler },
+            ],
+          });
+          entries.push({ texture, params, group });
+        }
+        projection = key;
+        previousDepth = sceneDepth;
       }
-      release();
-      const sceneView = depth ? depth.createView() : emptyDepthView;
-      for (const s of stamps) {
-        const size = [s.image.width, s.image.height];
-        const texture = device.createTexture({
-          size,
-          format: "rgba8unorm",
-          usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
-        });
-        device.queue.copyExternalImageToTexture(
-          { source: s.image },
-          { texture, premultipliedAlpha: true },
-          size,
-        );
-        const params = device.createBuffer({
-          size: 32,
-          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
-        device.queue.writeBuffer(params, 0, parameters(s, cssWidth, cssHeight, perspective));
-        const group = device.createBindGroup({
-          layout,
-          entries: [
-            { binding: 0, resource: { buffer: params } },
-            { binding: 1, resource: texture.createView() },
-            { binding: 2, resource: sceneView },
-            { binding: 3, resource: sampler },
-          ],
-        });
-        entries.push({ texture, params, group });
-      }
-      prevStamps = stamps;
-      prevDepth = depth;
-      prevWidth = cssWidth;
-      prevHeight = cssHeight;
-      prevPerspective = perspective;
-    },
-    draw(pass: GPURenderPassEncoder) {
       if (!entries.length) return;
       pass.setPipeline(pipeline);
       for (const { group } of entries) {
@@ -147,8 +136,7 @@ export function createOverlayPass(device: GPUDevice, format: GPUTextureFormat) {
     dispose() {
       release();
       emptyDepth.destroy();
-      prevStamps = undefined;
-      prevDepth = undefined;
+      previousDepth = undefined;
     },
   };
 }

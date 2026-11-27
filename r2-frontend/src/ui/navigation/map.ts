@@ -1,6 +1,6 @@
 // 全屏地图只提供相机和输入；近处复用主射线渲染器，远处用区块位图显示存档分布。
 import { cameraBasis, cameraRay, type Camera, type Renderer, type WorldSession } from "neomega-r2-core";
-import type { OverlayItem, OverlayMarker, SceneOverlay } from "../../compositor/overlay-types.ts";
+import type { OverlayItem, OverlayMarker, SceneOverlay } from "../../layers/overlay-types.ts";
 import { closePopovers, element } from "../layout/dom.ts";
 
 /** 把地图像素投影到水平参考面，拖动与光标缩放因此保持同一世界锚点。 */

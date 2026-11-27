@@ -2,7 +2,7 @@
 
 `r2-frontend` 构建在 [r2-core](../r2-core/README.md) 之上，提供两层递进的高层能力：
 
-1. **合成与后处理管线 (`neomega-r2-frontend/compositor`)**：在**单张 `<canvas>`** 上接收 `r2-core` 输出的 RGB 与深度纹理，按需串联 **3×3 双边降噪** → **WebSR 2× 超分** → **基于深度图的外部 2D/3D 标记图层混合（DepthOverlay）** → **上屏 / PNG 编码导出**。
+1. **合成与后处理管线 (`neomega-r2-frontend/compositor`)**：在**单张 `<canvas>`** 上接收 `r2-core` 输出的 RGB 与深度纹理，按需串联 **3×3 双边降噪** → **WebSR 2× 超分** → **按宿主指定的顺序绘制图层** → **上屏 / PNG 编码导出**。
 2. **共享查看界面 (`neomega-r2-frontend` / `neomega-r2-frontend/ui`)**：包含相机飞行控制、全屏正交地图与区块占用概览、坐标跳转、参数组管理、设置抽屉、渲染信息与材质包切换。支持两种集成方式：
    - **开箱即用 `mount()`**：发布脚本为单文件 `r2-frontend.js` 注入选定的材质，通过隔离 `iframe` 直接挂载完整播放器（适合单页 HTML）。
    - **宿主内联挂载 `mountLayout()` + `createView()`**：在宿主页面内挂载标准布局与插槽（Viewer、离线播放器、Demo 共用）。
@@ -56,38 +56,38 @@ npm run demo
 
 ## 方式二：只使用合成与后处理管线 (`compositor`)
 
-如果不想使用预设 HUD，只想把 `r2-core` 的离屏画面与自己的 2D 选框/标记混合并做降噪和超分，可直接导入 `neomega-r2-frontend/compositor`：
+合成器接收核心的离屏画面，完成降噪和超分，然后按 `present()` 的图层列表顺序叠加到画布上。宿主可以直接使用方块线框图层。同一批线框在相机移动时共用已上传的坐标。文字或其他自定义图层也可以通过同一个入口接入。
+
+图层实现 `SceneLayer` 接口。内容改变时递增 `revision`，让合成器在世界静止时也能重画。宿主在绘制世界前查询各层的 `needsSceneDepth`，有遮挡需求时向核心请求深度。`draw(pass, view)` 在已有的 WebGPU 渲染通道内绘制，图层绑定自己的管线和资源。视图提供相机、投影宽高比、CSS 尺寸、输出像素尺寸和只读深度。深度暂缺时仍可绘制置顶标记。
+
+下面用一个单位线框标出海面上的一格，适用于装有 R2 浏览器材质的页面。线宽以 CSS 像素计，即使射线采样分辨率低于画布分辨率，也能保持粗细。
 
 ```ts
 import { createRenderer } from "neomega-r2-core";
-import { createCompositor, SceneMarks } from "neomega-r2-frontend/compositor";
+import { createBlockOutlineLayer, createCompositor } from "neomega-r2-frontend/compositor";
 
-const renderer = await createRenderer({ assets: "/assets/", depthOutput: true });
-const compositor = createCompositor(renderer.device, document.querySelector("canvas")!);
-const marks = new SceneMarks();
-marks.blockOutline([0, 0, -4], { stroke: "#ffffff", strokeWidth: 2 });
+const canvas = document.querySelector("canvas")!;
+const renderer = await createRenderer({ assets: "/r2/assets/" });
+const compositor = createCompositor(renderer.device, canvas);
+const outlines = createBlockOutlineLayer(renderer.device, compositor.format);
+outlines.blockOutline([0, 0, -4], { stroke: "#ffffff", strokeWidth: 2 });
 
-// 渲染核心离屏生成 RGB 与 Depth
-await renderer.render(camera, { width: 640, height: 360, depthOutput: true, synchronize: true });
-
-// 合成器在同一张 canvas 上串联 降噪 → WebSR → 深度测试混合标记 → 上屏
+const camera = { position: [0.5, 2, 1], yaw: 0, pitch: -0.3 };
+const width = 640, height = 360;
+const items = [outlines];
+await renderer.render(camera, {
+  width, height, ocean: 0, synchronize: true,
+  depthOutput: items.some(layer => layer.needsSceneDepth),
+});
 if (renderer.frame) {
-  const stamps = marks.stamps(camera, innerWidth, innerHeight, devicePixelRatio, false, 640 / 360);
   compositor.present(renderer.frame, {
-    denoise: "light",
-    superResolution: "cnn-s",
-    displaySize: { width: Math.round(innerWidth * devicePixelRatio), height: Math.round(innerHeight * devicePixelRatio) },
-    overlay: { stamps, cssWidth: innerWidth, cssHeight: innerHeight, perspective: camera.ortho === undefined },
+    displaySize: { width: 1280, height: 720 },
+    layers: { items, camera, aspect: width / height, cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight },
   });
 }
-
-// 导出高分辨率 PNG
-const blob = await compositor.renderToPNG(renderer.frame!, {
-  denoise: "light",
-  superResolution: "cnn-s",
-  saveSuperResolution2x: true,
-});
 ```
+
+宿主管理图层的生命周期，退出时依次调用 `outlines.dispose()`、`compositor.dispose()` 和 `renderer.dispose()`。如果需要导出世界画面，`compositor.renderToPNG(frame, options)` 直接使用离屏帧和后处理参数。
 
 ## 方式三：宿主内联挂载 UI (`ui`)
 

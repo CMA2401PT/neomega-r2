@@ -1,7 +1,7 @@
 import type { Camera, ObjectRegistry } from "neomega-r2-core";
 import type { MinecraftSource } from "neomega-r2-mc";
 import type { MaterialInput } from "neomega-r2-materials";
-import type { SceneOverlay } from "../../compositor/overlay-types.ts";
+import type { SceneOverlay } from "../../layers/overlay-types.ts";
 
 export type CameraPosition = Pick<Camera, "position"> & Partial<Omit<Camera, "position">>;
 /** 场景由宿主提供；地图占用表可随场景切换。 */

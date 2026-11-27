@@ -1,23 +1,15 @@
 /// <reference types="@webgpu/types" />
 import type { FrameOutput } from "neomega-r2-core";
 import { createDenoisePass, type AccumulationFilter, type SuperResolution } from "./denoise.ts";
-import { createOverlayPass } from "./overlay-pass.ts";
+import type { LayerCamera, SceneLayer } from "./scene-layer.ts";
 import { readTexture, rgbaToPNG } from "./readback.ts";
-import type { Stamp } from "./scene-overlay.ts";
 import { createWebSR } from "./websr.ts";
-
-export interface OverlayInput {
-  stamps: Stamp[];
-  cssWidth: number;
-  cssHeight: number;
-  perspective: boolean;
-}
 
 export interface PresentOptions {
   denoise?: AccumulationFilter;
   superResolution?: SuperResolution;
   displaySize?: { width: number; height: number };
-  overlay?: OverlayInput | null;
+  layers?: LayerCamera & { readonly items: readonly SceneLayer[] };
 }
 
 export interface ExportPNGOptions {
@@ -51,7 +43,7 @@ export function createCompositor(device: GPUDevice, canvas: HTMLCanvasElement) {
   });
 
   const denoisePass = createDenoisePass(device);
-  const overlayPass = createOverlayPass(device, format);
+  const depthViews = new WeakMap<GPUTexture, GPUTextureView>();
   const blitModule = device.createShaderModule({ label: "R2 Blit", code: blitShader });
   const blitPipeline = device.createRenderPipeline({
     label: "R2 Blit",
@@ -66,7 +58,9 @@ export function createCompositor(device: GPUDevice, canvas: HTMLCanvasElement) {
   let upscaledSource: GPUTexture | undefined;
   let upscaledKey = "";
   let lastPresented = "";
-  let lastStamps: Stamp[] | null = null;
+  let lastLayers: readonly SceneLayer[] = [];
+  let lastColor: GPUTexture | undefined;
+  let lastDepth: GPUTexture | null = null;
 
   function processFrame(
     enc: GPUCommandEncoder,
@@ -112,36 +106,35 @@ export function createCompositor(device: GPUDevice, canvas: HTMLCanvasElement) {
   }
 
   return {
+    format,
     get bytes() {
       return denoisePass.bytes + (sr?.bytes ?? 0);
     },
     present(frame: FrameOutput, options: PresentOptions = {}): boolean {
       const denoise = options.denoise ?? "off";
       const model = options.superResolution ?? "off";
-      const overlay = options.overlay && options.overlay.stamps.length ? options.overlay : null;
-      const targetSize = options.displaySize && (model !== "off" || overlay)
+      const layers = options.layers?.items.length ? options.layers : undefined;
+      const targetSize = options.displaySize && (model !== "off" || layers)
         ? options.displaySize
         : { width: frame.width, height: frame.height };
-
-      if (overlay) {
-        overlayPass.prepare(overlay.stamps, frame.depth, overlay.cssWidth, overlay.cssHeight, overlay.perspective);
-      }
 
       const key = JSON.stringify([
         frame.revision,
         frame.width,
         frame.height,
-        frame.depth ? 1 : 0,
         denoise,
         model,
         targetSize.width,
         targetSize.height,
-        overlay ? [overlay.cssWidth, overlay.cssHeight, overlay.perspective] : null,
+        layers && [layers.camera, layers.aspect, layers.cssWidth, layers.cssHeight, layers.items.map(layer => layer.revision)],
       ]);
-      const overlayChanged = overlay ? overlay.stamps : null;
-      if (key === lastPresented && overlayChanged === lastStamps) return false;
+      const items = layers?.items ?? [];
+      if (key === lastPresented && frame.color === lastColor && frame.depth === lastDepth &&
+          items.length === lastLayers.length && items.every((layer, i) => layer === lastLayers[i])) return false;
       lastPresented = key;
-      lastStamps = overlayChanged;
+      lastLayers = [...items];
+      lastColor = frame.color;
+      lastDepth = frame.depth;
 
       if (canvas.width !== targetSize.width || canvas.height !== targetSize.height) {
         canvas.width = targetSize.width;
@@ -152,7 +145,7 @@ export function createCompositor(device: GPUDevice, canvas: HTMLCanvasElement) {
       const image = processFrame(enc, frame, denoise, model, targetSize);
       const backbuffer = ctx!.getCurrentTexture();
 
-      if (!overlay && image.width === targetSize.width && image.height === targetSize.height) {
+      if (!layers && image.width === targetSize.width && image.height === targetSize.height) {
         enc.copyTextureToTexture({ texture: image }, { texture: backbuffer }, [targetSize.width, targetSize.height]);
       } else {
         const pass = enc.beginRenderPass({
@@ -166,7 +159,17 @@ export function createCompositor(device: GPUDevice, canvas: HTMLCanvasElement) {
         pass.setPipeline(blitPipeline);
         pass.setBindGroup(0, blitBind(image));
         pass.draw(3);
-        if (overlay) overlayPass.draw(pass);
+        if (layers) {
+          let sceneDepth = frame.depth && depthViews.get(frame.depth);
+          if (!sceneDepth && frame.depth) {
+            sceneDepth = frame.depth.createView();
+            depthViews.set(frame.depth, sceneDepth);
+          }
+          const view = { camera: layers.camera, aspect: layers.aspect, cssWidth: layers.cssWidth,
+            cssHeight: layers.cssHeight, outputWidth: targetSize.width, outputHeight: targetSize.height,
+            sceneDepth: sceneDepth ?? null };
+          for (const layer of items) layer.draw(pass, view);
+        }
         pass.end();
       }
 
@@ -189,13 +192,14 @@ export function createCompositor(device: GPUDevice, canvas: HTMLCanvasElement) {
     },
     dispose() {
       lastPresented = "";
-      lastStamps = null;
+      lastLayers = [];
+      lastColor = undefined;
+      lastDepth = null;
       upscaledSource = undefined;
       upscaledKey = "";
       sr?.dispose();
       sr = undefined;
       denoisePass.dispose();
-      overlayPass.dispose();
       ctx!.unconfigure();
     },
   };
