@@ -15,3 +15,17 @@ npm run demo
 ```
 
 打开 <http://127.0.0.1:2415/> 查看模块化页面，打开 <http://127.0.0.1:2415/release/standalone.html> 查看单文件播放器。宿主已有材质服务时只需执行 `web` 装配，并提供自己的材质和配方地址。CI 将 `standalone` 的发行文件交给上一级的 `publish-cos.py`。
+
+## 从本地发布到 COS
+
+在仓库根目录运行下面的命令，会把本地已装配的 `scripts/release-browser/dist/standalone` 中的四个 JS、两个材质 ZIP 和来源声明上传到 COS 的 `r2/`，覆盖同名文件。命令使用 uv 安装与 CI 同版本的 COS SDK。密钥从当前环境的 `T_COS_SECRET_ID` 和 `T_COS_SECRET_KEY` 读取。服务区域和公开访问地址沿用 CI 默认值，也可分别用 `T_COS_SERVICE_URL` 和 `T_COS_ACCESS_URL` 覆盖。
+
+```sh
+npm run publish:cos
+```
+
+如果 GitHub Actions 已经构建成功，可以下载并解压该次构建的 `r2-browser` 产物，把含有 `r2-frontend.js` 的目录直接交给同一命令。
+
+```sh
+npm run publish:cos -- /path/to/r2-browser
+```

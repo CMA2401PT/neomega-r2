@@ -56,4 +56,4 @@ go test ./go-link/... ./fix-utils/... ./assets-utils/...
 
 [浏览器发布说明](scripts/release-browser/README.md)给出独立播放器、Go 宿主网页及本地演示的装配命令。
 
-主分支构建成功后，GitHub Actions 会调用 [scripts/publish-cos.py](scripts/publish-cos.py) 将 `r2-browser` 上传至腾讯云 COS（需要 secrets `T_COS_SECRET_ID` 与 `T_COS_SECRET_KEY`，可选覆盖 `T_COS_SERVICE_URL` 和 `T_COS_ACCESS_URL`）。
+主分支构建成功后，GitHub Actions 会将 `r2-browser` 上传至腾讯云 COS。也可以在仓库根目录运行 `npm run publish:cos`，使用当前环境中的 `T_COS_SECRET_ID` 和 `T_COS_SECRET_KEY` 发布本地产物。指定构建目录及 COS 地址的用法见[本地发布说明](scripts/release-browser/README.md#从本地发布到-cos)。
