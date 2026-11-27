@@ -494,17 +494,15 @@ vec3 octahedralNormal(uint packed){
  vec2 e=unpackSnorm2x16(packed);vec3 n=vec3(e,1.0-abs(e.x)-abs(e.y));float t=max(-n.z,0.0);
  n.xy-=t*vec2(n.x>=0.0?1.0:-1.0,n.y>=0.0?1.0:-1.0);return normalize(n);
 }
+#if !R2_CUBE_PASS
 // 每个面先只读一条引用求平面交点；交点不在本格射线区间内的面无需读取记录。
 // alpha 裁切失败的面不阻挡后方更远的命中。
-#if R2_CUBE_PASS
-// 命中候选来自格子本体或片段表。快路径标记像素，第二阶段从原始相机射线重画。
-bool needsFullModel=false;
 void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
- if((id&0x80000000u)!=0u||model(id).x==2u)needsFullModel=true;
-}
-#else
-void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
- if((id&0x80000000u)!=0u){intersectObject(id&0x7fffffffu,begin,end,hit);return;}
+ if(id>=0x40000000u){
+  if(id>=0x80000000u)intersectObject(id&0x7fffffffu,begin,end,hit);
+  else intersectTriangle(id&0x3fffffffu,cell,begin,end,hit);
+  return;
+ }
  uvec4 description=model(id);if(description.x!=2u)return;
  vec3 origin=eye-vec3(cell);
  for(uint i=0u;i<description.z;i++){
@@ -618,14 +616,19 @@ uint locate(ivec3 cell,out int level,out bool cellLevel,out uint parts){
  }
  return result;
 }
-// 本体与片段按原顺序共用一次模型求交，避免驱动展开两份面表与实例求交。
-void intersectCell(uint current,uint parts,ivec3 cell,float begin,float end,inout Hit hit){
- intersectModel(current,cell,begin,end,hit);
+#if R2_CUBE_PASS
+// 第一遍只处理立方体。主射线或阴影射线遇到精细几何时，整个像素交给第二遍重画。
+bool needsFullModel=false;
+#else
+void intersectCell(uint current,bool hasModel,uint parts,ivec3 cell,float begin,float end,inout Hit hit){
+ // 本体类型在遍历时已经读出；空气和普通立方体无需再查一次模型表。
+ if(hasModel)intersectModel(current,cell,begin,end,hit);
  if(parts!=0u){
   uint count=worldWord(parts);
   for(uint j=0u;j<count;j++)intersectModel(worldWord(parts+1u+j),cell,begin,end,hit);
  }
 }
+#endif
 // 平行于窗口边界的射线单独处理，避免 0×无穷产生 NaN。
 void windowInterval(out vec3 entry,out vec3 leave){
  bvec3 parallel=lessThan(abs(ray),vec3(1e-8));
@@ -715,7 +718,7 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
   bool water=description.x==1u&&description.w==uWaterGroup;
   if(inWater&&!water){light*=exp(-WATER_EXTINCTION*(t-waterStart));inWater=false;}
   if(water&&!inWater){inWater=true;waterStart=t;}
-  if(current!=0u){
+  if(current!=0u||parts!=0u){
    if(description.x==1u&&current!=previous&&!water){
     int face=int(description.y)+side*4;
     if(mod(table(uFast,face+1).w,2.0)!=1.0)return vec3(0);
@@ -724,10 +727,17 @@ vec3 sunVisibility(vec3 origin,vec3 direction){
    }
    if(description.x==3u&&t>0.0&&alphaAt(description.y,side,t)>=0.5)return vec3(0);
    if(cellLevel){
+#if R2_CUBE_PASS
+    if(description.x==2u||parts!=0u){
+     needsFullModel=true;
+     return vec3(0);
+    }
+#else
     Hit hit;hit.t=end+1.0;hit.alpha=0.0;
-    intersectCell(current,parts,cell,max(t,1e-3),end,hit);
+    intersectCell(current,description.x==2u,parts,cell,max(t,1e-3),end,hit);
     if(hit.alpha>=.99)return vec3(0);
     light*=mix(vec3(1),hit.color,hit.alpha);
+#endif
    }
    if(brightest(light)<0.02)return vec3(0);
   }
@@ -789,7 +799,6 @@ bool march(float limit,bool submerged){
   // 体素水独立于解析海面。在水内起步时，首个界面以前没有空气。
   if(primaryRay&&inside&&entering&&medium!=0u&&description.w==uWaterGroup)cameraInWater=true;
 #endif
-  if(medium==0u)description=uvec4(0);
   int exitSide;ivec3 nextCell;float end=min(last,leaveNode(lower,width,exitSide,nextCell));
   // WebGPU 保留直接分支。D3D12 上的逐格事件循环在大画面连续累积时会触发设备超时。
   if(entering){
@@ -813,15 +822,21 @@ bool march(float limit,bool submerged){
    inside=false;previous=medium;previousModel=description;entering=false;
   }
   if(brightest(throughput)<=.001){finished=true;break;}
+#if R2_CUBE_PASS
+  // 片段表非空就有候选面。第一遍无需读取整张表，也无需继续追踪这条射线。
+  if(cellLevel&&(description.x==2u||parts!=0u)){
+   needsFullModel=true;
+   break;
+  }
+#elif RENDER_TIER>0
   Hit hit;hit.t=end+1.0;hit.alpha=0.0;
-#if RENDER_TIER>0
-  if(cellLevel)intersectCell(current,parts,cell,max(t,afterHit),end,hit);
-#endif
+  if(cellLevel)intersectCell(current,description.x==2u,parts,cell,max(t,afterHit),end,hit);
   if(hit.alpha>0.0){
 #if R2_PICK
     if(!touched)pickedOwner=hit.owner;
 #endif
     contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
+#endif
   t=end;cell=nextCell;side=exitSide^1;entering=true;
   if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)boundarySurface(previous,previousModel,exitSide,t,false);finished=true;break;}
  }

@@ -77,6 +77,29 @@ test("静态预裁片不受近景范围影响，跨区域共存，来源卸载�
   regions.delete("0/0");
   assert.deepEqual(cell(prepareRegion(options), 8 * 4, (3 << 4) | 2).parts, []);
 });
+test("斜三角面只登记到实际覆盖的格，区域内复用面记录，整格平面归较大一侧", () => {
+  const handle = 0x80001000;
+  const positions = [[0,0,0], [3.5,0,0], [0,0,3.5]];
+  const mesh = {
+    vertices: positions.map(position => ({ position, uv: [0,0] })),
+    triangles: [{ indices: [0,1,2] }],
+  };
+  const region = prepareRegion({
+    x: -1, z: 0, catalog, regions: new Map([["-1/0", { sections: [], unknown: 0 }]]),
+    objects: [{ owner: [-4,2,0], bounds: [[-4,2,0],[0,3,4]], ids: [handle], mesh }],
+  });
+  const at = (x,y,z) => cell(region, 7 + 8*4, ((x&15)<<8) | (z<<4) | y).parts;
+  const [address] = at(-4,2,0);
+  assert.equal(address >>> 30, 1);
+  assert.equal(region.words[address & 0x3fffffff], handle & 0x7fffffff);
+  assert.deepEqual(at(-1,2,0), [address]);
+  assert.deepEqual(at(-4,2,3), [address]);
+  assert.deepEqual(at(-1,2,3), []);
+  assert.deepEqual(at(-4,1,0), []);
+  const aliases = Array.from(region.relocations).filter(i => region.words[i] === address);
+  assert.equal(aliases.length, 10, "十个相交格均持有可重定位的同一面地址");
+});
+
 test("实例跨负坐标边界，替换只影响准备好的本体格", () => {
   const regions = new Map([
     [

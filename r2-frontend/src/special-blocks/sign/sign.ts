@@ -1,4 +1,4 @@
-import type { ObjectRecipe, Vec3 } from "neomega-r2-core";
+import type { MeshRecipe, Vec3 } from "neomega-r2-core";
 import { bare, surface } from "../surface.ts";
 import { glyphURL } from "./assets.ts";
 import type { Run, SignSide } from "./text.ts";
@@ -22,15 +22,8 @@ async function loadFont(): Promise<Font> {
 }
 
 /** 在同一张透明图的上下两半绘制正背面，反面 UV 由观看方向决定。 */
-export async function sign(data: {
-  sides: SignSide[];
-  hanging: boolean;
-  wall: boolean;
-  rotation: number;
-}): Promise<ObjectRecipe> {
+async function signPixels(sides: SignSide[], width: number, height: number, hanging: boolean): Promise<Uint8Array> {
   const { bytes, offsets } = await (font ??= loadFont());
-  const width = data.hanging ? 128 : 192,
-    height = 96;
   const pixels = new Uint8Array(width * height * 2 * 4);
   function dot(x: number, y: number, side: number, color: number) {
     if (x < 0 || x >= width || y < 0 || y >= height) return;
@@ -40,8 +33,8 @@ export async function sign(data: {
     pixels[i + 2] = color;
     pixels[i + 3] = 255;
   }
-  for (const [sideIndex, side] of data.sides.entries()) {
-    const spacing = data.hanging ? 18 : 20;
+  for (const [sideIndex, side] of sides.entries()) {
+    const spacing = hanging ? 18 : 20;
     for (const [lineIndex, line] of side.lines.entries()) {
       const chars: { at: number; x: number; advance: number; style: Run }[] = [];
       let length = 0,
@@ -52,7 +45,7 @@ export async function sign(data: {
           const at = offsets.get(char.codePointAt(0)!) ?? offsets.get(0x25a1)!;
           const advance = bytes.getUint8(at + 6) + (style.bold ? bytes.getUint8(at + 7) : 0);
           if (char === " ") lastSpace = chars.length;
-          if (length + advance > (data.hanging ? 120 : 180)) {
+          if (length + advance > (hanging ? 120 : 180)) {
             if (lastSpace >= 0) {
               length = chars[lastSpace]?.x ?? length;
               chars.length = lastSpace;
@@ -93,17 +86,32 @@ export async function sign(data: {
         }
     }
   }
+  return pixels;
+}
+
+/** 用正背面文字覆盖牌面。相同版式和文字可以在不同朝向的牌面上共用。 */
+export function sign(data: {
+  sides: SignSide[];
+  hanging: boolean;
+  wall: boolean;
+  rotation: number;
+}): MeshRecipe {
+  const width = data.hanging ? 128 : 192, height = 96;
   const bottom = data.wall ? 4.33333 : 9.33333,
     z = data.wall ? 0.33333 : 7.33333;
   const low: Vec3 = data.hanging ? [0.8, -0.52, 6.98] : [0, bottom, z - 0.02];
   const high: Vec3 = data.hanging ? [15.2, 10.28, 9.02] : [16, bottom + 8, z + 1.35334];
-  const recipe = surface(
-    { pixels, width, height: height * 2, cacheKey: "sign/" + width + "/" + JSON.stringify(data.sides) },
+  return surface(
+    {
+      width,
+      height: height * 2,
+      cacheKey: "sign/" + width + "/" + JSON.stringify(data.sides),
+      renderPixels: () => signPixels(data.sides, width, height, data.hanging),
+    },
     low,
     high,
     [bare, bare, bare, bare, [width, height, -width, height], [0, 0, width, height]],
     data.rotation,
+    (data.sides[0].glow ? 1 << 5 : 0) | (data.sides[1].glow ? 1 << 4 : 0),
   );
-  recipe.parts[0].unlitFaces = (data.sides[0].glow ? 1 << 5 : 0) | (data.sides[1].glow ? 1 << 4 : 0);
-  return recipe;
 }

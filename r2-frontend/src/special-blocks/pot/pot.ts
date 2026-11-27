@@ -1,4 +1,4 @@
-import type { ObjectRecipe } from "neomega-r2-core";
+import type { MeshRecipe } from "neomega-r2-core";
 import { isCompound, type Compound } from "../../libs/snbt.ts";
 import { bare, surface } from "../surface.ts";
 import { atlasURL, tiles } from "./assets.ts";
@@ -16,7 +16,7 @@ export function potFaces(nbt: Compound): number[] | undefined {
 }
 
 /** 北向陶罐的 front 在南面。每一个纹样只取原图中央的十四列像素。 */
-export function decoratedPot(data: { sides: number[]; rotation: number }): ObjectRecipe {
+export function decoratedPot(data: { sides: number[]; rotation: number }): MeshRecipe {
   const [back, left, right, front] = data.sides;
   function face(tile: number, mirror: boolean) {
     if (tile < 0) return bare;

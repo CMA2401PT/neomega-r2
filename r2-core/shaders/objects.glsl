@@ -23,3 +23,35 @@ void intersectObject(uint handle,float begin,float end,inout Hit hit){
  hit.owner=int(handle&4095u)+1;
 #endif
 }
+
+// 静态三角面与覆盖格的地址表同在区域池中。记录布局与准备线程 registerMesh 一致。
+vec3 meshVector(uint at){
+ return uintBitsToFloat(uvec3(worldWord(at),worldWord(at+1u),worldWord(at+2u)));
+}
+vec2 meshUV(uint at){return uintBitsToFloat(uvec2(worldWord(at),worldWord(at+1u)));}
+void intersectTriangle(uint at,ivec3 cell,float begin,float end,inout Hit hit){
+ if(!uObjectsEnabled)return;
+ vec3 normal=meshVector(at+4u);float facing=dot(normal,ray);
+ if(abs(facing)<1e-8)return;
+ ivec3 local=(cell+uDirectoryOffset)&127;
+ vec3 region=vec3(cell.x-local.x,-uWorldOrigin.y,cell.z-local.z);
+ vec3 origin=eye-region;
+ float t=(uintBitsToFloat(worldWord(at+7u))-dot(normal,origin))/facing;
+ if(t<begin-EPS||t>end+EPS||t>=hit.t)return;
+ vec3 point=(origin-meshVector(at+1u))+t*ray;
+ float u=dot(meshVector(at+8u),point),v=dot(meshVector(at+11u),point);
+ if(min(u,v)<-1e-6||u+v>1.000001)return;
+ uint flags=worldWord(at),handle=flags&0x7fffffffu;
+ int slot=int(handle&4095u),instance=slot*12;
+ if(uint(objectWord(instance+4).w)!=(handle>>12))return;
+ vec2 uv=meshUV(at+14u)+u*meshUV(at+16u)+v*meshUV(at+18u);
+ vec4 rect=objectWord(instance+6);
+ ivec2 pixel=ivec2(rect.xy+clamp(floor(uv),vec2(0),rect.zw-1.0));
+ vec4 texel=texelFetch(uObjectAtlas,pixel,0);
+ if(texel.a<.1)return;
+ faceTests++;hit.t=t;hit.color=linearColor(texel.rgb);hit.alpha=1.0;
+ hit.material=plainMaterial(facing>0.0?-normal:normal);hit.unlit=(flags&0x80000000u)!=0u;
+#if R2_PICK
+ hit.owner=slot+1;
+#endif
+}

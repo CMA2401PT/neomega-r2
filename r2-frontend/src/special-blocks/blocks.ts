@@ -73,7 +73,7 @@ for (let rotation = 0; rotation < 16; rotation++) {
 }
 export const hasAppearance = (hash: number) => states.has(hash);
 
-/** 只将影响可见外观的字段纳入对象标识。改变罐中物品时只更新检查器。 */
+/** 位置标识方块，外观由提取出的可见字段决定。只改罐内物品时沿用已安装的部件。 */
 export function appearance(hash: number, position: Vec3, snbt?: string): ObjectDescriptor | undefined {
   const state = states.get(hash)!;
   const key = "block/" + position.join("/");
@@ -93,7 +93,7 @@ export function appearance(hash: number, position: Vec3, snbt?: string): ObjectD
     if (sides) data = { sides, rotation: state.rotation, wall: !!state.wall, hanging: !!state.hanging };
   }
   if (data)
-    return { key: key + "/" + state.kind + "/" + JSON.stringify(data), kind: state.kind, position, data };
+    return { key, kind: state.kind, position, data, appearanceKey: JSON.stringify(data) };
 }
 
 /** 为标准查看器注册内置外观，同时保留宿主自定义的工厂。 */

@@ -1,3 +1,4 @@
+import { registerMesh, TRIANGLE } from "./mesh.ts";
 import type {
   ObjectReference,
   PreparationCatalog,
@@ -171,14 +172,13 @@ export function prepareRegion({
     Math.floor(p[2] / 128) === z &&
     p[1] >= -64 &&
     p[1] < 448;
-  const add = (p: number[], ids: number[]) => {
-    if (!inside(p)) return;
+  const cellParts = (p: number[]): number[] => {
     const position = p.map((v) => Math.floor(v / 16)),
       list = ensure(position),
       [cx, cy, cz] = p.map((v) => ((v % 16) + 16) % 16),
       cell = cellIndex(cx, cy, cz);
     if (!list.has(cell)) list.set(cell, []);
-    list.get(cell)!.push(...ids);
+    return list.get(cell)!;
   };
   // 模型目录中的最大越界距离决定来源范围，接口不假定模型最多只跨一格。
   const halo = Math.ceil(catalog.fragmentReach / 128);
@@ -197,22 +197,31 @@ export function prepareRegion({
               raw.position[1] * 16 + (i & 15),
               raw.position[2] * 16 + ((i >> 4) & 15),
             ];
-            add(
-              owner.map((v, a) => v + part.offset[a]),
-              [part.model],
-            );
+            const target = owner.map((v, a) => v + part.offset[a]);
+            if (inside(target)) cellParts(target).push(part.model);
           }
       }
+  const pool = new Words();
   for (const object of objects) {
     const [low, high] = object.bounds;
     // 只枚举当前区域内的交集，大对象跨越区域时不会重复遍历整个包围盒。
     const x0 = Math.max(x * 128, Math.floor(low[0])), x1 = Math.min((x + 1) * 128, Math.ceil(high[0]));
     const y0 = Math.max(-64, Math.floor(low[1])), y1 = Math.min(448, Math.ceil(high[1]));
     const z0 = Math.max(z * 128, Math.floor(low[2])), z1 = Math.min((z + 1) * 128, Math.ceil(high[2]));
-    if (x0 < x1 && z0 < z1)
+    if (object.mesh && x0 < x1 && z0 < z1) {
+      registerMesh({
+        mesh: object.mesh,
+        owner: object.owner,
+        handle: object.ids[0],
+        regionX: x,
+        regionZ: z,
+        append: words => pool.append(words),
+        cellParts,
+      });
+    } else if (!object.mesh && x0 < x1 && z0 < z1)
       for (let cz = z0; cz < z1; cz++)
         for (let cy = y0; cy < y1; cy++)
-          for (let cx = x0; cx < x1; cx++) add([cx, cy, cz], object.ids);
+          for (let cx = x0; cx < x1; cx++) cellParts([cx, cy, cz]).push(...object.ids);
     if (object.replace && inside(object.owner)) {
       const position = object.owner.map((v) => Math.floor(v / 16)),
         key = sectionKey(position);
@@ -226,8 +235,7 @@ export function prepareRegion({
         );
     }
   }
-  const pool = new Words(),
-    headers: number[] = [],
+  const headers: number[] = [],
     stats = {
       sections: 0,
       fragmentReferences: 0,
@@ -259,6 +267,9 @@ export function prepareRegion({
       const offsets = new Uint32Array(4096);
       for (const [cell, ids] of parts) {
         offsets[cell] = pool.append([ids.length, ...ids]);
+        // 面记录位于本区域的池中，随区域一起重定位。模型编号和对象句柄是全局的。
+        for (let i = 0; i < ids.length; i++)
+          if ((ids[i] >>> 30) === (TRIANGLE >>> 30)) pool.relocations.push(offsets[cell] + 1 + i);
         stats.fragmentReferences += ids.length;
       }
       const at = pool.append(offsets);

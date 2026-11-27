@@ -1,4 +1,4 @@
-import type { ObjectRecipe } from "neomega-r2-core";
+import type { MeshRecipe } from "neomega-r2-core";
 import { isCompound, type Compound } from "../../libs/snbt.ts";
 import { surface } from "../surface.ts";
 import { atlasURL, tiles } from "./assets.ts";
@@ -112,14 +112,10 @@ async function readAtlas(): Promise<ImageData> {
 }
 
 /** 给原版图案的布料明暗染色，然后按透明度从下向上绘制。 */
-export async function banner(data: {
-  layers: Layer[];
-  rotation: number;
-  wall: boolean;
-}): Promise<ObjectRecipe> {
+async function bannerPixels(layers: Layer[]): Promise<Uint8Array> {
   const { width, data: atlasPixels } = await (atlas ??= readAtlas());
   const pixels = new Uint8Array(64 * 64 * 4);
-  for (const [tile, color] of data.layers) {
+  for (const [tile, color] of layers) {
     const tint = [color >> 16, (color >> 8) & 255, color & 255];
     const start = (tile % 8) * 64 + Math.floor(tile / 8) * 64 * width;
     for (let y = 0; y < 64; y++)
@@ -136,10 +132,24 @@ export async function banner(data: {
         pixels[dst + 3] = Math.round((alpha + under) * 255);
       }
   }
+  return pixels;
+}
+
+/** 安装旗布的表面，立旗和墙旗共用相同图案的贴图。 */
+export function banner(data: {
+  layers: Layer[];
+  rotation: number;
+  wall: boolean;
+}): MeshRecipe {
   const bottom = data.wall ? -13.333 : 2.667,
     back = data.wall ? 1.417 : 8.667;
   return surface(
-    { pixels, width: 64, height: 64, cacheKey: "banner/" + JSON.stringify(data.layers) },
+    {
+      width: 64,
+      height: 64,
+      cacheKey: "banner/" + JSON.stringify(data.layers),
+      renderPixels: () => bannerPixels(data.layers),
+    },
     [1.31, bottom - 0.02, back - 0.02],
     [14.69, bottom + 26.69, back + 0.687],
     [

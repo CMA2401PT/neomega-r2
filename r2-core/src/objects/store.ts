@@ -1,4 +1,5 @@
-import type { ObjectDescriptor, ObjectRecipe, ObjectReference, ObjectTexture } from "../contracts.ts";
+import { meshCellBounds } from "../scene/mesh.ts";
+import type { ObjectDescriptor, RenderRecipe, ObjectReference } from "../contracts.ts";
 import type { ObjectRegistry } from "./registry.ts";
 
 interface AtlasImage {
@@ -15,18 +16,21 @@ interface StoredObject {
   region: string;
   descriptor: ObjectDescriptor;
   reference: ObjectReference;
-  recipe: ObjectRecipe;
+  recipe: RenderRecipe;
   image: AtlasImage;
   slots: Array<{ slot: number; id: number }>;
 }
 
 /** 包围盒用世界坐标，部件几何仍保留在对象自己的坐标系中。 */
-function objectReference(descriptor: ObjectDescriptor, recipe: ObjectRecipe, ids: number[]): ObjectReference {
+function objectReference(descriptor: ObjectDescriptor, recipe: RenderRecipe, ids: number[]): ObjectReference {
+  const bounds = "mesh" in recipe ? meshCellBounds(recipe.mesh, descriptor.position)
+    : recipe.bounds.map(p => p.map((v, i) => v + descriptor.position[i]));
   return {
     key: descriptor.key,
     owner: descriptor.position,
     replace: !!descriptor.replace,
-    bounds: recipe.bounds.map(p => p.map((v, i) => v + descriptor.position[i])),
+    bounds,
+    mesh: "mesh" in recipe ? recipe.mesh : undefined,
     ids,
   };
 }
@@ -66,6 +70,7 @@ export class ObjectStore {
   generations = new Uint32Array(SLOTS);
   data = new Float32Array(SLOTS * STRIDE);
   high = 0;
+  private tableDirty = false;
   // 对象增删、移动或更换外观时递增。
   version = 0;
   /** 宿主可整体关闭对象绘制；undefined 视为开启。 */
@@ -76,24 +81,25 @@ export class ObjectStore {
     this.uploads = uploads;
     this.textureBytes = this.data.byteLength + SIDE * SIDE * 4;
   }
-  async image(source: ObjectTexture): Promise<AtlasImage> {
-    const name = source.url ?? source.cacheKey ?? source.pixels!;
-    let cached = this.images.get(name);
-    if (cached) {
-      cached.refs++;
-      return cached;
+  /** 在提交对象时分配图集空间。同尺寸的独占旧图可就地替换，即使图集已满也能改字。 */
+  private uploadImage(
+    name: AtlasImage["name"],
+    width: number,
+    height: number,
+    pixels: Uint8Array | undefined,
+    decoded: HTMLImageElement | undefined,
+    previous?: AtlasImage,
+  ): AtlasImage {
+    const w = Math.ceil(width / TILE), h = Math.ceil(height / TILE);
+    if (previous?.refs === 1 && previous.w === w && previous.h === h) {
+      this.uploads.image(previous.x * TILE, previous.y * TILE, width, height, pixels, decoded);
+      this.images.delete(previous.name);
+      // 新部件先接手这块图集，随后撤下旧部件时会释放旧引用。
+      Object.assign(previous, { width, height, name });
+      previous.refs++;
+      this.images.set(name, previous);
+      return previous;
     }
-    let decoded: HTMLImageElement | undefined;
-    if (source.url) {
-      decoded = new Image();
-      decoded.src = source.url;
-      await decoded.decode();
-      if (this.disposed) throw new DOMException("对象来源已关闭", "AbortError");
-    }
-    const width = source.width || decoded!.width,
-      height = source.height || decoded!.height,
-      w = Math.ceil(width / TILE),
-      h = Math.ceil(height / TILE);
     let found: { x: number; y: number; w: number; h: number } | null = null;
     for (let y = 0; y <= 32 - h && !found; y++)
       for (let x = 0; x <= 32 - w && !found; x++) {
@@ -104,9 +110,9 @@ export class ObjectStore {
       }
     if (!found) throw Error("特殊对象贴图空间不足");
     const { x, y } = found;
+    this.uploads.image(x * TILE, y * TILE, width, height, pixels, decoded);
     for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) this.tiles[x + dx + 32 * (y + dy)] = 1;
-    this.uploads.image(x * TILE, y * TILE, width, height, source.pixels, decoded);
-    cached = { ...found, width, height, refs: 1, name };
+    const cached = { ...found, width, height, refs: 1, name };
     this.images.set(name, cached);
     return cached;
   }
@@ -118,6 +124,7 @@ export class ObjectStore {
     invalidate?: (reference: ObjectReference) => void,
     current: () => boolean = () => true,
   ): Promise<boolean> {
+    if (this.disposed) throw new DOMException("对象来源已关闭", "AbortError");
     const version = this.version;
     const members = new Set(this.regions.get(region));
     this.regions.set(region, members);
@@ -127,7 +134,9 @@ export class ObjectStore {
 
     for (const descriptor of descriptors) {
       const old = this.objects.get(descriptor.key);
-      if (old && old.descriptor.kind === descriptor.kind && Object.is(old.descriptor.data, descriptor.data)) {
+      if (old && old.descriptor.kind === descriptor.kind &&
+          old.descriptor.appearanceKey === descriptor.appearanceKey &&
+          (descriptor.appearanceKey !== undefined || Object.is(old.descriptor.data, descriptor.data))) {
         // 新区域的快照可能先到；转移归属后，旧区域的撤回只能删除它仍拥有的对象。
         if (old.region !== region) {
           this.regions.get(old.region)?.delete(descriptor.key);
@@ -139,7 +148,7 @@ export class ObjectStore {
         const previous = old.reference;
         old.descriptor = { ...descriptor, position: [...descriptor.position] };
         old.reference = objectReference(old.descriptor, old.recipe, previous.ids);
-        if (!sameCells(previous, old.reference)) {
+        if (previous.mesh || !sameCells(previous, old.reference)) {
           invalidate?.(previous);
           invalidate?.(old.reference);
         }
@@ -150,17 +159,34 @@ export class ObjectStore {
       const snapshot: ObjectDescriptor = { ...descriptor, position: [...descriptor.position] };
       const recipe = await registry.create(snapshot);
       if (!current() || this.regions.get(region) !== members) return this.version !== version;
-      const image = await this.image(recipe.texture);
-      if (!current() || this.regions.get(region) !== members) {
-        this.releaseImage(image);
-        return this.version !== version;
+      const texture = recipe.texture;
+      const name = texture.url ?? texture.cacheKey ?? texture.pixels!;
+      let pixels = texture.pixels;
+      let decoded: HTMLImageElement | undefined;
+      if (!this.images.has(name)) {
+        if (texture.url !== undefined) {
+          decoded = new Image();
+          decoded.src = texture.url;
+          await decoded.decode();
+        } else if ("renderPixels" in texture) {
+          pixels = await texture.renderPixels();
+        }
+        if (!current() || this.regions.get(region) !== members) return this.version !== version;
       }
-      // 加载贴图期间旧区域可能已卸载。提交时按仍存在的部件计算可用槽位。
+      // 异步准备期间对象可能已卸载。就绪后再一起替换贴图和部件。
       const installed = this.objects.get(snapshot.key);
-      if (recipe.parts.length > this.free.length + (installed?.slots.length ?? 0)) {
-        this.releaseImage(image);
+      if (("mesh" in recipe ? 1 : recipe.parts.length) > this.free.length + (installed?.slots.length ?? 0))
         throw Error("特殊对象部件空间不足");
-      }
+      let image = this.images.get(name);
+      if (image) image.refs++;
+      else image = this.uploadImage(
+        name,
+        texture.width ?? decoded!.width,
+        texture.height ?? decoded!.height,
+        pixels,
+        decoded,
+        installed?.image,
+      );
       if (installed) this.remove(snapshot.key, invalidate);
       const slots = this.allocateParts(recipe, image);
       const reference = objectReference(snapshot, recipe, slots.map(part => part.id));
@@ -173,9 +199,11 @@ export class ObjectStore {
   }
 
   /** 将局部几何和图集坐标写入部件槽，格子中的引用只持有带代数的句柄。 */
-  private allocateParts(recipe: ObjectRecipe, image: AtlasImage): StoredObject["slots"] {
+  private allocateParts(recipe: RenderRecipe, image: AtlasImage): StoredObject["slots"] {
     const slots: StoredObject["slots"] = [];
-    for (const part of recipe.parts) {
+    this.tableDirty = true;
+    // 静态网格整体占一个材质和拾取槽，三角形数据由准备线程写入区域池。
+    for (const part of "mesh" in recipe ? [null] : recipe.parts) {
       const slot = this.free.pop()!;
       const generation = ++this.generations[slot];
       slots.push({
@@ -184,7 +212,12 @@ export class ObjectStore {
       });
       this.high = Math.max(this.high, slot + 1);
       const at = slot * STRIDE;
-      this.data.set([...part.minimum, generation], at + 16);
+      this.data[at + 19] = generation;
+      if (!part) {
+        this.data.set([image.x * TILE, image.y * TILE, image.width, image.height], at + 24);
+        continue;
+      }
+      this.data.set(part.minimum, at + 16);
       this.data.set([...part.maximum, part.unlitFaces ?? 0], at + 20);
       for (let face = 0; face < 6; face++) {
         const uv = part.faces[face];
@@ -205,6 +238,7 @@ export class ObjectStore {
       this.data[slot * STRIDE + 19] = 0;
       this.free.push(slot);
     }
+    this.tableDirty = true;
     this.releaseImage(object.image);
     this.objects.delete(name);
     invalidate?.(object.reference);
@@ -227,11 +261,13 @@ export class ObjectStore {
 
   references(animatedOnly = false): ObjectReference[] {
     return [...this.objects.values()]
-      .filter(({ recipe }) => !animatedOnly || recipe.animated !== false)
+      .filter(({ recipe }) => !animatedOnly || (!("mesh" in recipe) && recipe.animated !== false))
       .map(object => object.reference);
   }
   update(time: number, origin: number[]): void {
-    for (const { descriptor, recipe, slots } of this.objects.values())
+    for (const { descriptor, recipe, slots } of this.objects.values()) {
+      if ("mesh" in recipe) continue;
+      this.tableDirty = true;
       for (let i = 0; i < slots.length; i++) {
         const { axes, position, scale = 1 } = recipe.pose(time, i),
           shift = position.map((v, a) => v + descriptor.position[a] - origin[a]),
@@ -246,7 +282,9 @@ export class ObjectStore {
           at + 12,
         );
       }
-    if (this.high) {
+    }
+    if (this.high && this.tableDirty) {
+      this.tableDirty = false;
       const height = Math.ceil((this.high * 12) / 1024);
       this.uploads.rows(this.data.subarray(0, 1024 * height * 4), height);
     }

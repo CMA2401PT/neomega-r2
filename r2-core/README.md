@@ -76,9 +76,29 @@ renderer.render({ position: [8, 6, 20], yaw: 0, pitch: -0.4 }, { width: 1280, he
 
 - 自定义数据源可使用 `encodeRegion` 与 `blockHash` 编码 16×16×16 子区块（XZY 排列），实现见 [src/source/memory.ts](src/source/memory.ts) 与 [src/source/hash.ts](src/source/hash.ts)。
 
-对象用场景内唯一的 `key` 标识，可以放在带小数的世界坐标上。数据源按对象原点所在的近景区域提交。核心用覆盖整个动画的局部包围盒，把部件登记到它们可能出现的格子。射线从其他格子击中部件时，也能找回同一个对象。现有的[前端特殊方块](../r2-frontend/src/special-blocks/)同样通过这个接口绘制。
+对象用场景内唯一的 `key` 标识，可以放在带小数的世界坐标上。数据源按对象原点所在的近景区域提交。静态网格由准备线程按三角面登记到相交的格子。动画盒体使用覆盖整个动画的包围盒登记。射线从其他格子击中部件时，也能找回同一个对象。现有的[前端特殊方块](../r2-frontend/src/special-blocks/)同样通过这个接口绘制。
 
-用 `ObjectRegistry.register(kind, factory)` 注册对象的局部几何、贴图和位姿。在 `MemoryWorld` 中，调用 `world.addObject(descriptor)` 后用 `world.commit()` 发布。移动时沿用 `key`、`kind` 和 `data`，只改 `position`。改变局部外观时提交新的 `data` 值。移除时调用 `world.removeObject(key)` 并再次发布。自定义数据源通过 `sink.objects(x, z, descriptors)` 提交区域快照，跨区域移动时需要更新新旧两个区域。
+用 `ObjectRegistry.register(kind, factory)` 注册对象的局部几何、贴图和位姿。在 `MemoryWorld` 中，调用 `world.addObject(descriptor)` 后用 `world.commit()` 发布。移动时沿用 `key`、`kind` 和 `data`，只改 `position`。默认按 `data` 是否为同一个值判断外观变化。如果数据源每次重新解析参数，可以提供 `appearanceKey`，只有影响局部几何或材质的参数变化时才改变它。移除时调用 `world.removeObject(key)` 并再次发布。自定义数据源通过 `sink.objects(x, z, descriptors)` 提交区域快照，跨区域移动时需要更新新旧两个区域。
+
+工厂可以返回 `{ texture, mesh }` 来绘制静态表面。顶点位置相对对象原点，支持小数和跨格。每个三角形引用三个顶点，UV 坐标以贴图左上角为原点，单位是像素。若两个面在同一个空间位置采用不同 UV，可以各自定义顶点。下面的三角形可以和已有会话使用同一个注册表：
+
+```js
+registry.register("slope", () => ({
+  texture: { width: 1, height: 1, pixels: Uint8Array.of(255, 160, 40, 255) },
+  mesh: {
+    vertices: [
+      { position: [0, 0, 0], uv: [0, 0] },
+      { position: [2.5, 0, 0], uv: [1, 0] },
+      { position: [0, 1.5, 1], uv: [0, 1] },
+    ],
+    triangles: [{ indices: [0, 1, 2] }],
+  },
+}));
+world.addObject({ key: "slope-1", kind: "slope", position: [127.5, 2, 4] });
+world.commit();
+```
+
+每个目标区域内，一张三角面只写一份几何记录。格子保存面记录的地址。GPU 遍历到该格时只在当前射线区间内求交，命中后插值 UV 并检查透明像素。修改网格位置或外观会重新准备涉及的区域。
 
 用 `renderer.pick(camera, { width, height, x, y, objects: true })` 拾取对象。命中对象时，`hit.objectKey` 是提交时的标识，`hit.position` 是对象原点所在格。命中地形时，`hit.position` 是所属方块坐标。
 

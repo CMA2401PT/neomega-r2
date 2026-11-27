@@ -87,7 +87,13 @@ test("部分区域进出近景、同格文字变化以及未知实体的查看�
   assert.deepEqual(visible.map((o) => o.kind).sort(), ["enchanting_book", "sign"]);
   assert.equal(source.snbtAt([0, 0, 0]), "{unknown:9223372036854775807L}");
   assert.equal(source.snbtAt(position), raw);
-  const oldSign = visible.find((o) => o.kind === "sign").key;
+  const oldSign = visible.find((o) => o.kind === "sign");
+  const waxed = '{front_text:{messages:["甲"]},is_waxed:1b}';
+  world.setBlockEntity(position, waxed);
+  world.commit();
+  await Promise.resolve();
+  assert.equal(visible.find((o) => o.kind === "sign").appearanceKey, oldSign.appearanceKey);
+  assert.equal(source.snbtAt(position), waxed);
   world.setBlockEntity(position, "{front_text:");
   world.commit();
   await Promise.resolve();
@@ -97,7 +103,9 @@ test("部分区域进出近景、同格文字变化以及未知实体的查看�
   world.setBlockEntity(position, '{Text1:"乙"}');
   world.commit();
   await Promise.resolve();
-  assert.notEqual(visible.find((o) => o.kind === "sign").key, oldSign);
+  const edited = visible.find((o) => o.kind === "sign");
+  assert.equal(edited.key, oldSign.key);
+  assert.notEqual(edited.appearanceKey, oldSign.appearanceKey);
   await move([6, 0, 0]);
   assert.equal(source.snbtAt(position), undefined);
   assert.deepEqual(visible, []);

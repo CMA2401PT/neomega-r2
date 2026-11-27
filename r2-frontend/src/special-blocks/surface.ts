@@ -1,40 +1,38 @@
-import type { ObjectPose, ObjectRecipe, ObjectTexture, Vec3 } from "neomega-r2-core";
+import type { MeshRecipe, ObjectTexture, TriangleMesh, Vec3 } from "neomega-r2-core";
 
-/** 给静态方块表面加一层盒面。范围用模型的十六分之一格表示，朝向从南向西旋转。 */
+/** 将有纹样的盒面拆成静态三角形。尺寸以十六分之一格表示，贴图矩形可用负宽度镜像。
+ * 各面的 U、V 方向沿用方块贴图约定，同一个角在不同面上可以有不同的 UV。
+ */
 export function surface(
   texture: ObjectTexture,
   minimum: Vec3,
   maximum: Vec3,
   faces: number[][],
   rotation: number,
-): ObjectRecipe {
-  const angle = (rotation * Math.PI) / 8,
-    c = Math.cos(angle),
-    s = Math.sin(angle);
-  const low = minimum.map((v, i) => v / 16 - (i === 1 ? 0 : 0.5));
-  const high = maximum.map((v, i) => v / 16 - (i === 1 ? 0 : 0.5));
-  const corners = [low[0], high[0]].flatMap((x) =>
-    [low[2], high[2]].map((z) => [0.5 + c * x - s * z, 0.5 + s * x + c * z]),
-  );
-  const pose: ObjectPose = {
-    axes: [
-      [c, 0, s],
-      [0, 1, 0],
-      [-s, 0, c],
-    ],
-    position: [0.5, 0, 0.5],
-  };
-  return {
-    animated: false,
-    texture,
-    parts: [{ minimum: low, maximum: high, faces }],
-    bounds: [
-      [Math.min(...corners.map((p) => p[0])), low[1], Math.min(...corners.map((p) => p[1]))],
-      [Math.max(...corners.map((p) => p[0])), high[1], Math.max(...corners.map((p) => p[1]))],
-    ],
-    pose: () => pose,
-  };
+  unlitFaces = 0,
+): MeshRecipe {
+  const angle = (rotation * Math.PI) / 8;
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const mesh: TriangleMesh = { vertices: [], triangles: [] };
+  for (const [face, [u, v, w, h]] of faces.entries()) {
+    if (w === 0 && h === 0) continue;
+    const axis = face >> 1, side = face % 2, first = mesh.vertices.length;
+    for (const [horizontal, vertical] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+      const corner = axis === 0 ? [side, 1 - vertical, horizontal]
+        : axis === 1 ? [horizontal, side, vertical] : [horizontal, 1 - vertical, side];
+      const [x, y, z] = corner.map((end, i) => (end ? maximum[i] : minimum[i]) / 16);
+      mesh.vertices.push({
+        position: [0.5 + c * (x - 0.5) - s * (z - 0.5), y, 0.5 + s * (x - 0.5) + c * (z - 0.5)],
+        uv: [u + horizontal * w, v + vertical * h],
+      });
+    }
+    const unlit = (unlitFaces & (1 << face)) !== 0;
+    mesh.triangles.push(
+      { indices: [first, first + 1, first + 2], unlit },
+      { indices: [first, first + 2, first + 3], unlit },
+    );
+  }
+  return { texture, mesh };
 }
 
-// 零面积 UV 表示该面继续显示方块原有的材质。
 export const bare = [0, 0, 0, 0];

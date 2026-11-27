@@ -410,7 +410,13 @@ export class WorldSession {
     if (!best) return;
     const request = ++this.serial;
     this.preparing = { request, entry: best, version: best.version };
-    this.post({ type: "prepare", request, x: best.x, z: best.z, objects: this.objects.references() });
+    const { x, z } = best;
+    // 网格顶点会随消息复制，只发送与目标区域有关的对象。
+    const objects = this.objects.references().filter(({ bounds: [low, high], owner, replace }) =>
+      (low[0] < (x + 1) * 128 && high[0] > x * 128 && low[2] < (z + 1) * 128 && high[2] > z * 128) ||
+      (replace && Math.floor(owner[0] / 128) === x && Math.floor(owner[2] / 128) === z)
+    );
+    this.post({ type: "prepare", request, x, z, objects });
   }
 
   private message(data: WorkerResponse): void {

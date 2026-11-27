@@ -46,13 +46,17 @@ export interface ObjectDescriptor {
   position: Vec3;
   /** 局部外观参数。修改外观时提交新值，仅移动时沿用原值以复用几何与贴图。 */
   data?: unknown;
+  /** 同类对象可用这个值比较局部外观。重复解析出相同参数时仍能复用现有部件。 */
+  appearanceKey?: string;
   replace?: boolean;
 }
 
 /** 可共享的图片，或处理器生成的私有像素。 */
 export type ObjectTexture =
   | { url: string; pixels?: undefined; width?: undefined; height?: undefined }
-  | { url?: undefined; pixels: Uint8Array; width: number; height: number; cacheKey?: string };
+  | { url?: undefined; pixels: Uint8Array; width: number; height: number; cacheKey?: string }
+  /** 图集里首次需要这个 cacheKey 时才调用。相同像素可用于不同朝向和位置。 */
+  | { url?: undefined; pixels?: undefined; renderPixels: () => Promise<Uint8Array>; width: number; height: number; cacheKey: string };
 
 /** 盒体局部范围及六面的像素 UV 矩形。面顺序为 -X、+X、-Y、+Y、-Z、+Z。 */
 export interface ObjectPart {
@@ -80,10 +84,24 @@ export interface ObjectRecipe {
   pose: (time: number, partIndex: number) => ObjectPose;
 }
 
+/** 静态网格使用对象原点下的局部坐标。UV 以贴图左上角为原点，单位是像素。 */
+export interface TriangleMesh {
+  vertices: { position: Vec3; uv: [number, number] }[];
+  /** 三个下标引用上面的顶点。三角面双面可见，透明纹素允许射线穿过。 */
+  triangles: { indices: [number, number, number]; unlit?: boolean }[];
+}
+
+export interface MeshRecipe {
+  texture: ObjectTexture;
+  mesh: TriangleMesh;
+}
+
+export type RenderRecipe = ObjectRecipe | MeshRecipe;
+
 /** 外观实现无需接触 GPU 或存档读取。 */
 export type ObjectFactory = (
   descriptor: ObjectDescriptor,
-) => ObjectRecipe | Promise<ObjectRecipe>;
+) => RenderRecipe | Promise<RenderRecipe>;
 
 /** 格子准备器使用的活动部件候选。 */
 export interface ObjectReference {
@@ -92,6 +110,8 @@ export interface ObjectReference {
   replace: boolean;
   bounds: number[][];
   ids: number[];
+  /** 静态网格由准备线程按三角面登记；ids[0] 保存拾取和图集共用的实例句柄。 */
+  mesh?: TriangleMesh;
 }
 
 /** 压缩子区块（subchunk，16×16×16 方块）；解码后 palette 保存静态模型编号（传输时是方块哈希），格子索引为 XZY。 */
