@@ -33,7 +33,8 @@ function pixel(set, file, id, x = 0, y = 0, level = 0) {
 }
 test("合成信息独立发布；从基表重建的默认材质与分发包逐字节一致", {skip: !root && "需要 R2_GENERATED 中的材质包"}, () => {
   assert.equal(Object.keys(recipe).length, 5);
-  assert.equal(Object.keys(defaults).length, 14);
+  assert.equal(Object.keys(defaults).length, 13);
+  assert.equal(defaults["book.png"], undefined);
   const set = buildTextures(recipe, {});
   for (const [name, data] of set.files) assert.deepEqual(new Uint8Array(data), defaults[name], name);
   for (const name of [

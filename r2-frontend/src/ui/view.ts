@@ -42,7 +42,31 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   const marks = new SceneMarks();
   const jump = (position: number[]) => { camera.position = position; };
   const map = new FullscreenMap({ renderer, camera, jump, overlay: marks });
-  const controls = new FlightControls(viewCanvas, camera);
+  let activeSession: WorldSession | null = null;
+  let pickRequest = 0;
+  const entityDialog = element<HTMLDialogElement>("block-entity");
+  const controls = new FlightControls(viewCanvas, camera, event => {
+    const source = activeSession?.source;
+    if (!source?.snbtAt || map.open) return;
+    const request = ++pickRequest;
+    const rect = viewCanvas.getBoundingClientRect();
+    const pixel = {
+      width: rect.width,
+      height: rect.height,
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      objects: true,
+      voxel: shownTier === "voxel",
+    };
+    void renderer.pick(structuredClone(displayedCamera ?? camera), pixel).then(hit => {
+      if (!hit || request !== pickRequest || activeSession?.source !== source || map.open) return;
+      const snbt = source.snbtAt?.(hit.position);
+      if (snbt === undefined) return;
+      element("block-entity-title").textContent = "方块 SNBT · " + hit.position.join(", ");
+      element("block-entity-text").textContent = snbt;
+      entityDialog.showModal();
+    }).catch(error => hud.error(String(error)));
+  });
   const events = new AbortController();
   bindMovePad(element("movepad"), controls, events.signal);
   settings.resolution = windowResolution(settings.resolution);
@@ -297,6 +321,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   }
 
   function frame(now: number, session: WorldSession | null, options?: FrameOptions) {
+    activeSession = session;
     if (stopped) return;
     try {
       drawFrame(now, session, options);
@@ -513,6 +538,9 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     hud, map, frame, refreshSettings, cancelPhoto, frames: rate.intervals,
     get fps() { return rate.fps; },
     setWorld(loaded: boolean, readChunks?: () => ArrayBuffer | Promise<ArrayBuffer>) {
+      pickRequest++;
+      entityDialog.close();
+      activeSession = null;
       drawn = "";
       rate.reset();
       currentView = null;
@@ -524,6 +552,9 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       return map.setWorld(readChunks);
     },
     dispose() {
+      activeSession = null;
+      pickRequest++;
+      entityDialog.close();
       stopped = true;
       startup.finish();
       renderer.cancelAccumulation();

@@ -10,7 +10,7 @@ R2 在浏览器的 WebGPU 上以射线渲染 Minecraft 方块世界。本仓库�
 | [r2-link](r2-link/README.md) | **浏览器端协议客户端**（零运行时依赖）：通过 WebSocket 连接 `go-link` 数据源，将订阅与区域/对象消息接入 `WorldSession`。 | `neomega-r2-link` | `r2-link.js` |
 | [assets-utils](assets-utils/README.md) | **材质资源与编译**：Go 生成方块状态表、几何基表与原始配方；TS 负责制作默认包、解压 ZIP 与浏览器端材质编译。 | `neomega-view-utils/r2assets` / `neomega-r2-materials` | `r2-materials.js`、`default-materials.zip`、`material-info.zip` |
 | [r2-frontend](r2-frontend/README.md) | **合成后处理与共享界面**：① `compositor`（单画布降噪、WebSR 2× 超分、基于深度图的图层混合、PNG 导出）；② 共享 HUD/地图/设置与 `mount()`。Go 宿主装配所需网页后自行嵌入。 | `neomega-r2-frontend` | `r2-frontend.js` |
-| [go-link](go-link/README.md) | **Go 端协议服务端**：实现 R2Link v2 服务端会话、`effector` 与 `blockactor`。 | `neomega-r2link` | — |
+| [go-link](go-link/README.md) | **Go 端协议服务端**：实现 R2Link v3 的区域和近景方块实体订阅。 | `neomega-r2link` | — |
 | [fix-utils](fix-utils/README.md) | 按周围方块补全 Java 方块属性，读取宿主提供的六面实心表。 | `neomega-view-utils/fixer` | — |
 
 数据流向自底向上：

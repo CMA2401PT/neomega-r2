@@ -37,29 +37,33 @@ export function modelOf(states: Uint32Array, hash: number): number | undefined {
   }
   return undefined;
 }
-/** 解码传输布局并把调色板的方块哈希换成模型；表外的哈希画成空气并计入 unknown。
- * 压缩格子索引仍引用原始缓冲，不会展开整片世界。 */
-export function decodeRegion(buffer: ArrayBuffer, states: Uint32Array): SourceR2Region {
-  const data = new Uint32Array(buffer),
-    sections: SourceSubchunk[] = [];
-  let p = 2, unknown = 0;
+/** 按传输顺序读取子区块。调色板保留状态哈希，数组视图与输入共享内存。 */
+export function* hashSections(buffer: ArrayBuffer): Generator<SourceSubchunk> {
+  const data = new Uint32Array(buffer);
   if (data[0] !== 0x34504c54) throw Error("无法识别区块数据格式");
+  let p = 2;
   for (let n = 0; n < data[1]; n++) {
-    const position = [data[p++] | 0, data[p++] | 0, data[p++] | 0],
-      bits = data[p++],
-      count = data[p++],
-      length = data[p++],
-      palette = new Uint32Array(count);
-    for (let i = 0; i < count; i++) {
-      const model = modelOf(states, data[p + i]);
-      if (model === undefined) unknown++;
-      palette[i] = model ?? 0;
-    }
+    const position = [data[p++] | 0, data[p++] | 0, data[p++] | 0];
+    const bits = data[p++], count = data[p++], length = data[p++];
+    const palette = data.subarray(p, p + count);
     p += count;
     const words = data.subarray(p, p + length);
     p += length;
-    sections.push({ position, bits, palette, words });
+    yield { position, bits, palette, words };
   }
+}
+
+/** 解码传输布局并把调色板的方块哈希换成模型；表外的哈希画成空气并计入 unknown。 */
+export function decodeRegion(buffer: ArrayBuffer, states: Uint32Array): SourceR2Region {
+  let unknown = 0;
+  const sections = Array.from(hashSections(buffer), section => ({
+    ...section,
+    palette: section.palette.map(hash => {
+      const model = modelOf(states, hash);
+      if (model === undefined) unknown++;
+      return model ?? 0;
+    }),
+  }));
   return { sections, unknown, bytes: buffer.byteLength };
 }
 export function unpack(section: SourceSubchunk): Uint32Array {

@@ -21,6 +21,17 @@ const tscBin = join(dirname(require.resolve("typescript/package.json")), "bin/ts
 rmSync(dist, { recursive: true, force: true });
 execFileSync(process.execPath, [tscBin, "-p", root], { stdio: "inherit" });
 
+// 固定素材与实现一起交付，目录版、在线查看器和单文件播放器共用相同的图片。
+for (const block of ["book", "pot", "banner", "sign"]) {
+  await build({
+    entryPoints: [join(root, "src/special-blocks", block, "assets.ts")],
+    outfile: join(dist, "special-blocks", block, "assets.js"),
+    bundle: true,
+    format: "esm",
+    loader: { ".png": "dataurl", ".gz": "dataurl" },
+  });
+}
+
 // 为工作区 ESM 引用直接注入 WebSR 权重，保持源码独立运行能力。
 const srModule = join(dist, "compositor/websr.js");
 const websrLicense = readFileSync(join(root, "vendor/websr/LICENSE"), "utf8").trim();
@@ -70,7 +81,8 @@ async function bundle(entry, { format = "esm", define = {}, globalName, external
   return result.outputFiles[0].text;
 }
 
-const sourceNotice = readFileSync(join(root, "LICENSE"), "utf8").trim();
+const sourceNotice = ["LICENSE", "src/special-blocks/NOTICE.md", "src/special-blocks/sign/UNIFONT-LICENSE.txt"]
+  .map(file => readFileSync(join(root,file),"utf8").trim()).join("\n\n");
 mkdirSync(web, { recursive: true });
 copyFileSync(join(root, "src/ui/style.css"), join(web, "style.css"));
 

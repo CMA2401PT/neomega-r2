@@ -62,13 +62,13 @@ test("握手、订阅、提交与重连", async () => {
   });
   const socket = FakeSocket.all[0];
   socket.open();
-  assert.deepEqual(socket.sent[0].header, { type: "hello", protocol: "r2link", version: 2 });
+  assert.deepEqual(socket.sent[0].header, { type: "hello", protocol: "r2link", version: 3 });
   const { log, sink } = sinkLog();
   source.open(sink);
   // 握手前的订阅先记下，握手后作为完整快照发出，近的在前。
   source.want(want([{ x: 3, z: 0 }, { x: 0, z: 0 }]));
   assert.equal(socket.sent.length, 1);
-  socket.reply({ type: "welcome", protocol: "r2link", version: 2, scene: { name: "世界" }, camera: { position: [1, 2, 3] } });
+  socket.reply({ type: "welcome", protocol: "r2link", version: 3, scene: { name: "世界" }, camera: { position: [1, 2, 3] } });
   const welcome = await source.welcome;
   assert.equal(welcome.scene.name, "世界");
   assert.deepEqual(welcome.camera.position, [1, 2, 3]);
@@ -102,7 +102,7 @@ test("握手、订阅、提交与重连", async () => {
   await new Promise((r) => setTimeout(r, 10));
   const again = FakeSocket.all[1];
   again.open();
-  again.reply({ type: "welcome", protocol: "r2link", version: 2, scene: { name: "新世界" } });
+  again.reply({ type: "welcome", protocol: "r2link", version: 3, scene: { name: "新世界" } });
   assert.equal(source.state, "connected");
   assert.deepEqual(scenes, ["新世界"]);
   assert.deepEqual(
@@ -119,9 +119,9 @@ test("首次连接失败时拒绝 welcome 且不重连", async () => {
   const source = r2linkSource("ws://test/r2link", { WebSocket: FakeSocket, retry: 1 });
   const socket = FakeSocket.all[0];
   socket.open();
-  socket.reply({ type: "error", message: "需要 R2Link v2 的 hello" });
+  socket.reply({ type: "error", message: "需要 R2Link v3 的 hello" });
   socket.drop();
-  await assert.rejects(source.welcome, /需要 R2Link v2/);
+  await assert.rejects(source.welcome, /需要 R2Link v3/);
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(FakeSocket.all.length, 1);
   assert.equal(source.state, "closed");
@@ -139,6 +139,27 @@ test("版本不符的 welcome 断开连接", async () => {
   const source = r2linkSource("ws://test/r2link", { WebSocket: FakeSocket });
   const socket = FakeSocket.all[0];
   socket.open();
-  socket.reply({ type: "welcome", protocol: "r2link", version: 1, scene: { name: "旧" } });
-  await assert.rejects(source.welcome, /v1，需要 v2/);
+  socket.reply({ type: "welcome", protocol: "r2link", version: 2, scene: { name: "旧" } });
+  await assert.rejects(source.welcome, /v2，需要 v3/);
+});
+
+test("近景完整 SNBT 只交给仍在等待同一范围的订阅者", async () => {
+  const source = r2linkSource("ws://test/r2link", { WebSocket: FakeSocket });
+  const socket = FakeSocket.all.at(-1);
+  socket.open();
+  socket.reply({ type:"welcome",protocol:"r2link",version:3,scene:{name:"测试"} });
+  await source.welcome;
+  const log = [];
+  source.open({ ...sinkLog().sink, blockEntities:(x,z,entries) => log.push(entries) });
+  const range = { x:0,z:0,center:[1,2,3],radius:2 };
+  source.want(want([],[],{add:[range],remove:[]}));
+  assert.deepEqual(socket.sent.at(-1).header.blockEntities.add,[range]);
+  const entries = [{ position:[16,32,48],snbt:"{id:'unknown'}" }];
+  socket.reply({ type:"blockEntities",...range,center:[1,1,3],entries });
+  socket.reply({ type:"blockEntities",...range,entries });
+  socket.reply({ type:"blockEntities",...range,entries:[] });
+  source.want(want([],[],{add:[],remove:[range]}));
+  socket.reply({ type:"blockEntities",...range,entries });
+  assert.deepEqual(log,[entries,[]]);
+  source.close();
 });

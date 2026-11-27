@@ -3,7 +3,7 @@ import type { ObjectRegistry } from "../objects/registry.ts";
 import type { TextureSet } from "../render/textures.ts";
 import type { RegionDirectory } from "../render/region-directory.ts";
 import type { WorkerRequest, WorkerResponse } from "../scene/worker.ts";
-import type { ObjectDescriptor, PreparedR2Region } from "../contracts.ts";
+import type { BlockEntity, ObjectDescriptor, PreparedR2Region } from "../contracts.ts";
 import type { Renderer } from "../render/renderer.ts";
 
 /** r2region 坐标：每格横跨 8×8 个区块（chunk），r2region (x, z) 覆盖方块 [128x, 128x+128)。 */
@@ -33,8 +33,10 @@ export interface WantChange {
 export interface WorldSink {
   /** 区域的方块数据，编码见 README 的「区域编码」；null 表示这个区域没有方块。 */
   region(x: number, z: number, data: ArrayBuffer | null): void;
-  /** 区域内、当前近景范围里的特殊对象。 */
-  objects(x: number, z: number, descriptors: ObjectDescriptor[]): void;
+  /** 提交近景对象。缩小范围时可先用 complete=false 撤下远去的对象，等完整数据到达再结束等待。 */
+  objects(x: number, z: number, descriptors: ObjectDescriptor[], complete?: boolean): void;
+  /** 订阅区域内完整的原始方块实体；前端按方块状态解释。 */
+  blockEntities?(x: number, z: number, entries: BlockEntity[]): void;
   /** 区域数据无法提供；会话把区域标成失败，直到它移出又重新需要，或数据源再次提交。 */
   error(x: number, z: number, error: unknown): void;
 }
@@ -44,6 +46,8 @@ declare const R2_SCENE_WORKER: string;
 /** 世界数据源。会话打开时调用 open，之后用 want 告知需要的区域与近景对象；
  * 数据源为需要的区域调用 sink.region（以及 sink.objects），可以立即、稍后或在内容变化时重复调用。 */
 export interface DataSource {
+  /** 查看已订阅位置的原始 SNBT，供宿主在拾取方块后显示。 */
+  snbtAt?(position: number[]): string | undefined;
   open(sink: WorldSink): void;
   want(change: WantChange): void;
   close(): void;
@@ -110,6 +114,7 @@ interface Entry extends RegionCoord {
   /** 当前要的近景对象；空串表示不需要。 */
   objectSignature: string;
   objectsLoaded: string;
+  objectRequest: number;
   failed: string | null;
 }
 
@@ -180,8 +185,15 @@ export class WorldSession {
     this.post({ type: "init", catalog: renderer.catalog, states: renderer.states });
     source.open({
       region: (x, z, data) => this.receiveRegion(x, z, data),
-      objects: (x, z, descriptors) => {
-        this.objectQueue = this.objectQueue.then(() => this.receiveObjects(x, z, descriptors));
+      objects: (x, z, descriptors, complete = true) => {
+        const entry = this.entries.get(regionKey(x, z));
+        if (!entry?.objectSignature) return;
+        const request = ++entry.objectRequest;
+        entry.objectsLoaded = "";
+        this.objectQueue = this.objectQueue.then(() => {
+          if (entry.objectRequest === request && this.entries.get(entry.key) === entry)
+            return this.receiveObjects(x, z, descriptors, complete);
+        });
       },
       error: (x, z, error) => this.receiveError(x, z, error),
     });
@@ -287,6 +299,7 @@ export class WorldSession {
           published: 0,
           objectSignature: "",
           objectsLoaded: "",
+          objectRequest: 0,
           failed: null,
         };
         this.entries.set(key, entry);
@@ -300,13 +313,13 @@ export class WorldSession {
       if (objectSignature !== entry.objectSignature) {
         if (objectSignature)
           change.objects.add.push({ x: entry.x, z: entry.z, center: [...center], radius: nearRadius });
-        else change.objects.remove.push({ x: entry.x, z: entry.z });
+        else {
+          change.objects.remove.push({ x: entry.x, z: entry.z });
+          if (this.objects.removeRegion(key)) this.dirtyNeighbors(entry.x, entry.z);
+          entry.objectsLoaded = "";
+        }
+        entry.objectRequest++;
         entry.objectSignature = objectSignature;
-      }
-      if (!entry.near && entry.objectsLoaded) {
-        const changed = this.objects.removeRegion(key);
-        entry.objectsLoaded = "";
-        if (changed) this.dirtyNeighbors(entry.x, entry.z);
       }
     }
     change.regions.add.sort((a, b) => this.priority(a) - this.priority(b));
@@ -333,7 +346,7 @@ export class WorldSession {
     this.post({ type: "put", key: entry.key, request: entry.request, buffer }, [buffer]);
   }
 
-  private async receiveObjects(x: number, z: number, descriptors: ObjectDescriptor[]): Promise<void> {
+  private async receiveObjects(x: number, z: number, descriptors: ObjectDescriptor[], complete: boolean): Promise<void> {
     const entry = this.entries.get(regionKey(x, z));
     if (this.disposed || !entry || !entry.objectSignature) return;
     const signature = entry.objectSignature;
@@ -347,11 +360,14 @@ export class WorldSession {
         this.dirtyNeighbors(entry.x, entry.z);
         return;
       }
-      entry.objectsLoaded = signature;
+      entry.objectsLoaded = complete ? signature : "";
       if (changed) this.dirtyNeighbors(entry.x, entry.z);
     } catch (error) {
       if ((error as Error)?.name !== "AbortError" && !this.disposed) {
-        this.receiveError(x, z, error);
+        // 近景部件的容量或素材错误只影响外观；基础区域依旧可以发布。
+        entry.objectsLoaded = signature;
+        this.dirtyNeighbors(x, z);
+        this.onError(`区域 (${x}, ${z}) 的近景外观加载失败：${error}`);
       }
     } finally {
       this.pump();

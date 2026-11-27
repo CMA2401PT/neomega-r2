@@ -1,12 +1,12 @@
 # neomega-r2link：R2 浏览器与世界数据源之间的协议
 
-R2Link 让游戏机器人、服务器插件或存档服务把方块世界交给 [R2 渲染器](../r2-core/README.md)显示。数据源监听 WebSocket，浏览器作为客户端连接它。浏览器的世界会话按相机位置决定需要哪些区域，告诉数据源；数据源回送压缩区域、近景特殊对象和相机指令。浏览器不保存世界，所以数据源只需要能按区域读取，不必关心浏览器缓存了什么。
+R2Link 让游戏机器人、服务器插件或存档服务把方块世界交给 [R2 渲染器](../r2-core/README.md)显示。数据源监听 WebSocket，浏览器作为客户端连接它。浏览器的世界会话按相机位置决定需要哪些区域，告诉数据源；数据源回送压缩区域、近景方块实体和相机指令。浏览器不保存世界，所以数据源只需要能按区域读取，不必关心浏览器缓存了什么。
 
 [neomega-viewer-r2](../../apps/neomega-viewer-r2/README.md) 自己的存档与内置场景也走这条路：Go 服务在 `/r2link` 上把当前世界作为数据源提供给同源页面。外部数据源在 HUD 的连接按钮里填写地址。
 
 协议中的 `region` 指 r2region，横向覆盖 8×8 个区块（chunk）。每个区块沿高度分成 16×16×16 方块的子区块（subchunk），一个 `region` 消息携带该范围内有数据的子区块。
 
-本模块是 Go 一侧的实现：消息与区域编码、连接、按订阅排队读取的会话，以及生成特殊对象描述的 `effector`、`blockactor`。浏览器一侧是 neomega-r2 的 `r2linkSource`。
+Go 服务按订阅发送状态哈希和原始方块实体。每个实体由世界坐标和完整的 SNBT 文本表示。SNBT 是保留 NBT 数据类型的文本格式。浏览器一侧是 neomega-r2 的 `r2linkSource`。
 
 ## 消息
 
@@ -25,8 +25,8 @@ n 字节    UTF-8 JSON 头，必有 "type"
 浏览器连上后先发 `hello`，数据源回 `welcome`：
 
 ```json
-{"type":"hello","protocol":"r2link","version":2}
-{"type":"welcome","protocol":"r2link","version":2,"scene":{"name":"生存服"},"camera":{"position":[120.5,86,-31.5],"yaw":1.2,"pitch":-0.25}}
+{"type":"hello","protocol":"r2link","version":3}
+{"type":"welcome","protocol":"r2link","version":3,"scene":{"name":"生存服"},"camera":{"position":[120.5,86,-31.5],"yaw":1.2,"pitch":-0.25}}
 ```
 
 版本不符时数据源回复 `{"type":"error","message":"…"}` 并关闭连接，浏览器把 message 显示为连接失败的原因。`scene.name` 显示在界面上。`camera` 可以省略；位置是方块坐标，朝向是弧度，yaw 为 0 时看向 −Z、正值转向 +X，pitch 为正时向上看，省略朝向表示保留浏览器当前朝向。
@@ -35,7 +35,7 @@ n 字节    UTF-8 JSON 头，必有 "type"
 
 | type | 字段 | 含义 |
 |---|---|---|
-| `want` | `center`、`regions`、`objects` | 需要的区域与近景对象的变化，见下文。 |
+| `want` | `center`、`regions`、`blockEntities` | 需要的区域与近景方块实体的变化，见下文。 |
 | `chunks` | | 请求区块占用表。 |
 
 ```json
@@ -43,27 +43,31 @@ n 字节    UTF-8 JSON 头，必有 "type"
   "type": "want",
   "center": [1032.5, -220],
   "regions": {"add": [{"x": 8, "z": -2}], "remove": [{"x": 3, "z": 0}]},
-  "objects": {"add": [{"x": 8, "z": -2, "center": [64, 4, -14], "radius": 2}], "remove": []}
+  "blockEntities": {"add": [{"x": 8, "z": -2, "center": [64, 4, -14], "radius": 2}], "remove": []}
 }
 ```
 
-区域是 8×8 区块（128×128 方块）的整根柱子，区域 (x, z) 覆盖方块 `x*128 … x*128+127`。`center` 是远景中心的方块坐标 `[x, z]`，数据源应先供给离它近的区域；`regions.add` 已按由近到远排列。`objects.add` 要求区域内、以区块坐标 `center` 为圆心 `radius` 区块以内的特殊对象；已需要的区域再次出现在 `add` 里，表示圆心或半径变了。
+区域是 8×8 区块（128×128 方块）的整根柱子，区域 (x, z) 覆盖方块 `x*128 … x*128+127`。`center` 是远景中心的方块坐标 `[x, z]`，数据源应先供给离它近的区域；`regions.add` 已按由近到远排列。`blockEntities.add` 要求区域内、以区块坐标 `center` 为圆心 `radius` 区块以内的方块实体；高度按子区块计算，距 `center[1]` 最多 `min(radius + 1, 12)` 个子区块。已订阅的区域再次出现在 `add` 里，表示圆心或半径变了。
 
-`want` 是增量。每次握手后浏览器先发一条完整快照（`remove` 为空），之后只发变化。被移除的区域与对象，数据源应停止读取，晚到的结果浏览器会丢弃。
+`want` 是增量。每次握手后浏览器先发一条完整快照（`remove` 为空），之后只发变化。取消订阅的区域与方块实体，数据源应停止读取，晚到的结果浏览器会丢弃。
 
 ### 数据源发送
 
 | type | 字段 | 尾部 | 含义 |
 |---|---|---|---|
 | `region` | `x`、`z`、`clippedSections` | 区域编码 | 区域的全部方块。尾部为空表示区域为空。再次发送同一区域即更新。 |
-| `objects` | `x`、`z`、`descriptors` | | 区域内近景对象的完整列表，可以为空。每个 `objects.add` 都要有回复。 |
+| `blockEntities` | `x`、`z`、`center`、`radius`、`entries` | | 区域内近景方块实体的完整列表，可以为空。每个 `blockEntities.add` 都要有回复。 |
 | `failed` | `x`、`z`、`message` | | 区域读取失败，浏览器显示为失败区域。 |
 | `chunks` | `message` | 占用表 | 回复 `chunks` 请求，按请求顺序；`message` 非空表示失败。没有占用表时尾部为空。 |
 | `camera` | `camera` | | 让浏览器移动相机，格式同 welcome。 |
 | `scene` | `scene` | | 更新世界描述。 |
 | `error` | `message` | | 致命错误，随后关闭连接。 |
 
-`clippedSections` 是区域内因超出可显示高度而省略的 section 数，可以省略。`descriptors` 的每项是 `{"key","kind","position","data"?,"replace"?}`：`key` 在世界内稳定，`kind` 选择浏览器注册的外观工厂，`position` 是方块坐标，`data` 由该类型解释，`replace` 为真时实例替换该格的静态模型。
+`clippedSections` 是区域内因超出可显示高度而省略的 section 数，可以省略。`center` 和 `radius` 回显所响应的订阅范围，以便浏览器在移动后丢弃过期回复。每条 `entries` 记录包含整数世界坐标 `position` 和完整的 `snbt` 字符串。同一区域的新列表整体替换旧列表，空列表会清除原有数据。
+
+```json
+{"type":"blockEntities","x":0,"z":0,"center":[0,4,0],"radius":2,"entries":[{"position":[5,64,7],"snbt":"{Command:\"say hi\"}"}]}
+```
 
 ### 区域编码
 
@@ -92,7 +96,7 @@ section 内第 i 个索引对应格子 `x = i >> 8, z = (i >> 4) & 15, y = i & 1
 
 ## Go 数据源
 
-数据源实现 `Source`，可选实现 `ObjectSource` 与 `ChunkSource`，然后在 HTTP 处理函数里接受连接并交给 `Serve`：
+数据源实现 `Source`，可选实现 `BlockEntitySource` 与 `ChunkSource`，然后在 HTTP 处理函数里接受连接并交给 `Serve`：
 
 ```go
 type world struct{ /* … */ }
@@ -117,14 +121,14 @@ http.HandleFunc("/r2link", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-`Session` 记录浏览器需要什么，按离远景中心由近到远调用 `Region`（默认 4 个并发），移除的区域取消 ctx 并丢弃结果；同一区域的两次读取不会重叠。不实现 `ObjectSource` 时，对象请求得到空列表；不实现 `ChunkSource` 时，占用表为空。
+`Session` 记录浏览器需要什么，按离远景中心由近到远调用 `Region`（默认 4 个并发），移除的区域取消 ctx 并丢弃结果；同一区域的两次读取不会重叠。不实现 `BlockEntitySource` 时，对象请求得到空列表；不实现 `ChunkSource` 时，占用表为空。
 
 世界变化时用 `NewSession` 拿到会话，再调用：
 
 | 方法 | 作用 |
 |---|---|
 | `Update(x, z)` | 区域方块变了，浏览器仍需要时重读并发送。 |
-| `UpdateObjects(x, z)` | 区域的特殊对象变了。 |
+| `UpdateBlockEntities(x, z)` | 区域的方块实体变了。 |
 | `Refresh()` | 整个世界换了内容，重发所有仍需要的区域与对象。 |
 | `MoveCamera(ctx, camera)` | 移动浏览器的相机。 |
 | `SetScene(ctx, scene)` | 更新世界描述。 |
@@ -133,9 +137,9 @@ http.HandleFunc("/r2link", func(w http.ResponseWriter, r *http.Request) {
 
 其他工具：`Pack` 把 4096 个哈希压成最小位宽的 section，`EncodeRegion` 写出区域编码，`IsAir` 判断三种空气，`ChunkIndex` 生成占用表。
 
-### 特殊对象
+### 方块实体
 
-近景对象由数据源生成描述，浏览器按 `kind` 找到外观工厂绘制。`effector` 只根据方块状态与位置生成描述（例如附魔台上的书），`blockactor` 还读取方块实体 NBT（例如旗帜、告示牌）。两者按方块名注册，数据源在 `Objects` 里对近景范围内的方块调用它们。浏览器一侧怎样添加外观见 neomega-r2 的[说明](../r2-core/README.md#区域编码与活动对象)。
+实现 `BlockEntities(ctx, x, z, center, radius)` 即可提供近景数据。遍历订阅范围内的方块实体，保留其坐标和全部字段。浏览器根据已有区域中的状态哈希识别附魔台、陶罐、旗帜和告示牌。完整 SNBT 也用于点击查看。外观与固定素材见 [前端实现](../r2-frontend/src/special-blocks/)。
 
 ## 示例与检查
 

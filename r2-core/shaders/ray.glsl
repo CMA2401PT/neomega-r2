@@ -31,6 +31,10 @@ uniform bool uOrtho,uHasWorld;
 const bool uPicking=R2_PICK!=0;
 uniform vec2 uPickPixel;
 vec3 firstNormal;
+#if R2_PICK
+// 正值保存对象槽位加一，负值保存静态模型编号，用于找回跨格面的方块。
+int pickedOwner;
+#endif
 uniform int uDebug;
 uniform bool uHierarchy,uFragments;
 // 指向太阳的单位向量；太阳落到地平线下以后由反方向的月亮照明。
@@ -480,7 +484,11 @@ bool boundarySurface(uint id,uvec4 description,int side,float t,bool cutout){
  return cubeSurface(description.y,side,t,cutout);
 #endif
 }
-struct Hit{float t;vec3 color;float alpha;Material material;bool unlit;};
+struct Hit{float t;vec3 color;float alpha;Material material;bool unlit;
+#if R2_PICK
+int owner;
+#endif
+};
 #include <objects>
 vec3 octahedralNormal(uint packed){
  vec2 e=unpackSnorm2x16(packed);vec3 n=vec3(e,1.0-abs(e.x)-abs(e.y));float t=max(-n.z,0.0);
@@ -522,6 +530,9 @@ void intersectModel(uint id,ivec3 cell,float begin,float end,inout Hit hit){
   if(alpha<=0.0)continue;
   vec3 geometric=table(uQuadRecords,offset+6).xyz;
   if(dot(geometric,ray)>0.0)geometric=-geometric;
+  #if R2_PICK
+  hit.owner=-int(id);
+#endif
   hit.t=t;hit.color=linearColor(texel.rgb)*tint.rgb;hit.alpha=alpha;hit.unlit=b.w>=2.0;
 #if RENDER_TIER>=2
   // 平面上沿参数 u、v 前进的方向（与 U、V 互为对偶），再按贴图坐标对 (u,v) 的导数 [a.zw b.xy] 取逆，得到贴图横纵方向。
@@ -806,7 +817,11 @@ bool march(float limit,bool submerged){
 #if RENDER_TIER>0
   if(cellLevel)intersectCell(current,parts,cell,max(t,afterHit),end,hit);
 #endif
-  if(hit.alpha>0.0){contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
+  if(hit.alpha>0.0){
+#if R2_PICK
+    if(!touched)pickedOwner=hit.owner;
+#endif
+    contribute(hit.color,hit.alpha,hit.t,hit.material,hit.unlit,1.0);if(brightest(throughput)<=.001){finished=true;break;}afterHit=hit.t+EPS;t=afterHit;if(t<end-EPS)continue;}
   t=end;cell=nextCell;side=exitSide^1;entering=true;
   if(t>=last-EPS){absorbWater(t);if(last<limit&&previous!=0u&&brightest(throughput)>.001)boundarySurface(previous,previousModel,exitSide,t,false);finished=true;break;}
  }
@@ -1109,8 +1124,15 @@ void main(){
   pathSample=samplePath(uFrame/cells,cells==1u?pixelSeed:pcg(pixelSeed+uFrame%cells));
   jitter+=(pathSample.zw-.5)*uJitter.z;
  }
+ #if R2_PICK
+ pickedOwner=0;
+#endif
  vec3 color=tracePixel(uPicking?uPickPixel:vec2(pixelCoord.x,uViewport.y-pixelCoord.y)+jitter);
- if(uPicking){outColor=vec4(touched?firstDepth:-1.0,firstNormal);return;}
+ #if R2_PICK
+ vec3 n=firstNormal/max(dot(abs(firstNormal),vec3(1)),1e-8);
+ vec2 oct=n.z<0.0?(1.0-abs(n.yx))*mix(vec2(-1),vec2(1),greaterThanEqual(n.xy,vec2(0))):n.xy;
+ outColor=vec4(touched?firstDepth:-1.0,oct,float(pickedOwner));return;
+#endif
  if(uDebug==1)color=vec3(min(float(steps)/128.0,1.0),min(float(faceTests)/512.0,1.0),0);
  if(uDebug==2)color=vec3(float(faceTests>0),float(faceTests==0&&touched),0);
  // 对数色阶让近处方块和远景都容易分辨，1023 格以外沿用最远色。

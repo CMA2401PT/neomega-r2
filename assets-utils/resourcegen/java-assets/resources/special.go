@@ -97,15 +97,11 @@ func FamilyUsesTexture(family string, id jmodel.ResourceID) bool {
 	return false
 }
 
-// Families also declare textures used by dynamic effects, not just those that
-// appear in the static template's faces (banner patterns, eyes, lid skins, etc.).
+// 为这些模型补充动态效果要用的材质，例如眼睛和箱盖纹理。
 var familyPrefixes = map[string][]string{
 	"bed":                 {"entity/bed/"},
-	"sign":                {"entity/signs/"},
 	"chest":               {"entity/chest/"},
 	"shulker_box":         {"entity/shulker/"},
-	"banner":              {"entity/banner/"},
-	"decorated_pot":       {"entity/decorated_pot/"},
 	"copper_golem_statue": {"entity/copper_golem/"},
 	"conduit":             {"entity/conduit/"},
 	"portal":              {"entity/end_portal/"},

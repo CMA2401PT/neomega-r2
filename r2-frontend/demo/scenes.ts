@@ -1,4 +1,4 @@
-import type { MemoryWorld, ObjectDescriptor } from "neomega-r2-core";
+import type { MemoryWorld } from "neomega-r2-core";
 
 /** 验证场景：在内存世界里摆方块，给出初始相机。方块用 Java 状态字符串写，与存档走同一条哈希与准备路径。 */
 export interface Scene {
@@ -44,7 +44,7 @@ const view = { camera: [32, 16, 58], target: [32, 3, 25] };
 
 export const scenes: Record<string, Scene> = {
   special: {
-    label: "附魔书与独立旗面",
+    label: "附魔台、陶罐、旗帜和告示牌",
     camera: [33.5, 4, 31.5],
     target: [33.5, 3, 26.5],
     build(world) {
@@ -53,11 +53,14 @@ export const scenes: Record<string, Scene> = {
       world.fill([34, 2, 26], [34, 4, 26], fence);
       world.set(32, 2, 29, glass);
       world.set(33, 2, 28, quartz);
-      const objects: ObjectDescriptor[] = [
-        { key: "book", kind: "enchanting_book", position: [32, 2, 26] },
-        { key: "banner", kind: "test_banner", position: [35.2, 2.2, 26.5] },
-      ];
-      for (const object of objects) world.addObject(object);
+      world.set(35,2,26,'blue_banner ["rotation"="0"]');
+      world.setBlockEntity([35,2,26],'{patterns:[{pattern:"minecraft:cross",color:"yellow"}]}');
+      world.set(34,2,28,'decorated_pot ["cracked"="false","facing"="north"]');
+      world.setBlockEntity([34,2,28],'{sherds:{front:{id:"minecraft:angler_pottery_sherd"}},item:{id:"minecraft:brick"}}');
+      world.set(33,2,26,'oak_sign ["rotation"="0"]');
+      world.setBlockEntity([33,2,26],'{front_text:{messages:["你好，世界","R2"],color:"black",has_glowing_text:1b},back_text:{messages:["背面"]}}');
+      world.set(31,2,26,'command_block ["conditional"="false","facing"="north"]');
+      world.setBlockEntity([31,2,26],'{Command:"say hello"}');
     },
   },
   showcase: {

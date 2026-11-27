@@ -1,8 +1,8 @@
 // R2Link 数据源：浏览器连接数据源的 WebSocket，把会话的订阅转成 want 消息，把收到的区域与对象交给会话。
 // 协议见 neomega-r2link 的 README。
-import type { DataSource, ObjectDescriptor, ObjectWant, RegionCoord, WantChange, WorldSink } from "neomega-r2-core";
+import type { DataSource, BlockEntity, ObjectWant, RegionCoord, WantChange, WorldSink } from "neomega-r2-core";
 
-export const R2LINK_VERSION = 2;
+export const R2LINK_VERSION = 3;
 
 export interface R2LinkScene {
   name: string;
@@ -104,7 +104,7 @@ export function r2linkSource(url: string, options: R2LinkOptions = {}): R2LinkSo
       type: "want",
       center,
       regions: { add: [...regions.values()].sort((a, b) => distance(a) - distance(b)), remove: [] },
-      objects: { add: [...objects.values()], remove: [] },
+      blockEntities: { add: [...objects.values()], remove: [] },
     });
   };
 
@@ -144,8 +144,12 @@ export function r2linkSource(url: string, options: R2LinkOptions = {}): R2LinkSo
         if (!regions.has(key(x, z))) return;
         clipped.set(key(x, z), header.clippedSections || 0);
         sink?.region(x, z, tail.byteLength ? tail : null);
-      } else if (type === "objects") {
-        if (objects.has(key(x, z))) sink?.objects(x, z, header.descriptors as ObjectDescriptor[]);
+      } else if (type === "blockEntities") {
+        const want = objects.get(key(x, z));
+        if (want && want.radius === header.radius && want.center.every((v, i) => v === header.center[i])) {
+          if (sink?.blockEntities) sink.blockEntities(x, z, header.entries as BlockEntity[]);
+          else sink?.objects(x, z, []);
+        }
       } else if (type === "failed") {
         sink?.error(x, z, Error(header.message));
       } else if (type === "chunks") {
@@ -200,7 +204,7 @@ export function r2linkSource(url: string, options: R2LinkOptions = {}): R2LinkSo
       for (const value of change.regions.add) regions.set(key(value.x, value.z), value);
       for (const { x, z } of change.objects.remove) objects.delete(key(x, z));
       for (const value of change.objects.add) objects.set(key(value.x, value.z), value);
-      send({ type: "want", ...change });
+      send({ type: "want", center: change.center, regions: change.regions, blockEntities: change.objects });
     },
     chunks() {
       if (!welcomed || socket?.readyState !== 1) return Promise.reject(Error("数据源没有连接"));

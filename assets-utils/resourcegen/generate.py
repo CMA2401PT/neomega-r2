@@ -71,11 +71,8 @@ def prepare_client(*, java: str, work: Path, jar: Path | None, templates: Path |
 
 
 def pack_browser_materials(work: Path) -> None:
-    """把配方、图集和附魔台书本纹理交给浏览器材质编译器打包。"""
+    """把配方和图集交给浏览器材质编译器打包。"""
     recipe = work / "recipe"
-    textures = work / "extract/extracted/assets/minecraft/textures/entity"
-    (book,) = textures.rglob("enchanting_table_book.png")
-    shutil.copyfile(book, recipe / "book.png")
     shutil.copyfile(work / "java-assets/block-atlas.png", recipe / "base-atlas.png")
     subprocess.run(
         ["node", "resourcegen/browser-materials/pack.mjs", recipe, work / "browser-materials"],

@@ -9,8 +9,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"neomega-r2link/object"
 )
 
 // testSource 的区域 (x, z) 是一个 section，整块为哈希 x*100+z+1；区域 (9, 9) 阻塞到取消，区域 (7, 7) 读取失败。
@@ -39,8 +37,8 @@ func (s *testSource) Region(ctx context.Context, x, z int) (Region, error) {
 	return Region{Sections: []Section{{Position: [3]int{x * 8, 0, z * 8}, Palette: []uint32{uint32(x*100+z+1) + version}}}, Clipped: 2}, nil
 }
 
-func (s *testSource) Objects(ctx context.Context, x, z int, center [3]int, radius int) ([]object.Descriptor, error) {
-	return []object.Descriptor{{Key: "k", Kind: "book", Position: [3]float64{float64(center[0]), float64(radius), 0}}}, nil
+func (s *testSource) BlockEntities(ctx context.Context, x, z int, center [3]int, radius int) ([]BlockEntity, error) {
+	return []BlockEntity{{SNBT: "{test:1b}", Position: [3]int{center[0], radius, 0}}}, nil
 }
 
 func (s *testSource) Chunks(ctx context.Context) (ChunkIndex, error) {
@@ -176,12 +174,12 @@ func TestSession(t *testing.T) {
 
 	// 对象、占用表与相机。
 	want.Regions.Remove = nil
-	want.Objects.Add = []ObjectWant{{X: 0, Z: 0, Center: [3]int{3, 4, 5}, Radius: 6}}
+	want.BlockEntities.Add = []BlockEntityWant{{X: 0, Z: 0, Center: [3]int{3, 4, 5}, Radius: 6}}
 	send(t, conn, want)
-	var objects Objects
-	receive(t, conn, &objects)
-	if objects.Type != "objects" || len(objects.Descriptors) != 1 || objects.Descriptors[0].Position != [3]float64{3, 6, 0} {
-		t.Fatalf("对象 %+v", objects)
+	var entities BlockEntities
+	receive(t, conn, &entities)
+	if entities.Type != "blockEntities" || len(entities.Entries) != 1 || entities.Entries[0].Position != [3]int{3, 6, 0} {
+		t.Fatalf("方块实体 %+v", entities)
 	}
 	send(t, conn, Chunks{Type: "chunks"})
 	var chunks Chunks
@@ -206,10 +204,10 @@ func TestSession(t *testing.T) {
 
 func TestSessionRejectsOldVersion(t *testing.T) {
 	conn, _ := start(t, &testSource{reads: map[RegionPos]int{}}, Options{})
-	send(t, conn, Hello{Type: "hello", Protocol: "r2link", Version: 1})
+	send(t, conn, Hello{Type: "hello", Protocol: "r2link", Version: 2})
 	var message Error
 	receive(t, conn, &message)
-	if message.Type != "error" || !strings.Contains(message.Message, "v2") {
+	if message.Type != "error" || !strings.Contains(message.Message, "v3") {
 		t.Fatalf("%+v", message)
 	}
 }
@@ -264,12 +262,12 @@ func TestSessionWithoutOptionalSources(t *testing.T) {
 	receive(t, conn, nil)
 	var want Want
 	want.Type = "want"
-	want.Objects.Add = []ObjectWant{{X: 2, Z: 3, Radius: 4}}
+	want.BlockEntities.Add = []BlockEntityWant{{X: 2, Z: 3, Radius: 4}}
 	send(t, conn, want)
-	var objects Objects
-	receive(t, conn, &objects)
-	if objects.Type != "objects" || objects.X != 2 || objects.Z != 3 || objects.Descriptors == nil || len(objects.Descriptors) != 0 {
-		t.Fatalf("对象 %+v", objects)
+	var entities BlockEntities
+	receive(t, conn, &entities)
+	if entities.Type != "blockEntities" || entities.X != 2 || entities.Z != 3 || entities.Entries == nil || len(entities.Entries) != 0 {
+		t.Fatalf("方块实体 %+v", entities)
 	}
 	send(t, conn, Chunks{Type: "chunks"})
 	var chunks Chunks

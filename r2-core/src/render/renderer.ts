@@ -524,9 +524,20 @@ export async function createRenderer(
       }
       return submitFrame(camera, o);
     }
-    async function pick(camera: Camera, pixel: { width: number; height: number; x: number; y: number }): Promise<PickResult | null> {
+    // 模型片段在烘焙时获得独立编号，片段偏移用于把跨格命中还原到所属方块。
+    const fragmentOffsets = new Map<number, number[]>();
+    function indexFragments() {
+      fragmentOffsets.clear();
+      for (const model of catalog.models)
+        for (const part of model.fragments ?? []) fragmentOffsets.set(part.model, part.offset);
+    }
+    indexFragments();
+    async function pick(
+      camera: Camera,
+      pixel: { width: number; height: number; x: number; y: number; objects?: boolean; voxel?: boolean },
+    ): Promise<PickResult | null> {
       const tier =
-        programs.has("basic") || programs.has("shading") || programs.has("accumulation")
+        !pixel.voxel && (programs.has("basic") || programs.has("shading") || programs.has("accumulation"))
           ? "basic-pick"
           : "voxel-pick";
       await compileProgram(tier);
@@ -541,7 +552,7 @@ export async function createRenderer(
           tier,
           {
             ...pixel,
-            objects: false,
+            objects: pixel.objects ?? false,
             pickPixel: [Math.floor(pixel.x) + 0.5, pixel.height - Math.floor(pixel.y) - 0.5],
           },
           false,
@@ -550,11 +561,29 @@ export async function createRenderer(
         trace(enc, tier, { hdr: target.createView(), history: pickHistory, width: 1, height: 1 });
         device.queue.submit([enc.finish()]);
         const ray = cameraRay(camera, { ...pixel, x: Math.floor(pixel.x), y: Math.floor(pixel.y) });
+        const objectVersion = objects.store.version;
+        const worldVersion = generation;
         const hit = new Float32Array((await readTexture(device, target, 16)).buffer);
-        if (hit[0] < 0) return null;
-        const normal = Array.from(hit.subarray(1));
+        if (hit[0] < 0 || generation !== worldVersion) return null;
+        const [, x, y, owner] = hit;
+        const z = 1 - Math.abs(x) - Math.abs(y);
+        const t = Math.max(0, -z);
+        const normal = [x + (x >= 0 ? -t : t), y + (y >= 0 ? -t : t), z];
+        const length = Math.hypot(...normal);
+        for (let i = 0; i < 3; i++) normal[i] /= length;
+        if (owner > 0) {
+          if (objects.store.version !== objectVersion) return null;
+          for (const object of objects.store.objects.values()) {
+            if (object.slots.some(part => part.slot === owner - 1))
+              return { position: object.descriptor.position.map(Math.floor), normal };
+          }
+          return null;
+        }
+        const offset = fragmentOffsets.get(-owner);
         return {
-          position: ray.origin.map((v, i) => Math.floor(v + ray.direction[i] * hit[0] - normal[i] * 0.002)),
+          position: ray.origin.map((v, i) =>
+            Math.floor(v + ray.direction[i] * hit[0] - normal[i] * 0.002) - (offset?.[i] ?? 0),
+          ),
           normal,
         };
       } finally {
@@ -710,6 +739,7 @@ export async function createRenderer(
         materials.dispose();
         materials = next;
         Object.assign(catalog, set.catalog);
+        indexFragments();
         scene = bind();
         generation++;
         resetTiming();

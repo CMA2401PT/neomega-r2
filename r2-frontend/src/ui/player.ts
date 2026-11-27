@@ -1,8 +1,6 @@
 import {
   createRenderer,
-  enchantingBook,
-  ObjectRegistry,
-  WorldSession,
+  type WorldSession,
   type Camera,
 } from "neomega-r2-core";
 import { element, mountLayout } from "./dom.ts";
@@ -10,6 +8,7 @@ import type { Frontend, MountOptions, Scene } from "./frontend-types.ts";
 import { materialControls } from "./material-controls.ts";
 import { createStartup } from "./startup.ts";
 import type { ViewSettings } from "./types.ts";
+import { blockWorldSession } from "../special-blocks/source.ts";
 import { createView } from "./view.ts";
 
 
@@ -27,9 +26,6 @@ export async function start(options: MountOptions): Promise<Frontend> {
     readResource,
     onProgress: ({ label }) => startup.stage(label),
   });
-  const bookURL = URL.createObjectURL(await (await readResource("book.png")).blob());
-  const registry =
-    options.registry ?? new ObjectRegistry().register("enchanting_book", () => enchantingBook(bookURL));
   const settings: ViewSettings = {
     nearRadius: 4,
     farRadius: 8,
@@ -78,8 +74,8 @@ export async function start(options: MountOptions): Promise<Frontend> {
       await view.cancelPhoto();
       if (!session || next.source !== scene.source) {
         session?.dispose();
-        session = new WorldSession(renderer, next.source, {
-          registry,
+        session = blockWorldSession(renderer, next.source, {
+          registry:options.registry,
           onError: (message) => view.hud.error(message),
         });
       }
@@ -101,7 +97,6 @@ export async function start(options: MountOptions): Promise<Frontend> {
     view.dispose();
     session?.dispose();
     renderer.dispose();
-    URL.revokeObjectURL(bookURL);
   }
   try {
     if (options.actions) element("host-actions").append(options.actions);

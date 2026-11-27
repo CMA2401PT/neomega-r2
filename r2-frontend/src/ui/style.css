@@ -1085,3 +1085,5 @@ body.map-open #movepad {
     flex: 1;
   }
 }
+
+#block-entity-text { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; user-select: text; }

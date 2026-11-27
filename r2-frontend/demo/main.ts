@@ -1,13 +1,11 @@
 // 演示页：使用 MemoryWorld 与共享 UI 演示方块、光影、地图与活动部件。
 import {
   createRenderer,
-  enchantingBook,
   memorySource,
   MemoryWorld,
-  ObjectRegistry,
-  WorldSession,
+  type WorldSession,
 } from "neomega-r2-core";
-import { createStartup, createView, element, mountLayout, type ViewSettings } from "neomega-r2-frontend/ui";
+import { blockWorldSession, createStartup, createView, element, mountLayout, type ViewSettings } from "neomega-r2-frontend/ui";
 import { scenes } from "./scenes.ts";
 
 mountLayout();
@@ -32,32 +30,12 @@ const settings: ViewSettings = {
 };
 element<HTMLInputElement>("far-radius").min = "8";
 
-function testBanner() {
-  const pixels = new Uint8Array(32 * 64 * 4);
-  for (let y = 0; y < 64; y++) {
-    for (let x = 0; x < 32; x++) {
-      const color = (x >= 13 && x < 19) || (y >= 27 && y < 35) ? [245, 198, 67, 255] : [23, 63, 152, 255];
-      pixels.set(x >= 12 && x < 20 && y >= 49 && y < 57 ? [0, 0, 0, 0] : color, (x + y * 32) * 4);
-    }
-  }
-  return {
-    texture: { pixels, width: 32, height: 64 },
-    bounds: [[0, 0, -0.005], [1, 2, 0.005]],
-    parts: [{ minimum: [0, 0, -0.005], maximum: [1, 2, 0.005], faces: Array.from({ length: 6 }, () => [0, 0, 32, 64]) }],
-    pose: () => ({ axes: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], position: [0, 0, 0], scale: 1 }),
-  };
-}
-
 try {
   const renderer = await createRenderer({
     assets: "/assets/",
     tier: settings.tier,
     onProgress: ({ label }) => startup.stage(label),
   });
-  const registry = new ObjectRegistry()
-    .register("enchanting_book", () => enchantingBook("/assets/book.png"))
-    .register("test_banner", testBanner);
-
   for (const [name, scene] of Object.entries(scenes)) select.add(new Option(scene.label, name));
 
   let world = new MemoryWorld();
@@ -104,8 +82,7 @@ try {
     select.value = name;
     world = new MemoryWorld();
     scene.build(world);
-    session = new WorldSession(renderer, memorySource(world), {
-      registry,
+    session = blockWorldSession(renderer, memorySource(world), {
       onError: (message) => (status.textContent = message),
     });
     setCamera(scene.camera, scene.target);

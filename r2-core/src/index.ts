@@ -13,8 +13,7 @@ export {
 export { loadTextureSet, type TextureSet, type TextureInfo } from "./render/textures.ts";
 export { cameraBasis, cameraRay, cameraSpan, PERSPECTIVE_SPAN } from "./render/camera.ts";
 export { ObjectRegistry } from "./objects/registry.ts";
-export { enchantingBook } from "./effects/enchanting-book.ts";
-export { regionKey, decodeRegion, modelOf, unpack } from "./scene/prepare.ts";
+export { regionKey, hashSections, decodeRegion, modelOf, unpack } from "./scene/prepare.ts";
 export {
   WorldSession,
   type DataSource,

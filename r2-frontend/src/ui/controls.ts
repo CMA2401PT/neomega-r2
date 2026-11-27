@@ -19,10 +19,10 @@ export class FlightControls {
   readonly camera: Camera;
   readonly canvas: HTMLCanvasElement;
   private held = new Map<string, Move>();
-  private drag: { id: number; x: number; y: number } | null = null;
+  private drag: { id: number; x: number; y: number; movement: number } | null = null;
   private events = new AbortController();
 
-  constructor(canvas: HTMLCanvasElement, camera: Camera) {
+  constructor(canvas: HTMLCanvasElement, camera: Camera, onTap?: (event: PointerEvent) => void) {
     this.camera = camera;
     this.canvas = canvas;
     const signal = this.events.signal;
@@ -47,12 +47,13 @@ export class FlightControls {
       if (!this.enabled || this.drag || (event.button !== 0 && event.button !== 2)) return;
       canvas.focus();
       if (this.paused) return;
-      this.drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      this.drag = { id: event.pointerId, x: event.clientX, y: event.clientY, movement:0 };
       canvas.setPointerCapture(event.pointerId);
     }, { signal });
     canvas.addEventListener("pointermove", (event) => {
       const drag = this.drag;
       if (!drag || drag.id !== event.pointerId || this.paused) return;
+      drag.movement += Math.hypot(event.clientX-drag.x,event.clientY-drag.y);
       camera.yaw += (event.clientX - drag.x) * 0.004;
       camera.pitch = Math.max(
         -Math.PI / 2 + 0.01,
@@ -62,7 +63,10 @@ export class FlightControls {
       drag.y = event.clientY;
     }, { signal });
     const release = (event: PointerEvent) => {
-      if (this.drag?.id === event.pointerId) this.drag = null;
+      if (this.drag?.id !== event.pointerId) return;
+      const tap = event.type === "pointerup" && event.button === 0 && this.drag.movement < 4 && !this.paused;
+      this.drag = null;
+      if (tap) onTap?.(event);
     };
     canvas.addEventListener("pointerup", release, { signal });
     canvas.addEventListener("pointercancel", release, { signal });

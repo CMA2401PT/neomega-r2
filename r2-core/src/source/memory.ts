@@ -1,6 +1,6 @@
 import { AIR, blockHash } from "./hash.ts";
 import type { DataSource, WantChange, WorldSink } from "../session/session.ts";
-import type { ObjectDescriptor } from "../contracts.ts";
+import type { BlockEntity, ObjectDescriptor, Vec3 } from "../contracts.ts";
 
 /** 一个子区块（subchunk）的方块哈希：4096 项，第 i 项是格子 x = i >> 8, z = (i >> 4) & 15, y = i & 15。0 表示空气。 */
 export interface SectionBlocks {
@@ -45,6 +45,7 @@ const regionOf = (x: number, z: number) => `${Math.floor(x / 128)}/${Math.floor(
 export class MemoryWorld {
   private sections = new Map<string, Uint32Array>();
   private regions = new Map<string, Set<string>>();
+  private entities = new Map<string, BlockEntity>();
   private descriptors = new Map<string, ObjectDescriptor>();
   private hashes = new Map<string, number>();
   private changed: Changes = { blocks: new Set(), objects: new Set() };
@@ -84,6 +85,14 @@ export class MemoryWorld {
     return section ? section[((x & 15) << 8) | ((z & 15) << 4) | (y & 15)] : 0;
   }
 
+  /** 设置该格的完整 SNBT；传 null 删除方块实体。改动通过 commit 通知近景订阅。 */
+  setBlockEntity(position: Vec3, snbt: string | null): void {
+    const key = position.join("/");
+    if (snbt === null) this.entities.delete(key);
+    else this.entities.set(key,{ position:[...position], snbt });
+    this.changed.objects.add(regionOf(position[0],position[2]));
+  }
+
   /** 加入或替换特殊对象（同一 key 替换）；对象按位置所在的区块交给近景。 */
   addObject(descriptor: ObjectDescriptor): void {
     const old = this.descriptors.get(descriptor.key);
@@ -106,6 +115,8 @@ export class MemoryWorld {
       this.changed.objects.add(regionOf(descriptor.position[0], descriptor.position[2]));
     this.sections.clear();
     this.regions.clear();
+    for (const {position} of this.entities.values()) this.changed.objects.add(regionOf(position[0],position[2]));
+    this.entities.clear();
     this.descriptors.clear();
   }
 
@@ -155,8 +166,15 @@ export class MemoryWorld {
 
   /** 区域 (x, z) 内、以区块坐标 center 为圆心 radius 区块以内的对象；竖直方向最多取 radius + 1 个 section。 */
   objects(x: number, z: number, center: number[], radius: number): ObjectDescriptor[] {
+    return this.inRange(this.descriptors.values(),x,z,center,radius);
+  }
+  /** 查询范围与自定义活动对象相同，可同时提交二者。 */
+  blockEntities(x: number, z: number, center: number[], radius: number): BlockEntity[] {
+    return this.inRange(this.entities.values(),x,z,center,radius);
+  }
+  private inRange<T extends {position: Vec3}>(entries: Iterable<T>, x: number, z: number, center: number[], radius: number): T[] {
     const vertical = Math.min(radius + 1, 12);
-    return [...this.descriptors.values()].filter(({ position }) => {
+    return [...entries].filter(({ position }) => {
       const [cx, cy, cz] = position.map((v) => Math.floor(v / 16));
       return (
         Math.floor(cx / 8) === x &&
@@ -207,7 +225,10 @@ export function memorySource(world: MemoryWorld): DataSource {
     for (const key of pendingObjects) {
       const [x, z] = key.split("/").map(Number),
         want = objects.get(key);
-      if (want) sink.objects(x, z, world.objects(x, z, want.center, want.radius));
+      if (want) {
+        sink.objects(x, z, world.objects(x, z, want.center, want.radius));
+        sink.blockEntities?.(x, z, world.blockEntities(x, z, want.center, want.radius));
+      }
     }
     pending.clear();
     pendingObjects.clear();

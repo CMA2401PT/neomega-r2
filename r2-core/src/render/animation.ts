@@ -11,7 +11,7 @@ export function hasVisibleAnimation(
     dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
     halfHeight = cameraSpan(camera) / 2,
     halfWidth = (halfHeight * width) / height;
-  return objects.references().some(({ bounds: [low, high] }) => {
+  return objects.references(true).some(({ bounds: [low, high] }) => {
     const center = low.map((v, i) => (v + high[i]) / 2 - camera.position[i]),
       radius = Math.hypot(...high.map((v, i) => v - low[i])) / 2,
       depth = dot(center, forward);

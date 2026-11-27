@@ -30,6 +30,12 @@ export interface PickResult {
   normal: number[];
 }
 
+/** 近景数据源提交的方块实体，位置是整格世界坐标。 */
+export interface BlockEntity {
+  position: Vec3;
+  snbt: string;
+}
+
 /** 特殊对象描述；data 由同类型工厂解释。 */
 export interface ObjectDescriptor {
   key: string;
@@ -42,13 +48,15 @@ export interface ObjectDescriptor {
 /** 可共享的图片，或处理器生成的私有像素。 */
 export type ObjectTexture =
   | { url: string; pixels?: undefined; width?: undefined; height?: undefined }
-  | { url?: undefined; pixels: Uint8Array; width: number; height: number };
+  | { url?: undefined; pixels: Uint8Array; width: number; height: number; cacheKey?: string };
 
 /** 盒体局部范围及六面的像素 UV 矩形。面顺序为 -X、+X、-Y、+Y、-Z、+Z。 */
 export interface ObjectPart {
   minimum: number[];
   maximum: number[];
   faces: number[][];
+  /** 逐面自亮掩码，告示牌正背面可以分别使用发光墨囊。 */
+  unlitFaces?: number;
 }
 
 /** 正交旋转轴、相对拥有者的位移和统一缩放。 */
@@ -60,6 +68,8 @@ export interface ObjectPose {
 
 /** 对象工厂产物；bounds 必须覆盖整个动画，相对 descriptor.position。 */
 export interface ObjectRecipe {
+  /** 固定位姿设为 false，静止画面可以停绘和累积。默认随时间更新。 */
+  animated?: boolean;
   texture: ObjectTexture;
   bounds: number[][];
   parts: ObjectPart[];

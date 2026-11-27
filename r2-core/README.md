@@ -75,7 +75,7 @@ renderer.render({ position: [8, 6, 20], yaw: 0, pitch: -0.4 }, { width: 1280, he
 ### 区域编码与活动对象
 
 - 自定义数据源可使用 `encodeRegion` 与 `blockHash` 编码 16×16×16 子区块（XZY 排列），实现见 [src/source/memory.ts](src/source/memory.ts) 与 [src/source/hash.ts](src/source/hash.ts)。
-- 附魔书等活动部件由数据源生成 `ObjectDescriptor`，前端通过 `ObjectRegistry.register(kind, factory)` 注册外观，参考 [src/effects/enchanting-book.ts](src/effects/enchanting-book.ts)。
+- 浏览器前端把需要绘制的部件转换为 `ObjectDescriptor`。核心通过 `ObjectRegistry` 找到对应工厂，接收几何、贴图和位姿。主视图拾取时传入 `objects: true`，可取得跨格部件所属方块的坐标。内置外观见 [前端特殊方块](../r2-frontend/src/special-blocks/)。
 
 ## 构建与测试
 

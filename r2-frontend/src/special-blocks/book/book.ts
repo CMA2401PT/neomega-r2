@@ -1,5 +1,6 @@
+import { bookURL } from "./assets.ts";
 // 附魔书只提供七个盒体及其运动；格子登记、贴图和 GPU 上传由公共对象层负责。
-import type { ObjectRecipe } from "../contracts.ts";
+import type { ObjectRecipe } from "neomega-r2-core";
 
 const rotateY = (v: number[], a: number): number[] => [
   Math.cos(a) * v[0] + Math.sin(a) * v[2],
@@ -11,7 +12,7 @@ const rotateZ = (v: number[], a: number): number[] => [
   Math.sin(a) * v[0] + Math.cos(a) * v[1],
   v[2],
 ];
-export function enchantingBook(textureURL: string): ObjectRecipe {
+export function enchantingBook(): ObjectRecipe {
   const definitions: number[][][] = [
     [
       [-6, -5, -0.005],
@@ -50,7 +51,7 @@ export function enchantingBook(textureURL: string): ObjectRecipe {
     ],
   ];
   return {
-    texture: { url: textureURL },
+    texture: { url: bookURL },
     bounds: [
       [-0.1, 0.75, -0.1],
       [1.1, 1.85, 1.1],
@@ -82,8 +83,7 @@ export function enchantingBook(textureURL: string): ObjectRecipe {
           openness * (1 - 2 * ((time * 0.35) % 1)),
           openness * (1 - 2 * ((time * 0.35 + 0.5) % 1)),
         ][i],
-        pivot =
-          i < 2 ? [0, 0, i === 0 ? -1 : 1] : i > 2 ? [slide, 0, 0] : [0, 0, 0];
+        pivot = i < 2 ? [0, 0, i === 0 ? -1 : 1] : i > 2 ? [slide, 0, 0] : [0, 0, 0];
       const transform = (v: number[]) =>
           rotateY(rotateZ(rotateY(v, angle), (80 * Math.PI) / 180), time * 0.3),
         position = rotateY(

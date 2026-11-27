@@ -5,7 +5,8 @@
 ## 用法
 
 ```js
-import { createRenderer, ObjectRegistry, WorldSession } from "./r2-core.js";
+import { createRenderer } from "./r2-core.js";
+import { blockWorldSession } from "./r2-frontend.js";
 import { r2linkSource } from "./r2-link.js";
 
 const renderer = await createRenderer({ assets: "./assets/" });
@@ -13,9 +14,7 @@ const source = r2linkSource("ws://127.0.0.1:2414/r2link", {
   onCamera: (camera) => { /* 更新相机 */ },
 });
 const { scene, camera } = await source.welcome;
-const session = new WorldSession(renderer, source, {
-  registry: new ObjectRegistry(),
-});
+const session = blockWorldSession(renderer, source);
 ```
 
 - 断线后保留已显示内容并按 `retry` 间隔（默认 3000 ms）自动重连，重连握手后重发完整订阅；首次连接失败不重试。

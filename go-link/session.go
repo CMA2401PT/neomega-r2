@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-
-	"neomega-r2link/object"
 )
 
 // Source 提供区域方块。Region 可能被并发调用；ctx 在区域不再需要或连接结束时取消。
@@ -15,10 +13,10 @@ type Source interface {
 	Region(ctx context.Context, x, z int) (R2Region, error)
 }
 
-// ObjectSource 是可选接口：提供区域内、以区块坐标 center 为圆心 radius 区块以内的特殊对象。
+// BlockEntitySource 是可选接口：提供区域内、以区块坐标 center 为圆心 radius 区块以内的方块实体。
 // 竖直方向通常只取 center 上下 min(radius+1, 12) 个 section。不实现时，会话对每个请求回复空列表。
-type ObjectSource interface {
-	Objects(ctx context.Context, x, z int, center [3]int, radius int) ([]object.Descriptor, error)
+type BlockEntitySource interface {
+	BlockEntities(ctx context.Context, x, z int, center [3]int, radius int) ([]BlockEntity, error)
 }
 
 // ChunkSource 是可选接口：列出存在的区块，地图据此显示世界分布。
@@ -30,32 +28,32 @@ type ChunkSource interface {
 type Options struct {
 	Scene  Scene
 	Camera *Camera
-	// Workers 是同时读取的区域数，默认 4；对象一次读一个区域。
+	// Workers 是同时读取的区域数，默认 4；方块实体一次读一个区域。
 	Workers int
 }
 
-// Session 服务一条浏览器连接：记录浏览器需要的区域和对象，离远景中心近的先读，
+// Session 服务一条浏览器连接：记录浏览器需要的区域和方块实体，离远景中心近的先读，
 // 不再需要的读取立即取消。数据变化时调用 Update 或 Refresh，仍被需要的部分会重新发送。
 type Session struct {
 	conn    *Conn
 	source  Source
 	options Options
 
-	mu       sync.Mutex
-	wake     *sync.Cond
-	closed   bool
-	center   [2]float64
-	regions  map[RegionPos]bool
-	pending  map[RegionPos]bool
-	active   map[RegionPos]*job
-	objects  map[RegionPos]ObjectWant
-	objPend  map[RegionPos]bool
-	objectOn *objectJob
+	mu            sync.Mutex
+	wake          *sync.Cond
+	closed        bool
+	center        [2]float64
+	regions       map[RegionPos]bool
+	pending       map[RegionPos]bool
+	active        map[RegionPos]*job
+	entityWants   map[RegionPos]BlockEntityWant
+	entityPending map[RegionPos]bool
+	entityOn      *entityJob
 }
 
 type job struct{ cancel context.CancelFunc }
 
-type objectJob struct {
+type entityJob struct {
 	key    RegionPos
 	cancel context.CancelFunc
 }
@@ -68,7 +66,7 @@ func NewSession(conn *Conn, source Source, options Options) *Session {
 	s := &Session{
 		conn: conn, source: source, options: options,
 		regions: map[RegionPos]bool{}, pending: map[RegionPos]bool{}, active: map[RegionPos]*job{},
-		objects: map[RegionPos]ObjectWant{}, objPend: map[RegionPos]bool{},
+		entityWants: map[RegionPos]BlockEntityWant{}, entityPending: map[RegionPos]bool{},
 	}
 	s.wake = sync.NewCond(&s.mu)
 	return s
@@ -105,19 +103,19 @@ func (s *Session) Run(ctx context.Context) error {
 	for range s.options.Workers {
 		workers.Go(func() { s.regionWorker(ctx) })
 	}
-	objects, ok := s.source.(ObjectSource)
+	entities, ok := s.source.(BlockEntitySource)
 	if !ok {
-		objects = noObjects{}
+		entities = noBlockEntities{}
 	}
-	workers.Go(func() { s.objectWorker(ctx, objects) })
+	workers.Go(func() { s.entityWorker(ctx, entities) })
 	defer func() {
 		s.mu.Lock()
 		s.closed = true
 		for _, job := range s.active {
 			job.cancel()
 		}
-		if s.objectOn != nil {
-			s.objectOn.cancel()
+		if s.entityOn != nil {
+			s.entityOn.cancel()
 		}
 		s.wake.Broadcast()
 		s.mu.Unlock()
@@ -146,7 +144,7 @@ func (s *Session) Run(ctx context.Context) error {
 	}
 }
 
-// apply 更新需要的集合：移除的取消在途读取，新增的排队；对象圆心变化时重读。
+// apply 更新需要的集合：移除的取消在途读取，新增的排队；近景订阅圆心变化时重读。
 func (s *Session) apply(want Want) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,21 +161,21 @@ func (s *Session) apply(want Want) {
 		s.regions[key] = true
 		s.pending[key] = true
 	}
-	for _, key := range want.Objects.Remove {
-		delete(s.objects, key)
-		delete(s.objPend, key)
-		if s.objectOn != nil && s.objectOn.key == key {
-			s.objectOn.cancel()
-			s.objectOn = nil
+	for _, key := range want.BlockEntities.Remove {
+		delete(s.entityWants, key)
+		delete(s.entityPending, key)
+		if s.entityOn != nil && s.entityOn.key == key {
+			s.entityOn.cancel()
+			s.entityOn = nil
 		}
 	}
-	for _, value := range want.Objects.Add {
+	for _, value := range want.BlockEntities.Add {
 		key := RegionPos{value.X, value.Z}
-		s.objects[key] = value
-		s.objPend[key] = true
-		if s.objectOn != nil && s.objectOn.key == key {
-			s.objectOn.cancel()
-			s.objectOn = nil
+		s.entityWants[key] = value
+		s.entityPending[key] = true
+		if s.entityOn != nil && s.entityOn.key == key {
+			s.entityOn.cancel()
+			s.entityOn = nil
 		}
 	}
 	s.wake.Broadcast()
@@ -194,34 +192,34 @@ func (s *Session) Update(x, z int) {
 	}
 }
 
-// UpdateObjects 表示区域 (x, z) 的特殊对象变了；浏览器仍需要时重新读取并发送。
-func (s *Session) UpdateObjects(x, z int) {
+// UpdateBlockEntities 表示区域 (x, z) 的方块实体变了；浏览器仍需要时重新读取并发送。
+func (s *Session) UpdateBlockEntities(x, z int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := RegionPos{x, z}
-	if _, ok := s.objects[key]; ok {
-		s.objPend[key] = true
-		if s.objectOn != nil && s.objectOn.key == key {
-			s.objectOn.cancel()
-			s.objectOn = nil
+	if _, ok := s.entityWants[key]; ok {
+		s.entityPending[key] = true
+		if s.entityOn != nil && s.entityOn.key == key {
+			s.entityOn.cancel()
+			s.entityOn = nil
 		}
 		s.wake.Broadcast()
 	}
 }
 
-// Refresh 重新发送所有仍被需要的区域与对象，用于整个世界换了内容。
+// Refresh 重新发送所有仍被需要的区域与方块实体，用于整个世界换了内容。
 func (s *Session) Refresh() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key := range s.regions {
 		s.pending[key] = true
 	}
-	for key := range s.objects {
-		s.objPend[key] = true
+	for key := range s.entityWants {
+		s.entityPending[key] = true
 	}
-	if s.objectOn != nil {
-		s.objectOn.cancel()
-		s.objectOn = nil
+	if s.entityOn != nil {
+		s.entityOn.cancel()
+		s.entityOn = nil
 	}
 	s.wake.Broadcast()
 }
@@ -304,61 +302,61 @@ func (s *Session) regionWorker(ctx context.Context) {
 	}
 }
 
-func (s *Session) nextObjects() (ObjectWant, bool) {
-	best, found, distance := ObjectWant{}, false, math.Inf(1)
-	for key := range s.objPend {
+func (s *Session) nextBlockEntities() (BlockEntityWant, bool) {
+	best, found, distance := BlockEntityWant{}, false, math.Inf(1)
+	for key := range s.entityPending {
 		if d := s.distance(key); d < distance {
-			best, found, distance = s.objects[key], true, d
+			best, found, distance = s.entityWants[key], true, d
 		}
 	}
 	return best, found
 }
 
-// noObjects 让不提供特殊对象的数据源也回复 objects，浏览器据此结束近景等待。
-type noObjects struct{}
+// noBlockEntities 让不提供方块实体的数据源也回复 blockEntities，浏览器据此结束近景等待。
+type noBlockEntities struct{}
 
-func (noObjects) Objects(context.Context, int, int, [3]int, int) ([]object.Descriptor, error) {
+func (noBlockEntities) BlockEntities(context.Context, int, int, [3]int, int) ([]BlockEntity, error) {
 	return nil, nil
 }
 
-func (s *Session) objectWorker(ctx context.Context, source ObjectSource) {
+func (s *Session) entityWorker(ctx context.Context, source BlockEntitySource) {
 	for {
 		s.mu.Lock()
-		want, ok := s.nextObjects()
+		want, ok := s.nextBlockEntities()
 		for !s.closed && !ok {
 			s.wake.Wait()
-			want, ok = s.nextObjects()
+			want, ok = s.nextBlockEntities()
 		}
 		if s.closed {
 			s.mu.Unlock()
 			return
 		}
 		key := RegionPos{want.X, want.Z}
-		delete(s.objPend, key)
+		delete(s.entityPending, key)
 		jobCtx, cancel := context.WithCancel(ctx)
-		current := &objectJob{key: key, cancel: cancel}
-		s.objectOn = current
+		current := &entityJob{key: key, cancel: cancel}
+		s.entityOn = current
 		s.mu.Unlock()
 
-		descriptors, err := source.Objects(jobCtx, want.X, want.Z, want.Center, want.Radius)
+		entries, err := source.BlockEntities(jobCtx, want.X, want.Z, want.Center, want.Radius)
 
 		s.mu.Lock()
-		valid := s.objectOn == current && jobCtx.Err() == nil
-		if s.objectOn == current {
-			s.objectOn = nil
+		valid := s.entityOn == current && jobCtx.Err() == nil
+		if s.entityOn == current {
+			s.entityOn = nil
 		}
 		s.mu.Unlock()
 		cancel()
 		if !valid {
 			continue
 		}
-		if descriptors == nil {
-			descriptors = []object.Descriptor{}
+		if entries == nil {
+			entries = []BlockEntity{}
 		}
 		if err != nil {
 			err = s.conn.Send(ctx, Failed{Type: "failed", X: key.X, Z: key.Z, Message: err.Error()}, nil)
 		} else {
-			err = s.conn.Send(ctx, Objects{Type: "objects", X: key.X, Z: key.Z, Descriptors: descriptors}, nil)
+			err = s.conn.Send(ctx, BlockEntities{Type: "blockEntities", X: key.X, Z: key.Z, Center: want.Center, Radius: want.Radius, Entries: entries}, nil)
 		}
 		if err != nil {
 			s.conn.CloseNow()

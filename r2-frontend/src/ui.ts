@@ -7,3 +7,4 @@ export { createView, TIER_NAMES } from "./ui/view.ts";
 export { windowResolution } from "./ui/presets.ts";
 export type { ViewOptions, ViewSettings, ViewStats } from "./ui/types.ts";
 export type { Frontend, MountOptions, CameraPosition, Scene } from "./ui/frontend-types.ts";
+export { blockWorldSession } from "./special-blocks/source.ts";

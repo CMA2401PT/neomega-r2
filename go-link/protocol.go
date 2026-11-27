@@ -1,12 +1,10 @@
 // Package r2link 是 R2 浏览器与世界数据源之间的协议：浏览器作为客户端连接数据源的 WebSocket，
-// 按世界会话的需要订阅区域和近景对象，数据源回送压缩区域、对象描述和控制消息。
+// 按世界会话的需要订阅区域和近景方块实体，数据源回送压缩区域、原始 SNBT和控制消息。
 // 消息格式见 README；Go 数据源用 Session 实现订阅、排队、取消与重发。
 package r2link
 
-import "neomega-r2link/object"
-
 // Version 是当前协议版本，hello 与 welcome 都要带上。
-const Version = 2
+const Version = 3
 
 // Scene 描述数据源提供的世界，显示在界面上。
 type Scene struct {
@@ -27,8 +25,8 @@ type RegionPos struct {
 	Z int `json:"z"`
 }
 
-// ObjectWant 要求区域内、以区块坐标 Center 为圆心 Radius 区块以内的特殊对象。
-type ObjectWant struct {
+// BlockEntityWant 要求区域内、以区块坐标 Center 为圆心 Radius 区块以内的方块实体。
+type BlockEntityWant struct {
 	X      int    `json:"x"`
 	Z      int    `json:"z"`
 	Center [3]int `json:"center"`
@@ -51,8 +49,8 @@ type Welcome struct {
 	Camera   *Camera `json:"camera,omitempty"`
 }
 
-// Want 是浏览器需要的区域与近景对象的增减；数据源据此维护需要的集合。
-// Objects.Add 里已经需要的区域再次出现，表示圆心或半径变了，需要重新提供。
+// Want 是浏览器需要的区域与近景方块实体的增减；数据源据此维护需要的集合。
+// BlockEntities.Add 里已经需要的区域再次出现，表示圆心或半径变了，需要重新提供。
 type Want struct {
 	Type    string     `json:"type"`
 	Center  [2]float64 `json:"center"`
@@ -60,10 +58,10 @@ type Want struct {
 		Add    []RegionPos `json:"add"`
 		Remove []RegionPos `json:"remove"`
 	} `json:"regions"`
-	Objects struct {
-		Add    []ObjectWant `json:"add"`
-		Remove []RegionPos  `json:"remove"`
-	} `json:"objects"`
+	BlockEntities struct {
+		Add    []BlockEntityWant `json:"add"`
+		Remove []RegionPos       `json:"remove"`
+	} `json:"blockEntities"`
 }
 
 // RegionData 提交一个区域的方块，压缩数据在消息尾部；尾部为空表示区域没有方块。
@@ -75,12 +73,20 @@ type RegionData struct {
 	ClippedSections int    `json:"clippedSections,omitempty"`
 }
 
-// Objects 提交区域内当前近景范围的特殊对象，替换这个区域之前的对象。
-type Objects struct {
-	Type        string              `json:"type"`
-	X           int                 `json:"x"`
-	Z           int                 `json:"z"`
-	Descriptors []object.Descriptor `json:"descriptors"`
+// BlockEntity 保留方块实体的位置和完整 SNBT。
+type BlockEntity struct {
+	Position [3]int `json:"position"`
+	SNBT     string `json:"snbt"`
+}
+
+// BlockEntities 是一次近景订阅覆盖范围内的完整方块实体列表。
+type BlockEntities struct {
+	Type    string        `json:"type"`
+	X       int           `json:"x"`
+	Z       int           `json:"z"`
+	Center  [3]int        `json:"center"`
+	Radius  int           `json:"radius"`
+	Entries []BlockEntity `json:"entries"`
 }
 
 // Failed 表示区域无法提供；浏览器把它标为失败，直到再次需要或收到新数据。

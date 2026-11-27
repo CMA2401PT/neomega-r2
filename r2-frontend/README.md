@@ -9,13 +9,18 @@
 
 ## 运行本地演示
 
-先按[浏览器发布说明](../scripts/release-browser/README.md)生成 web 与 standalone 两套文件，再在仓库根目录运行：
+首次运行时，在 neomega-r2 根目录安装依赖并生成浏览器材质。
 
 ```sh
+npm ci
+python3 assets-utils/resourcegen/generate.py --java 26.3 --topic browser-materials
 npm run demo
 ```
 
-打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。其他示例页：
+之后运行 `npm run demo` 即可。启动命令从当前源码构建页面，并读取本地生成的材质。
+
+打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。其他示例页：
+
 - 内存世界单页接入：<http://127.0.0.1:2415/release/standalone.html>（源码 [examples/standalone.html](examples/standalone.html)）
 - 按需 `DataSource` 接入：<http://127.0.0.1:2415/release/datasource.html>（源码 [examples/datasource.html](examples/datasource.html)）
 - 离屏核心 RGB + 深度 + 拾取：<http://127.0.0.1:2415/release/color-depth.html>（源码 [../r2-core/examples/color-depth.html](../r2-core/examples/color-depth.html)）
@@ -93,6 +98,14 @@ const blob = await compositor.renderToPNG(renderer.frame!, {
 3. 使用 `createRenderer(...)` 与 `createView({ renderer, camera, settings, startup, scene, ... })` 驱动帧循环。
 
 参考实现见 [demo/main.ts](demo/main.ts) 与 [apps/neomega-viewer-r2/web/app.ts](../../apps/neomega-viewer-r2/web/app.ts)。
+
+## 近景方块与 SNBT
+
+主视图用方块状态选择基础模型。靠近方块后，附魔台出现活动书；陶罐按四面陶片选择纹样，旗帜按图案顺序染色，告示牌按正背面排字。移出近景后只显示基础模型。在主视图单击带有方块实体的格子，可查看完整 SNBT，包括容器物品和命令。
+
+`mount()` 已接入上述行为。自行组装 UI 的宿主用 `blockWorldSession(renderer, source)` 创建会话。自定义数据源通过 `sink.region` 提交压缩的状态哈希，通过 `sink.blockEntities?.(x, z, entries)` 提交近景实体。每项含有世界坐标 `position` 和 SNBT 原文 `snbt`。内存场景可以调用 `world.setBlockEntity(position, snbt)` 并 `commit()`，传入 `null` 会清除该实体。
+
+具体方块的图案、字模和动画随 [special-blocks](src/special-blocks/) 分发。合成在浏览器主线程完成，准备线程登记部件覆盖的格子，GPU 完成射线求交。告示牌字模取自 Java 默认位图字体和 GNU Unifont 16.0.01，来源和许可见 [素材声明](src/special-blocks/NOTICE.md)。
 
 ## 宿主选择材质
 

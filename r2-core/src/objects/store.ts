@@ -56,7 +56,7 @@ export class ObjectStore {
     this.textureBytes = this.data.byteLength + SIDE * SIDE * 4;
   }
   async image(source: ObjectTexture, key: string): Promise<AtlasImage> {
-    const name = source.url || key;
+    const name = source.url ?? source.cacheKey ?? key;
     let cached = this.images.get(name);
     if (cached) {
       cached.refs++;
@@ -91,41 +91,57 @@ export class ObjectStore {
   }
   /** 更新拥有者区域的实例，返回候选是否改变；无变化时宿主不必重建静态区域。 */
   async setRegion(key: string, descriptors: ObjectDescriptor[], registry: ObjectRegistry): Promise<boolean> {
-    const previous = this.regions.get(key) || new Set<string>(),
-      next = new Set<string>();
-    for (const descriptor of descriptors) {
-      next.add(descriptor.key);
-      if (this.objects.has(descriptor.key)) continue;
-      const recipe = await registry.create(descriptor);
-      if (this.disposed) throw new DOMException("对象来源已关闭", "AbortError");
-      const image = await this.image(recipe.texture, descriptor.key),
-        slots: StoredObject["slots"] = [];
-      for (const part of recipe.parts) {
-        const slot = this.free.pop();
-        if (slot === undefined) throw Error("特殊对象部件空间不足");
-        const generation = ++this.generations[slot];
-        slots.push({
-          slot,
-          id: (0x80000000 | (generation << 12) | slot) >>> 0,
-        });
-        this.high = Math.max(this.high, slot + 1);
-        const at = slot * STRIDE;
-        this.data.set([...part.minimum, generation], at + 16);
-        this.data.set([...part.maximum, 0], at + 20);
-        for (let face = 0; face < 6; face++) {
-          const uv = part.faces[face];
-          this.data.set(
-            [(image.x * TILE + uv[0]) / SIDE, (image.y * TILE + uv[1]) / SIDE, uv[2] / SIDE, uv[3] / SIDE],
-            at + 24 + face * 4,
-          );
-        }
-      }
-      this.objects.set(descriptor.key, { descriptor, recipe, image, slots });
-      this.version++;
+    const previous = this.regions.get(key) ?? new Set<string>();
+    const wanted = new Set(descriptors.map(d => d.key));
+    const changed = previous.size !== wanted.size || [...previous].some(name => !wanted.has(name));
+    if (!changed) return false;
+    // 先释放已撤销的对象，使新文字能复用旧贴图的位置。
+    const installed = new Set<string>();
+    this.regions.set(key, installed);
+    for (const name of previous) {
+      if (wanted.has(name)) installed.add(name);
+      else this.remove(name);
     }
-    for (const name of previous) if (!next.has(name)) this.remove(name);
-    this.regions.set(key, next);
-    return previous.size !== next.size || [...previous].some((name) => !next.has(name));
+    try {
+      for (const descriptor of descriptors) {
+        if (installed.has(descriptor.key)) continue;
+        const recipe = await registry.create(descriptor);
+        if (this.regions.get(key) !== installed) throw new DOMException("区域已经卸载", "AbortError");
+        if (recipe.parts.length > this.free.length) throw Error("特殊对象部件空间不足");
+        const image = await this.image(recipe.texture, descriptor.key);
+        if (this.regions.get(key) !== installed) {
+          this.releaseImage(image);
+          throw new DOMException("区域已经卸载", "AbortError");
+        }
+        const slots: StoredObject["slots"] = [];
+        for (const part of recipe.parts) {
+          const slot = this.free.pop()!;
+          const generation = ++this.generations[slot];
+          slots.push({
+            slot,
+            id: (0x80000000 | (generation << 12) | slot) >>> 0,
+          });
+          this.high = Math.max(this.high, slot + 1);
+          const at = slot * STRIDE;
+          this.data.set([...part.minimum, generation], at + 16);
+          this.data.set([...part.maximum, part.unlitFaces ?? 0], at + 20);
+          for (let face = 0; face < 6; face++) {
+            const uv = part.faces[face];
+            this.data.set(
+              [(image.x * TILE + uv[0]) / SIDE, (image.y * TILE + uv[1]) / SIDE, uv[2] / SIDE, uv[3] / SIDE],
+              at + 24 + face * 4,
+            );
+          }
+        }
+        this.objects.set(descriptor.key, { descriptor, recipe, image, slots });
+        installed.add(descriptor.key);
+        this.version++;
+      }
+    } catch (error) {
+      if (this.regions.get(key) === installed) this.removeRegion(key);
+      throw error;
+    }
+    return true;
   }
   remove(name: string): void {
     const object = this.objects.get(name);
@@ -134,14 +150,16 @@ export class ObjectStore {
       this.data[slot * STRIDE + 19] = 0;
       this.free.push(slot);
     }
-    const image = object.image;
+    this.releaseImage(object.image);
+    this.objects.delete(name);
+    this.version++;
+  }
+  private releaseImage(image: AtlasImage): void {
     if (--image.refs === 0) {
       for (let y = 0; y < image.h; y++)
         for (let x = 0; x < image.w; x++) this.tiles[image.x + x + 32 * (image.y + y)] = 0;
       this.images.delete(image.name);
     }
-    this.objects.delete(name);
-    this.version++;
   }
   removeRegion(key: string): boolean {
     const changed = (this.regions.get(key)?.size || 0) > 0;
@@ -149,14 +167,16 @@ export class ObjectStore {
     this.regions.delete(key);
     return changed;
   }
-  references(): ObjectReference[] {
-    return [...this.objects.values()].map(({ descriptor, recipe, slots }) => ({
-      key: descriptor.key,
-      owner: descriptor.position,
-      replace: descriptor.replace || false,
-      bounds: recipe.bounds.map((p) => p.map((v, i) => v + descriptor.position[i])),
-      ids: slots.map((v) => v.id),
-    }));
+  references(animatedOnly = false): ObjectReference[] {
+    return [...this.objects.values()]
+      .filter(({ recipe }) => !animatedOnly || recipe.animated !== false)
+      .map(({ descriptor, recipe, slots }) => ({
+        key: descriptor.key,
+        owner: descriptor.position,
+        replace: descriptor.replace || false,
+        bounds: recipe.bounds.map((p) => p.map((v, i) => v + descriptor.position[i])),
+        ids: slots.map((v) => v.id),
+      }));
   }
   update(time: number, origin: number[]): void {
     for (const { descriptor, recipe, slots } of this.objects.values())

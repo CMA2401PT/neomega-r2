@@ -23,6 +23,6 @@ function save(filename, entries) {
 }
 save("default-materials.zip", [
   ...files,
-  ...["states.bin", "quad-references.bin", "book.png"].map((name) => [name, read(name)]),
+  ...["states.bin", "quad-references.bin"].map((name) => [name, read(name)]),
 ]);
 save("material-info.zip", Object.entries(recipe));
