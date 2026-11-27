@@ -1,7 +1,7 @@
 import type { TriangleMesh, Vec3 } from "neomega-r2-core";
 import { isCompound, type Tag } from "../libs/snbt.ts";
 import catalog from "./catalog.json" with { type: "json" };
-import { shapesURL } from "./assets.ts";
+import type { MinecraftAssets } from "../contracts.ts";
 
 interface ItemModel {
   shape: number;
@@ -16,7 +16,7 @@ interface Quad {
 }
 
 const models: Record<string, ItemModel> = catalog.items;
-let shapes: Promise<Quad[][]> | undefined;
+const shapes = new WeakMap<MinecraftAssets, Promise<Quad[][]>>();
 
 /** 根据 Java 物品栈选择固定展示模型。显示名称、数量和附魔不影响选中的几何。 */
 export function displayedModel(stack: Tag | undefined): string | undefined {
@@ -37,13 +37,14 @@ export async function appendItemModel(
   modelId: string,
   place: (position: Vec3) => Vec3,
   unlit: boolean,
+  assets: MinecraftAssets,
 ): Promise<void> {
-  // shapesURL 指向随代码内嵌的 gzip 数据。不同物品可以共用形状，只替换面对应的图块。
-  shapes ??= fetch(shapesURL).then(response =>
+  // 形状表按素材集合惰性解压一次，不同物品复用形状，只替换面对应的图块。
+  if (!shapes.has(assets)) shapes.set(assets, fetch(assets.shapes).then(response =>
     new Response(response.body!.pipeThrough(new DecompressionStream("gzip"))).json() as Promise<Quad[][]>
-  );
+  ));
   const { shape, tiles } = models[modelId];
-  for (const face of (await shapes)[shape]) {
+  for (const face of (await shapes.get(assets)!)[shape]) {
     const first = mesh.vertices.length;
     const tile = tiles[face.material];
     const x = (tile % catalog.columns) * 16, y = Math.floor(tile / catalog.columns) * 16;

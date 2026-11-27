@@ -207,7 +207,7 @@ func TestSessionRejectsOldVersion(t *testing.T) {
 	send(t, conn, Hello{Type: "hello", Protocol: "r2link", Version: 2})
 	var message Error
 	receive(t, conn, &message)
-	if message.Type != "error" || !strings.Contains(message.Message, "v3") {
+	if message.Type != "error" || !strings.Contains(message.Message, "v4") {
 		t.Fatalf("%+v", message)
 	}
 }

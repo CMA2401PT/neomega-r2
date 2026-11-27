@@ -4,14 +4,15 @@
   "type": "module",
   "workspaces": [
     "r2-core",
+    "r2-mc",
     "r2-link",
     "assets-utils",
     "r2-frontend"
   ],
   "scripts": {
-    "build": "npm -w r2-core run build && npm -w r2-link run build && npm -w assets-utils run build && npm -w r2-frontend run build",
-    "check": "npm -w r2-core run check && npm -w r2-link run check && npm -w assets-utils run check && npm -w r2-frontend run check",
-    "test": "npm -w r2-core test && npm -w r2-link test && npm -w assets-utils test && npm -w r2-frontend test",
+    "build": "npm -w r2-core run build && npm -w r2-mc run build && npm -w r2-link run build && npm -w assets-utils run build && npm -w r2-frontend run build",
+    "check": "npm -w r2-core run check && npm -w r2-mc run check && npm -w r2-link run check && npm -w assets-utils run check && npm -w r2-frontend run check",
+    "test": "npm -w r2-core test && npm -w r2-mc test && npm -w r2-link test && npm -w assets-utils test && npm -w r2-frontend test",
     "predemo": "node scripts/release-browser/prepare-demo.mjs",
     "demo": "node scripts/release-browser/serve.mjs r2-frontend/demo/dist",
     "publish:cos": "uv run --script scripts/publish-cos.py"

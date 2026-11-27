@@ -3,7 +3,7 @@ import type { ObjectRegistry } from "../objects/registry.ts";
 import type { TextureSet } from "../render/textures.ts";
 import type { RegionDirectory } from "../render/region-directory.ts";
 import type { WorkerRequest, WorkerResponse } from "../scene/worker.ts";
-import type { BlockEntity, ObjectDescriptor, ObjectReference, PreparedR2Region } from "../contracts.ts";
+import type { ObjectDescriptor, ObjectReference, PreparedR2Region } from "../contracts.ts";
 import type { Renderer } from "../render/renderer.ts";
 
 /** r2region 坐标：每格横跨 8×8 个区块（chunk），r2region (x, z) 覆盖方块 [128x, 128x+128)。 */
@@ -35,10 +35,6 @@ export interface WorldSink {
   region(x: number, z: number, data: ArrayBuffer | null): void;
   /** 按对象原点提交区域快照。移动沿用 key，跨区时更新两区。complete=false 表示稍后还会补齐。 */
   objects(x: number, z: number, descriptors: ObjectDescriptor[], complete?: boolean): void;
-  /** 订阅区域内完整的原始方块实体；前端按方块状态解释。 */
-  blockEntities?(x: number, z: number, entries: BlockEntity[]): void;
-  /** 同一近景范围内普通实体的完整 Java SNBT 快照。 */
-  entities?(x: number, z: number, entries: string[]): void;
   /** 区域数据无法提供；会话把区域标成失败，直到它移出又重新需要，或数据源再次提交。 */
   error(x: number, z: number, error: unknown): void;
 }
@@ -47,10 +43,8 @@ declare const R2_SCENE_WORKER: string;
 
 /** 世界数据源。会话打开时调用 open，之后用 want 告知需要的区域与近景对象；
  * 数据源为需要的区域调用 sink.region（以及 sink.objects），可以立即、稍后或在内容变化时重复调用。 */
-export interface DataSource {
-  /** 查看命中方块或实体的原始 SNBT。实体可与方块或其他实体同格，拾取时一并传入 objectKey。 */
-  snbtAt?(position: number[], objectKey?: string): string | undefined;
-  open(sink: WorldSink): void;
+export interface DataSource<Sink extends WorldSink = WorldSink> {
+  open: (sink: Sink) => void;
   want(change: WantChange): void;
   close(): void;
 }

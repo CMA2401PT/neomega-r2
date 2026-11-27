@@ -11,7 +11,7 @@ if (!output || !["web", "standalone"].includes(mode) || (mode === "standalone" &
 }
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
-for (const [pkg, name] of [["r2-core", "r2-core.js"], ["r2-link", "r2-link.js"], ["assets-utils", "r2-materials.js"]]) {
+for (const [pkg, name] of [["r2-core", "r2-core.js"], ["r2-link", "r2-link.js"], ["r2-mc", "r2-mc.js"], ["assets-utils", "r2-materials.js"]]) {
   copyFileSync(join(root, pkg, "dist/release", name), join(out, name));
 }
 const frontend = join(root, "r2-frontend");

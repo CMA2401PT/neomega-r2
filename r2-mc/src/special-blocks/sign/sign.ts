@@ -1,16 +1,16 @@
 import type { MeshRecipe, Vec3 } from "neomega-r2-core";
 import { bare, surface } from "../surface.ts";
-import { glyphURL } from "./assets.ts";
+import type { MinecraftAssets } from "../../contracts.ts";
 import type { Run, SignSide } from "./text.ts";
 
 interface Font {
   bytes: DataView;
   offsets: Map<number, number>;
 }
-let font: Promise<Font> | undefined;
+const fonts = new WeakMap<MinecraftAssets, Promise<Font>>();
 
 /** 首次显示有字的牌时解压字模；之后每个字符直接按码点定位。 */
-async function loadFont(): Promise<Font> {
+async function loadFont(glyphURL: string): Promise<Font> {
   const stream = (await fetch(glyphURL)).body!.pipeThrough(new DecompressionStream("gzip"));
   const bytes = new DataView(await new Response(stream).arrayBuffer());
   const offsets = new Map<number, number>();
@@ -22,8 +22,9 @@ async function loadFont(): Promise<Font> {
 }
 
 /** 在同一张透明图的上下两半绘制正背面，反面 UV 由观看方向决定。 */
-async function signPixels(sides: SignSide[], width: number, height: number, hanging: boolean): Promise<Uint8Array> {
-  const { bytes, offsets } = await (font ??= loadFont());
+async function signPixels(sides: SignSide[], width: number, height: number, hanging: boolean, assets: MinecraftAssets): Promise<Uint8Array> {
+  if (!fonts.has(assets)) fonts.set(assets, loadFont(assets.glyphs));
+  const { bytes, offsets } = await fonts.get(assets)!;
   const pixels = new Uint8Array(width * height * 2 * 4);
   function dot(x: number, y: number, side: number, color: number) {
     if (x < 0 || x >= width || y < 0 || y >= height) return;
@@ -95,7 +96,7 @@ export function sign(data: {
   hanging: boolean;
   wall: boolean;
   rotation: number;
-}): MeshRecipe {
+}, assets: MinecraftAssets): MeshRecipe {
   const width = data.hanging ? 128 : 192, height = 96;
   const bottom = data.wall ? 4.33333 : 9.33333,
     z = data.wall ? 0.33333 : 7.33333;
@@ -106,7 +107,7 @@ export function sign(data: {
       width,
       height: height * 2,
       cacheKey: "sign/" + width + "/" + JSON.stringify(data.sides),
-      renderPixels: () => signPixels(data.sides, width, height, data.hanging),
+      renderPixels: () => signPixels(data.sides, width, height, data.hanging, assets),
     },
     low,
     high,

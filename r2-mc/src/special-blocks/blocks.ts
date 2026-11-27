@@ -1,3 +1,4 @@
+import type { MinecraftAssets } from "../contracts.ts";
 import { blockHash, type ObjectRegistry, type ObjectDescriptor, type Vec3 } from "neomega-r2-core";
 import { isCompound, parseSNBT } from "../libs/snbt.ts";
 import { banner, bannerLayers, dyes } from "./banner/banner.ts";
@@ -97,10 +98,10 @@ export function appearance(hash: number, position: Vec3, snbt?: string): ObjectD
 }
 
 /** 登记由方块状态或方块实体决定的内置外观。 */
-export function registerBlocks(registry: ObjectRegistry): void {
+export function registerBlocks(registry: ObjectRegistry, assets: MinecraftAssets): void {
   registry
-    .register("enchanting_book", enchantingBook)
-    .register("pot", (d) => decoratedPot(d.data as Parameters<typeof decoratedPot>[0]))
-    .register("banner", (d) => banner(d.data as Parameters<typeof banner>[0]))
-    .register("sign", (d) => sign(d.data as Parameters<typeof sign>[0]));
+    .register("enchanting_book", () => enchantingBook(assets.book))
+    .register("pot", (d) => decoratedPot(d.data as Parameters<typeof decoratedPot>[0], assets.pot))
+    .register("banner", (d) => banner(d.data as Parameters<typeof banner>[0], assets))
+    .register("sign", (d) => sign(d.data as Parameters<typeof sign>[0], assets));
 }

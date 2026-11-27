@@ -1,6 +1,7 @@
 .DS_Store
 /node_modules/
 /r2-core/dist/
+/r2-mc/dist/
 /r2-link/dist/
 /assets-utils/dist/
 /r2-frontend/dist/

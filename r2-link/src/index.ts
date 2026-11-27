@@ -1,8 +1,10 @@
 // R2Link 数据源：浏览器连接数据源的 WebSocket，把会话的订阅转成 want 消息，把收到的区域与对象交给会话。
 // 协议见 neomega-r2link 的 README。
-import type { DataSource, BlockEntity, ObjectWant, RegionCoord, WantChange, WorldSink } from "neomega-r2-core";
+import type { DataSource, ObjectWant, RegionCoord, WantChange, WorldSink } from "neomega-r2-core";
 
-export const R2LINK_VERSION = 3;
+import type { MinecraftSink } from "neomega-r2-mc";
+
+export const R2LINK_VERSION = 4;
 
 export interface R2LinkScene {
   name: string;
@@ -36,7 +38,9 @@ export interface R2LinkOptions {
   WebSocket?: new (url: string) => WebSocket;
 }
 
-export interface R2LinkSource extends DataSource {
+// 纯核心宿主也能订阅同一数据源，只消费区域与通用对象。
+type LinkSink = WorldSink & Partial<Pick<MinecraftSink, "near">>;
+export interface R2LinkSource extends DataSource<LinkSink> {
   readonly url: string;
   readonly state: R2LinkState;
   /** 首次握手；连接失败或数据源拒绝时拒绝。 */
@@ -75,7 +79,7 @@ export function r2linkSource(url: string, options: R2LinkOptions = {}): R2LinkSo
   const retry = options.retry ?? 3000,
     Socket = options.WebSocket ?? WebSocket,
     key = (x: number, z: number) => `${x}/${z}`;
-  let sink: WorldSink | null = null,
+  let sink: LinkSink | null = null,
     socket: WebSocket | null = null,
     timer: ReturnType<typeof setTimeout> | undefined,
     state: R2LinkState = "connecting",
@@ -147,9 +151,13 @@ export function r2linkSource(url: string, options: R2LinkOptions = {}): R2LinkSo
       } else if (type === "blockEntities") {
         const want = objects.get(key(x, z));
         if (want && want.radius === header.radius && want.center.every((v, i) => v === header.center[i])) {
-          sink?.entities?.(x, z, header.entities ?? []);
-          if (sink?.blockEntities) sink.blockEntities(x, z, header.entries as BlockEntity[]);
-          else sink?.objects(x, z, []);
+          if (sink?.near) {
+            const entries: { position: [number, number, number]; snbt: string }[] = header.entries;
+            sink.near(x, z, {
+              blockEntities: entries.map(({ position, snbt }) => [position, snbt]),
+              entities: header.entities ?? [],
+            });
+          } else sink?.objects(x, z, []);
         }
       } else if (type === "failed") {
         sink?.error(x, z, Error(header.message));

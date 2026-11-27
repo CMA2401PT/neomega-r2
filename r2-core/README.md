@@ -76,7 +76,7 @@ renderer.render({ position: [8, 6, 20], yaw: 0, pitch: -0.4 }, { width: 1280, he
 
 - 自定义数据源可使用 `encodeRegion` 与 `blockHash` 编码 16×16×16 子区块（XZY 排列），实现见 [src/source/memory.ts](src/source/memory.ts) 与 [src/source/hash.ts](src/source/hash.ts)。
 
-对象用场景内唯一的 `key` 标识，可以放在带小数的世界坐标上。数据源按对象原点所在的近景区域提交。静态网格由准备线程按三角面登记到相交的格子。动画盒体使用覆盖整个动画的包围盒登记。射线从其他格子击中部件时，也能找回同一个对象。现有的[前端特殊方块](../r2-frontend/src/special-blocks/)同样通过这个接口绘制。
+对象用场景内唯一的 `key` 标识，可以放在带小数的世界坐标上。数据源按对象原点所在的近景区域提交。静态网格由准备线程按三角面登记到相交的格子。动画盒体使用覆盖整个动画的包围盒登记。射线从其他格子击中部件时，也能找回同一个对象。现有的[Minecraft 特殊方块](../r2-mc/src/special-blocks/)同样通过这个接口绘制。
 
 用 `ObjectRegistry.register(kind, factory)` 注册对象的局部几何、贴图和位姿。在 `MemoryWorld` 中，调用 `world.addObject(descriptor)` 后用 `world.commit()` 发布。移动时沿用 `key`、`kind` 和 `data`，只改 `position`。默认按 `data` 是否为同一个值判断外观变化。如果数据源每次重新解析参数，可以提供 `appearanceKey`，只有影响局部几何或材质的参数变化时才改变它。移除时调用 `world.removeObject(key)` 并再次发布。自定义数据源通过 `sink.objects(x, z, descriptors)` 提交区域快照，跨区域移动时需要更新新旧两个区域。
 

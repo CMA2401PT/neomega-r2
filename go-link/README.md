@@ -6,7 +6,7 @@ R2Link 让游戏机器人、服务器插件或存档服务把方块世界交给 
 
 协议中的 `region` 指 r2region，横向覆盖 8×8 个区块（chunk）。每个区块沿高度分成 16×16×16 方块的子区块（subchunk），一个 `region` 消息携带该范围内有数据的子区块。
 
-Go 服务按订阅发送状态哈希及两类近景数据。方块实体按格子定位，普通实体的世界坐标和身份在其 Java SNBT 中。SNBT 是保留 NBT 数据类型的文本格式。浏览器一侧是 neomega-r2 的 `r2linkSource`。
+Go 服务按订阅发送状态哈希及两类近景数据。方块实体按格子定位，普通实体以数据源提供的实例 ID 定位，世界坐标在 Java SNBT 中。SNBT 是保留 NBT 数据类型的文本格式。浏览器一侧是 neomega-r2 的 `r2linkSource`。
 
 ## 消息
 
@@ -25,8 +25,8 @@ n 字节    UTF-8 JSON 头，必有 "type"
 浏览器连上后先发 `hello`，数据源回 `welcome`：
 
 ```json
-{"type":"hello","protocol":"r2link","version":3}
-{"type":"welcome","protocol":"r2link","version":3,"scene":{"name":"生存服"},"camera":{"position":[120.5,86,-31.5],"yaw":1.2,"pitch":-0.25}}
+{"type":"hello","protocol":"r2link","version":4}
+{"type":"welcome","protocol":"r2link","version":4,"scene":{"name":"生存服"},"camera":{"position":[120.5,86,-31.5],"yaw":1.2,"pitch":-0.25}}
 ```
 
 版本不符时数据源回复 `{"type":"error","message":"…"}` 并关闭连接，浏览器把 message 显示为连接失败的原因。`scene.name` 显示在界面上。`camera` 可以省略；位置是方块坐标，朝向是弧度，yaw 为 0 时看向 −Z、正值转向 +X，pitch 为正时向上看，省略朝向表示保留浏览器当前朝向。
@@ -63,7 +63,7 @@ n 字节    UTF-8 JSON 头，必有 "type"
 | `scene` | `scene` | | 更新世界描述。 |
 | `error` | `message` | | 致命错误，随后关闭连接。 |
 
-`clippedSections` 是区域内因超出可显示高度而省略的 section 数，可以省略。`center` 和 `radius` 回显所响应的订阅范围，以便浏览器在移动后丢弃过期回复。每条 `entries` 记录包含整数世界坐标 `position` 和完整的 `snbt` 字符串。普通实体放在 `entities` 字符串数组中，每项是保留 `Pos` 和身份字段的完整 Java SNBT。同一区域的新快照整体替换旧快照，省略 `entities` 或发送空数组都会撤下旧的普通实体。
+`clippedSections` 是区域内因超出可显示高度而省略的 section 数，可以省略。`center` 和 `radius` 回显所响应的订阅范围，以便浏览器在移动后丢弃过期回复。每条 `entries` 记录包含整数世界坐标 `position` 和完整的 `snbt` 字符串。普通实体放在 `entities` 数组中，每项是 `[实例 ID, 完整 Java SNBT]`。ID 是字符串，在同一世界内唯一，实体移动时沿用。同一区域的新快照整体替换旧快照，省略 `entities` 或发送空数组都会撤下旧的普通实体。
 
 ```json
 {"type":"blockEntities","x":0,"z":0,"center":[0,4,0],"radius":2,"entries":[{"position":[5,64,7],"snbt":"{Command:\"say hi\"}"}]}
@@ -139,9 +139,9 @@ http.HandleFunc("/r2link", func(w http.ResponseWriter, r *http.Request) {
 
 ### 近景方块实体和普通实体
 
-实现 `Entities(ctx, x, z, center, radius) ([]string, error)` 可用同一近景订阅交付普通实体。数据源按位置筛选并序列化完整 Java SNBT，前端按实体的 `id` 选择外观。
+实现 `Entities(ctx, x, z, center, radius) ([]r2link.Entity, error)` 可用同一近景订阅交付普通实体。数据源按位置筛选并序列化完整 Java SNBT，前端按实体的 `id` 选择外观。
 
-实现 `BlockEntities(ctx, x, z, center, radius)` 即可提供近景数据。遍历订阅范围内的方块实体，保留其坐标和全部字段。浏览器根据已有区域中的状态哈希识别附魔台、陶罐、旗帜和告示牌。完整 SNBT 也用于点击查看。外观与固定素材见 [前端实现](../r2-frontend/src/special-blocks/)。
+实现 `BlockEntities(ctx, x, z, center, radius)` 即可提供近景数据。遍历订阅范围内的方块实体，保留其坐标和全部字段。浏览器根据已有区域中的状态哈希识别附魔台、陶罐、旗帜和告示牌。完整 SNBT 也用于点击查看。外观与固定素材见 [前端实现](../r2-mc/src/special-blocks/)。
 
 ## 示例与检查
 

@@ -4,7 +4,7 @@
 package r2link
 
 // Version 是当前协议版本，hello 与 welcome 都要带上。
-const Version = 3
+const Version = 4
 
 // Scene 描述数据源提供的世界，显示在界面上。
 type Scene struct {
@@ -79,6 +79,9 @@ type BlockEntity struct {
 	SNBT     string `json:"snbt"`
 }
 
+// Entity 用两个字符串传送数据源里的实例 ID 和原始 Java SNBT。
+type Entity [2]string
+
 // BlockEntities 同时发布同一近景内的两份快照。普通实体保留完整 Java SNBT，包括 Pos 和 UUID。
 type BlockEntities struct {
 	Type     string        `json:"type"`
@@ -87,7 +90,7 @@ type BlockEntities struct {
 	Center   [3]int        `json:"center"`
 	Radius   int           `json:"radius"`
 	Entries  []BlockEntity `json:"entries"`
-	Entities []string      `json:"entities,omitempty"`
+	Entities []Entity      `json:"entities,omitempty"`
 }
 
 // Failed 表示区域无法提供；浏览器把它标为失败，直到再次需要或收到新数据。

@@ -1,23 +1,24 @@
 # neOmega R2
 
-R2 在浏览器的 WebGPU 上以射线渲染 Minecraft 方块世界。本仓库按职责拆分为互不越界的独立模块，并与发布的四个浏览器 ES 模块及两份材质归档一一对应。终端启动器、存档选择器、结构转换与离线导出服务由工作区中的 [neOmega Viewer R2](../apps/neomega-viewer-r2/README.md) 提供。
+R2 在浏览器的 WebGPU 上以射线渲染 Minecraft 方块世界。本仓库按职责拆分为互不越界的独立模块，并与发布的五个浏览器 ES 模块及两份材质归档一一对应。终端启动器、存档选择器、结构转换与离线导出服务由工作区中的 [neOmega Viewer R2](../apps/neomega-viewer-r2/README.md) 提供。
 
 ## 模块与产物对照
 
 | 目录 | 职责 | 包 / 模块名 | 对外产物 |
 | --- | --- | --- | --- |
 | [r2-core](r2-core/README.md) | **渲染核心**（零运行时依赖）：纯离屏 WebGPU 射线渲染器（RGB 纹理、Depth 纹理、`pick`、`createCapture`）、`WorldSession`、`DataSource`、`MemoryWorld`、`ObjectRegistry`。 | `neomega-r2-core` | `r2-core.js` |
+| [r2-mc](r2-mc/README.md) | Java 世界的特殊方块、实体和物品外观，以及带实例 ID 的拾取。 | `neomega-r2-mc` | `r2-mc.js` |
 | [r2-link](r2-link/README.md) | **浏览器端协议客户端**（零运行时依赖）：通过 WebSocket 连接 `go-link` 数据源，将订阅与区域/对象消息接入 `WorldSession`。 | `neomega-r2-link` | `r2-link.js` |
 | [assets-utils](assets-utils/README.md) | **材质资源与编译**：Go 生成方块状态表、几何基表与原始配方；TS 负责制作默认包、解压 ZIP 与浏览器端材质编译。 | `neomega-view-utils/r2assets` / `neomega-r2-materials` | `r2-materials.js`、`default-materials.zip`、`material-info.zip` |
 | [r2-frontend](r2-frontend/README.md) | **合成后处理与共享界面**：① `compositor`（单画布降噪、WebSR 2× 超分、基于深度图的图层混合、PNG 导出）；② 共享 HUD/地图/设置与 `mount()`。Go 宿主装配所需网页后自行嵌入。 | `neomega-r2-frontend` | `r2-frontend.js` |
-| [go-link](go-link/README.md) | **Go 端协议服务端**：实现 R2Link v3 的区域和近景方块实体订阅。 | `neomega-r2link` | — |
+| [go-link](go-link/README.md) | **Go 端协议服务端**：实现 R2Link v4 的区域和近景方块实体订阅。 | `neomega-r2link` | — |
 | [fix-utils](fix-utils/README.md) | 按周围方块补全 Java 方块属性，读取宿主提供的六面实心表。 | `neomega-view-utils/fixer` | — |
 
 数据流向自底向上：
 
 ```text
 DataSource (MemoryWorld / r2linkSource)
-  └─▶ WorldSession ──▶ r2-core (离屏 WebGPU：RGB 纹理 + Depth 纹理 + pick)
+  └─▶ r2-mc（解释 Java 近景快照）──▶ WorldSession ──▶ r2-core (离屏 WebGPU：RGB 纹理 + Depth 纹理 + pick)
                          └─▶ r2-frontend/compositor (降噪 → WebSR → 深度混合外部图层 → 单画布上屏 / PNG)
                                └─▶ r2-frontend UI (HUD / 地图 / 设置 / mount())
 ```
@@ -27,7 +28,7 @@ DataSource (MemoryWorld / r2linkSource)
 
 ## 在 HTML 中加载
 
-发布的四个浏览器 ESM 入口与两个材质归档可直接在静态页面导入：
+发布的五个浏览器 ESM 入口与两个材质归档可直接在静态页面导入：
 
 ```html
 <script type="module">
@@ -41,7 +42,7 @@ DataSource (MemoryWorld / r2linkSource)
 
 ## 构建与测试
 
-仓库根目录通过 npm workspaces 管理 `r2-core`、`r2-link`、`assets-utils` 与 `r2-frontend`（需要 Node.js 24+ 与 Go 1.25.5+；Go 模块的本地替换路径指向工作区同级的 `neomega-blocks` 和 `neomega-nbt`）：
+仓库根目录通过 npm workspaces 管理 `r2-core`、`r2-mc`、`r2-link`、`assets-utils` 与 `r2-frontend`（需要 Node.js 24+ 与 Go 1.25.5+；Go 模块的本地替换路径指向工作区同级的 `neomega-blocks` 和 `neomega-nbt`）：
 
 ```sh
 npm ci

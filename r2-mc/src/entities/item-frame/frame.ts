@@ -1,8 +1,7 @@
 import type { MeshRecipe, TriangleMesh, Vec3 } from "neomega-r2-core";
 import type { EntityRenderer } from "../entities.ts";
 import { appendItemModel, displayedModel } from "../../items/items.ts";
-import { itemAtlasURL } from "../../items/assets.ts";
-import { frameURL } from "./assets.ts";
+import type { MinecraftAssets } from "../../contracts.ts";
 import model from "./model.json" with { type: "json" };
 
 const directions = ["down", "up", "north", "south", "west", "east"] as const;
@@ -59,7 +58,7 @@ interface FrameAppearance {
 }
 
 /** 在朝北的局部坐标中旋转物品，再将框内外的表面一起转到挂载方向。 */
-async function itemFrame({ facing, invisible, item, rotation }: FrameAppearance, glow: boolean): Promise<MeshRecipe> {
+async function itemFrame({ facing, invisible, item, rotation }: FrameAppearance, glow: boolean, assets: MinecraftAssets): Promise<MeshRecipe> {
   const mesh: TriangleMesh = { vertices: [], triangles: [] };
   if (!invisible) appendFrame(mesh, facing, glow);
   if (item) {
@@ -70,9 +69,9 @@ async function itemFrame({ facing, invisible, item, rotation }: FrameAppearance,
       (cos * x - sin * y) / 2,
       (sin * x + cos * y) / 2,
       z / 2 + depth,
-    ], facing), glow);
+    ], facing), glow, assets);
   }
-  return { texture: { url: item ? itemAtlasURL : frameURL }, mesh };
+  return { texture: { url: item ? assets.items : assets.frame }, mesh };
 }
 
 export const frameRenderer: EntityRenderer = {
@@ -89,5 +88,5 @@ export const frameRenderer: EntityRenderer = {
     const data: FrameAppearance = { facing: facing as Facing, invisible, item, rotation: rotation & 7 };
     return { data, appearanceKey: JSON.stringify(data) };
   },
-  factory: descriptor => itemFrame(descriptor.data as FrameAppearance, descriptor.kind === "minecraft:glow_item_frame"),
+  factory: (descriptor, assets) => itemFrame(descriptor.data as FrameAppearance, descriptor.kind === "minecraft:glow_item_frame", assets),
 };

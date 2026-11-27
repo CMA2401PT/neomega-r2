@@ -1,10 +1,12 @@
-import { entityObject, registerEntities } from "../entities/entities.ts";
+import type { MinecraftAssets, MinecraftHit, MinecraftSource } from "./contracts.ts";
+import { entityObject, registerEntities } from "./entities/entities.ts";
 import {
   hashSections,
   regionKey,
   unpack,
   WorldSession,
   ObjectRegistry,
+  type Camera,
   type DataSource,
   type WorldSink,
   type Renderer,
@@ -14,7 +16,7 @@ import {
   type Vec3,
   type SessionOptions,
 } from "neomega-r2-core";
-import { hasAppearance, appearance, registerBlocks } from "./blocks.ts";
+import { hasAppearance, appearance, registerBlocks } from "./special-blocks/blocks.ts";
 
 interface Candidate {
   hash: number;
@@ -29,7 +31,7 @@ interface Section {
 interface Near {
   want: ObjectWant;
   snbt: Map<string, string>;
-  entities: Map<string, { object: ObjectDescriptor; snbt: string }>;
+  entities: ObjectDescriptor[];
   custom: ObjectDescriptor[];
   received: boolean;
 }
@@ -42,10 +44,14 @@ function inRange(section: number[], { center, radius }: ObjectWant): boolean {
 }
 
 /** 包装任何区域数据源。按区域合并方块外观、普通实体与宿主对象。只有包含特殊状态的子区块需要在近景展开。 */
-export function specialBlockSource(source: DataSource, onError: (message: string) => void = console.error) {
+export function minecraftRenderSource(source: MinecraftSource, onError: (message: string) => void = console.error) {
   const sections = new Map<string, Section[] | null>(),
     near = new Map<string, Near>();
   let sink: WorldSink;
+  // 只在接收宿主快照时限定名字空间，避免和实体 ID 或方块坐标同名。
+  function customObjects(objects: ObjectDescriptor[]): ObjectDescriptor[] {
+    return objects.map(object => ({ ...object, key: "custom/" + object.key }));
+  }
   function publish(x: number, z: number, complete = true) {
     const key = regionKey(x, z),
       slice = near.get(key),
@@ -57,7 +63,7 @@ export function specialBlockSource(source: DataSource, onError: (message: string
         slice.want,
       ),
     );
-    for (const { object } of slice.entities.values())
+    for (const object of slice.entities)
       if (inRange(object.position.map(v => Math.floor(v / 16)), slice.want)) objects.push(object);
     for (const section of blocks) {
       const origin = section.compressed.position;
@@ -85,7 +91,7 @@ export function specialBlockSource(source: DataSource, onError: (message: string
             cell.object = appearance(cell.hash, cell.position, snbt);
           } catch (error) {
             if (!(error instanceof SyntaxError)) throw error;
-            // 单格数据损坏时保留原文供点击查看，其他方块继续处理。
+            // 单格的 SNBT 有误时撤下其外观，继续处理其余方块。
             cell.object = undefined;
             onError(`方块 (${cell.position.join(", ")}) 的 SNBT 无法解析：${error.message}`);
           }
@@ -97,12 +103,6 @@ export function specialBlockSource(source: DataSource, onError: (message: string
     sink.objects(x, z, objects, complete);
   }
   return {
-    snbtAt(position: number[], objectKey?: string) {
-      const section = position.map((v) => Math.floor(v / 16));
-      const slice = near.get(regionKey(Math.floor(section[0] / 8), Math.floor(section[2] / 8)));
-      if (!slice || !inRange(section, slice.want)) return;
-      return objectKey?.startsWith("entity/") ? slice.entities.get(objectKey)?.snbt : slice.snbt.get(position.join("/"));
-    },
     open(next: WorldSink) {
       sink = next;
       source.open({
@@ -122,34 +122,29 @@ export function specialBlockSource(source: DataSource, onError: (message: string
           sink.region(x, z, data);
           publish(x, z);
         },
-        objects(x, z, custom) {
+        objects(x, z, custom, complete = true) {
           const slice = near.get(regionKey(x, z));
           if (slice) {
-            slice.custom = custom;
-            slice.received = true;
-            publish(x, z);
+            slice.custom = customObjects(custom);
+            slice.received = complete;
+            publish(x, z, complete);
           }
         },
-        entities(x, z, entries) {
-          const key = regionKey(x, z), slice = near.get(key);
-          if (!slice) return;
-          slice.received = true;
-          slice.entities.clear();
-          for (const [index, snbt] of entries.entries()) {
-            try {
-              const object = entityObject(snbt, key + "/entry/" + index);
-              if (object) slice.entities.set(object.key, { object, snbt });
-            } catch (error) {
-              if (!(error instanceof SyntaxError)) throw error;
-              onError(`区域 ${key} 中第 ${index + 1} 个实体的数据有误：${error.message}`);
-            }
-          }
-          publish(x, z);
-        },
-        blockEntities(x, z, entries) {
+        near(x, z, snapshot) {
           const slice = near.get(regionKey(x, z));
           if (!slice) return;
-          slice.snbt = new Map(entries.map((e) => [e.position.join("/"), e.snbt]));
+          slice.snbt = new Map(snapshot.blockEntities.map(([position, snbt]) => [position.join("/"), snbt]));
+          slice.entities = [];
+          if (snapshot.objects !== undefined) slice.custom = customObjects(snapshot.objects);
+          for (const [entityId, snbt] of snapshot.entities) {
+            try {
+              const object = entityObject(entityId, snbt);
+              if (object) slice.entities.push(object);
+            } catch (error) {
+              if (!(error instanceof SyntaxError)) throw error;
+              onError(`实体 ${entityId} 的数据有误：${error.message}`);
+            }
+          }
           slice.received = true;
           publish(x, z);
         },
@@ -174,7 +169,7 @@ export function specialBlockSource(source: DataSource, onError: (message: string
           slice.want = want;
           publish(want.x, want.z, false);
           slice.received = false;
-        } else near.set(key, { want, snbt: new Map(), entities: new Map(), custom: [], received: false });
+        } else near.set(key, { want, snbt: new Map(), entities: [], custom: [], received: false });
       }
       source.want(change);
     },
@@ -186,15 +181,33 @@ export function specialBlockSource(source: DataSource, onError: (message: string
   } satisfies DataSource;
 }
 
-/** 标准查看器共享此入口；只使用渲染核心的宿主仍能直接提交自定义对象。 */
-export function blockWorldSession(
-  renderer: Renderer,
-  source: DataSource,
-  options: Omit<SessionOptions, "registry"> & Partial<Pick<SessionOptions, "registry">> = {},
-) {
+export type MinecraftWorldOptions = Omit<SessionOptions, "registry"> & {
+  assets: MinecraftAssets;
+  registry?: ObjectRegistry;
+};
+
+/** 用宿主提供的资源和数据创建世界。宿主自行驱动核心会话，按需拾取方块或实体。 */
+export function createMinecraftWorld(renderer: Renderer, source: MinecraftSource, options: MinecraftWorldOptions) {
   const registry = new ObjectRegistry();
-  registerBlocks(registry);
-  registerEntities(registry);
-  for (const [kind, factory] of options.registry?.factories ?? []) registry.register(kind, factory);
-  return new WorldSession(renderer, specialBlockSource(source, options.onError), { ...options, registry });
+  registerBlocks(registry, options.assets);
+  registerEntities(registry, options.assets);
+  for (const [kind, factory] of options.registry?.factories ?? []) {
+    // 工厂收到宿主提交的原始 key，内部的名字空间只用于场景归属与拾取。
+    registry.register(kind, descriptor => factory(descriptor.key.startsWith("custom/")
+      ? { ...descriptor, key: descriptor.key.slice("custom/".length) }
+      : descriptor));
+  }
+  const session = new WorldSession(renderer, minecraftRenderSource(source, options.onError), { ...options, registry });
+  return {
+    session,
+    /** 返回所属方块坐标；命中实体时附带数据源传入的实例 ID。 */
+    async pick(camera: Camera, pixel: Parameters<Renderer["pick"]>[1]): Promise<MinecraftHit | null> {
+      const hit = await renderer.pick(camera, { objects: true, ...pixel });
+      if (!hit) return null;
+      const { position, normal, objectKey } = hit;
+      return objectKey?.startsWith("entity/")
+        ? { position, normal, entityId: objectKey.slice("entity/".length) }
+        : { position, normal };
+    },
+  };
 }

@@ -1,4 +1,3 @@
-import { bookURL } from "./assets.ts";
 // 附魔书只提供七个盒体及其运动；格子登记、贴图和 GPU 上传由公共对象层负责。
 import type { ObjectRecipe } from "neomega-r2-core";
 
@@ -12,7 +11,7 @@ const rotateZ = (v: number[], a: number): number[] => [
   Math.sin(a) * v[0] + Math.cos(a) * v[1],
   v[2],
 ];
-export function enchantingBook(): ObjectRecipe {
+export function enchantingBook(bookURL: string): ObjectRecipe {
   const definitions: number[][][] = [
     [
       [-6, -5, -0.005],

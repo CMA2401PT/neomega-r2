@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "neomega-r2-core": "*",
-    "neomega-r2-materials": "*"
+    "neomega-r2-materials": "*",
+    "neomega-r2-mc": "*"
   }
 }

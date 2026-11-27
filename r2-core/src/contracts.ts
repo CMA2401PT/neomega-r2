@@ -32,12 +32,6 @@ export interface PickResult {
   normal: number[];
 }
 
-/** 近景数据源提交的方块实体，位置是整格世界坐标。 */
-export interface BlockEntity {
-  position: Vec3;
-  snbt: string;
-}
-
 /** 特殊对象描述；data 由同类型工厂解释。 */
 export interface ObjectDescriptor {
   /** 场景内唯一，移动或更换外观时沿用。 */

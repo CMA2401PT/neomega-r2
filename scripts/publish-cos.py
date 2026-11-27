@@ -1,7 +1,7 @@
 # /// script
 # dependencies = ["cos-python-sdk-v5==1.9.45"]
 # ///
-"""将已装配的四个浏览器入口、两份材质包和来源声明发布到 COS。"""
+"""将已装配的五个浏览器入口、两份材质包和来源声明发布到 COS。"""
 
 import argparse
 import os
@@ -16,6 +16,7 @@ FILES = {
     "default-materials.zip": "application/zip",
     "material-info.zip": "application/zip",
     "THIRD_PARTY_NOTICES.txt": "text/plain; charset=utf-8",
+    "r2-mc.js": "text/javascript; charset=utf-8",
     "r2-core.js": "text/javascript; charset=utf-8",
     "r2-link.js": "text/javascript; charset=utf-8",
     "r2-materials.js": "text/javascript; charset=utf-8",

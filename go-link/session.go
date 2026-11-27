@@ -21,7 +21,7 @@ type BlockEntitySource interface {
 
 // EntitySource 按同一近景范围提供普通实体的 Java SNBT。会话只负责传输。
 type EntitySource interface {
-	Entities(ctx context.Context, x, z int, center [3]int, radius int) ([]string, error)
+	Entities(ctx context.Context, x, z int, center [3]int, radius int) ([]Entity, error)
 }
 
 // ChunkSource 是可选接口：列出存在的区块，地图据此显示世界分布。
@@ -344,7 +344,7 @@ func (s *Session) entityWorker(ctx context.Context, source BlockEntitySource) {
 		s.mu.Unlock()
 
 		entries, err := source.BlockEntities(jobCtx, want.X, want.Z, want.Center, want.Radius)
-		var entities []string
+		var entities []Entity
 		if provider, ok := s.source.(EntitySource); ok && err == nil {
 			entities, err = provider.Entities(jobCtx, want.X, want.Z, want.Center, want.Radius)
 		}

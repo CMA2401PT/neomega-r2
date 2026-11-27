@@ -1,7 +1,8 @@
+import type { MinecraftAssets } from "../../contracts.ts";
 import type { MeshRecipe } from "neomega-r2-core";
 import { isCompound, type Compound } from "../../libs/snbt.ts";
 import { surface } from "../surface.ts";
-import { atlasURL, tiles } from "./assets.ts";
+import { tiles } from "./assets.ts";
 
 // Java 染料顺序同时对应旧版旗帜的数字颜色。
 export const dyes = {
@@ -101,19 +102,19 @@ export function bannerLayers(nbt: Compound, dye: string): Layer[] | undefined {
   return layers.length > 1 ? layers : undefined;
 }
 
-let atlas: Promise<ImageData> | undefined;
-async function readAtlas(): Promise<ImageData> {
-  const image = new Image();
-  image.src = atlasURL;
-  await image.decode();
+const atlases = new WeakMap<MinecraftAssets, Promise<ImageData>>();
+async function readAtlas(url: string): Promise<ImageData> {
+  const image = await createImageBitmap(await (await fetch(url)).blob());
   const ctx = new OffscreenCanvas(image.width, image.height).getContext("2d")!;
   ctx.drawImage(image, 0, 0);
-  return ctx.getImageData(0, 0, image.width, image.height);
+  image.close();
+  return ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height);
 }
 
 /** 给原版图案的布料明暗染色，然后按透明度从下向上绘制。 */
-async function bannerPixels(layers: Layer[]): Promise<Uint8Array> {
-  const { width, data: atlasPixels } = await (atlas ??= readAtlas());
+async function bannerPixels(layers: Layer[], assets: MinecraftAssets): Promise<Uint8Array> {
+  if (!atlases.has(assets)) atlases.set(assets, readAtlas(assets.banner));
+  const { width, data: atlasPixels } = await atlases.get(assets)!;
   const pixels = new Uint8Array(64 * 64 * 4);
   for (const [tile, color] of layers) {
     const tint = [color >> 16, (color >> 8) & 255, color & 255];
@@ -140,7 +141,7 @@ export function banner(data: {
   layers: Layer[];
   rotation: number;
   wall: boolean;
-}): MeshRecipe {
+}, assets: MinecraftAssets): MeshRecipe {
   const bottom = data.wall ? -13.333 : 2.667,
     back = data.wall ? 1.417 : 8.667;
   return surface(
@@ -148,7 +149,7 @@ export function banner(data: {
       width: 64,
       height: 64,
       cacheKey: "banner/" + JSON.stringify(data.layers),
-      renderPixels: () => bannerPixels(data.layers),
+      renderPixels: () => bannerPixels(data.layers, assets),
     },
     [1.31, bottom - 0.02, back - 0.02],
     [14.69, bottom + 26.69, back + 0.687],
