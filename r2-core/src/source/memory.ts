@@ -45,7 +45,8 @@ const regionOf = (x: number, z: number) => `${Math.floor(x / 128)}/${Math.floor(
 export class MemoryWorld {
   private sections = new Map<string, Uint32Array>();
   private regions = new Map<string, Set<string>>();
-  private entities = new Map<string, BlockEntity>();
+  private blockEntitiesByPosition = new Map<string, BlockEntity>();
+  private entitySections = new Map<string, { position: Vec3; entries: string[] }>();
   private descriptors = new Map<string, ObjectDescriptor>();
   private hashes = new Map<string, number>();
   private changed: Changes = { blocks: new Set(), objects: new Set() };
@@ -88,9 +89,17 @@ export class MemoryWorld {
   /** 设置该格的完整 SNBT；传 null 删除方块实体。改动通过 commit 通知近景订阅。 */
   setBlockEntity(position: Vec3, snbt: string | null): void {
     const key = position.join("/");
-    if (snbt === null) this.entities.delete(key);
-    else this.entities.set(key,{ position:[...position], snbt });
+    if (snbt === null) this.blockEntitiesByPosition.delete(key);
+    else this.blockEntitiesByPosition.set(key,{ position:[...position], snbt });
     this.changed.objects.add(regionOf(position[0],position[2]));
+  }
+
+  /** 替换整个子区块的普通实体快照，空列表表示全部撤下。坐标单位为 16 格。 */
+  setEntities(section: Vec3, entries: string[]): void {
+    const position = section.map(v => v * 16) as Vec3;
+    if (entries.length) this.entitySections.set(section.join("/"), { position, entries: [...entries] });
+    else this.entitySections.delete(section.join("/"));
+    this.changed.objects.add(regionOf(position[0], position[2]));
   }
 
   /** 加入或替换特殊对象（同一 key 替换）；对象按位置所在的区块交给近景。 */
@@ -115,8 +124,10 @@ export class MemoryWorld {
       this.changed.objects.add(regionOf(descriptor.position[0], descriptor.position[2]));
     this.sections.clear();
     this.regions.clear();
-    for (const {position} of this.entities.values()) this.changed.objects.add(regionOf(position[0],position[2]));
-    this.entities.clear();
+    for (const {position} of this.blockEntitiesByPosition.values()) this.changed.objects.add(regionOf(position[0],position[2]));
+    this.blockEntitiesByPosition.clear();
+    for (const {position} of this.entitySections.values()) this.changed.objects.add(regionOf(position[0], position[2]));
+    this.entitySections.clear();
     this.descriptors.clear();
   }
 
@@ -170,7 +181,10 @@ export class MemoryWorld {
   }
   /** 查询范围与自定义活动对象相同，可同时提交二者。 */
   blockEntities(x: number, z: number, center: number[], radius: number): BlockEntity[] {
-    return this.inRange(this.entities.values(),x,z,center,radius);
+    return this.inRange(this.blockEntitiesByPosition.values(),x,z,center,radius);
+  }
+  entities(x: number, z: number, center: number[], radius: number): string[] {
+    return this.inRange(this.entitySections.values(), x, z, center, radius).flatMap(section => section.entries);
   }
   private inRange<T extends {position: Vec3}>(entries: Iterable<T>, x: number, z: number, center: number[], radius: number): T[] {
     const vertical = Math.min(radius + 1, 12);
@@ -227,6 +241,7 @@ export function memorySource(world: MemoryWorld): DataSource {
         want = objects.get(key);
       if (want) {
         sink.objects(x, z, world.objects(x, z, want.center, want.radius));
+        sink.entities?.(x, z, world.entities(x, z, want.center, want.radius));
         sink.blockEntities?.(x, z, world.blockEntities(x, z, want.center, want.radius));
       }
     }

@@ -19,6 +19,11 @@ type BlockEntitySource interface {
 	BlockEntities(ctx context.Context, x, z int, center [3]int, radius int) ([]BlockEntity, error)
 }
 
+// EntitySource 按同一近景范围提供普通实体的 Java SNBT。会话只负责传输。
+type EntitySource interface {
+	Entities(ctx context.Context, x, z int, center [3]int, radius int) ([]string, error)
+}
+
 // ChunkSource 是可选接口：列出存在的区块，地图据此显示世界分布。
 type ChunkSource interface {
 	Chunks(ctx context.Context) (ChunkIndex, error)
@@ -192,7 +197,7 @@ func (s *Session) Update(x, z int) {
 	}
 }
 
-// UpdateBlockEntities 表示区域 (x, z) 的方块实体变了；浏览器仍需要时重新读取并发送。
+// UpdateBlockEntities 重新发送该区域的近景快照，适用于方块实体和普通实体的变动。
 func (s *Session) UpdateBlockEntities(x, z int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -339,6 +344,10 @@ func (s *Session) entityWorker(ctx context.Context, source BlockEntitySource) {
 		s.mu.Unlock()
 
 		entries, err := source.BlockEntities(jobCtx, want.X, want.Z, want.Center, want.Radius)
+		var entities []string
+		if provider, ok := s.source.(EntitySource); ok && err == nil {
+			entities, err = provider.Entities(jobCtx, want.X, want.Z, want.Center, want.Radius)
+		}
 
 		s.mu.Lock()
 		valid := s.entityOn == current && jobCtx.Err() == nil
@@ -356,7 +365,7 @@ func (s *Session) entityWorker(ctx context.Context, source BlockEntitySource) {
 		if err != nil {
 			err = s.conn.Send(ctx, Failed{Type: "failed", X: key.X, Z: key.Z, Message: err.Error()}, nil)
 		} else {
-			err = s.conn.Send(ctx, BlockEntities{Type: "blockEntities", X: key.X, Z: key.Z, Center: want.Center, Radius: want.Radius, Entries: entries}, nil)
+			err = s.conn.Send(ctx, BlockEntities{Type: "blockEntities", X: key.X, Z: key.Z, Center: want.Center, Radius: want.Radius, Entries: entries, Entities: entities}, nil)
 		}
 		if err != nil {
 			s.conn.CloseNow()

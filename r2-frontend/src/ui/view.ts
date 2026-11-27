@@ -60,9 +60,9 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     };
     void renderer.pick(structuredClone(displayedCamera ?? camera), pixel).then(hit => {
       if (!hit || request !== pickRequest || activeSession?.source !== source || map.open) return;
-      const snbt = source.snbtAt?.(hit.position);
+      const snbt = source.snbtAt?.(hit.position, hit.objectKey);
       if (snbt === undefined) return;
-      element("block-entity-title").textContent = "方块 SNBT · " + hit.position.join(", ");
+      element("block-entity-title").textContent = (hit.objectKey?.startsWith("entity/") ? "实体 SNBT · " : "方块 SNBT · ") + hit.position.join(", ");
       element("block-entity-text").textContent = snbt;
       entityDialog.showModal();
     }).catch(error => hud.error(String(error)));

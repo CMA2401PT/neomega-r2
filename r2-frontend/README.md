@@ -19,7 +19,7 @@ npm run demo
 
 之后运行 `npm run demo` 即可。启动命令从当前源码构建页面，并读取本地生成的材质。
 
-打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。其他示例页：
+打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。打开 <http://127.0.0.1:2415/?scene=frames> 可以围绕同一个支撑方块观察六个朝向的空展示框，单击框体查看实体 SNBT。其他示例页：
 
 - 内存世界单页接入：<http://127.0.0.1:2415/release/standalone.html>（源码 [examples/standalone.html](examples/standalone.html)）
 - 按需 `DataSource` 接入：<http://127.0.0.1:2415/release/datasource.html>（源码 [examples/datasource.html](examples/datasource.html)）
@@ -99,7 +99,7 @@ const blob = await compositor.renderToPNG(renderer.frame!, {
 
 参考实现见 [demo/main.ts](demo/main.ts) 与 [apps/neomega-viewer-r2/web/app.ts](../../apps/neomega-viewer-r2/web/app.ts)。
 
-## 近景方块与 SNBT
+## 近景方块、普通实体与 SNBT
 
 小麦、陶罐和旗帜都有基础模型。核心按 Java 方块状态哈希查本地模型表。资源生成时已算好每个模型面伸进哪些邻格，准备线程据此把面登记到世界里的对应格子。小麦的生长阶段属于方块状态，所以只用这条路径就可以画出整株小麦。
 
@@ -110,6 +110,10 @@ const blob = await compositor.renderToPNG(renderer.frame!, {
 `mount()` 已接入上述行为。自行组装 UI 的宿主用 `blockWorldSession(renderer, source)` 创建会话。自定义数据源通过 `sink.region` 提交压缩的状态哈希，通过 `sink.blockEntities?.(x, z, entries)` 提交近景实体。每项含有世界坐标 `position` 和 SNBT 原文 `snbt`。内存场景可以调用 `world.setBlockEntity(position, snbt)` 并 `commit()`，传入 `null` 会清除该实体。
 
 具体方块的图案、字模和动画随 [special-blocks](src/special-blocks/) 分发。合成在浏览器主线程完成，准备线程登记部件覆盖的格子，GPU 完成射线求交。告示牌字模取自 Java 默认位图字体和 GNU Unifont 16.0.01，来源和许可见 [素材声明](src/special-blocks/NOTICE.md)。
+
+展示框使用普通实体入口。数据源用 `sink.entities?.(x, z, entries)` 提交区域内的 Java SNBT 字符串快照。前端按 `id` 注册外观，按 `Pos` 放置框体，按 `Facing` 旋转。点击框体会按实体标识找到其原始 SNBT。离开近景后，框体与这份近景数据一起撤下。内存场景用 `world.setEntities([sx, sy, sz], entries)` 替换一个子区块的实体，再调用 `world.commit()`。
+
+框体模板、底板和桦木边纹取自 Minecraft Java 26.3 客户端，随 [展示框实现](src/entities/item-frame/) 分发，权利归原权利人。挂载方向参考了 [viewer-core 的实体实现](https://github.com/CMA2401PT/neomega-viewer-core/tree/main/viewer/entity_render)。带物品的框保留完整的 `Item` 数据，当前外观绘制框体。
 
 ## 宿主选择材质
 

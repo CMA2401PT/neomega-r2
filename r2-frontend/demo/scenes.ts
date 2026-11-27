@@ -43,6 +43,22 @@ function glassWall(depth: number): Scene["build"] {
 const view = { camera: [32, 16, 58], target: [32, 3, 25] };
 
 export const scenes: Record<string, Scene> = {
+  frames: {
+    label: "空展示框",
+    camera: [40.5, 4.5, 43],
+    target: [40.5, 3.5, 40.5],
+    build(world) {
+      ground(world);
+      world.set(40, 3, 40, quartz);
+      // 框体中心离支撑方块中心 17/32 格。六面共用一个子区块，每个实体都有自己的 UUID。
+      const normals = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+      const entries = normals.map((normal, facing) => {
+        const position = [40.5, 3.5, 40.5].map((v, i) => (v + normal[i] * 17 / 32) + "d");
+        return `{id:"minecraft:item_frame",UUID:[I;0,0,0,${facing}],Facing:${facing}b,Pos:[${position}]}`;
+      });
+      world.setEntities([2, 0, 2], entries);
+    },
+  },
   special: {
     label: "附魔台、陶罐、旗帜和告示牌",
     camera: [33.5, 4, 31.5],

@@ -147,6 +147,7 @@ export function r2linkSource(url: string, options: R2LinkOptions = {}): R2LinkSo
       } else if (type === "blockEntities") {
         const want = objects.get(key(x, z));
         if (want && want.radius === header.radius && want.center.every((v, i) => v === header.center[i])) {
+          sink?.entities?.(x, z, header.entities ?? []);
           if (sink?.blockEntities) sink.blockEntities(x, z, header.entries as BlockEntity[]);
           else sink?.objects(x, z, []);
         }

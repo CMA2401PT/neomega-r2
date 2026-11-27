@@ -1,8 +1,10 @@
+import { entityObject, registerEntities } from "../entities/entities.ts";
 import {
   hashSections,
   regionKey,
   unpack,
   WorldSession,
+  ObjectRegistry,
   type DataSource,
   type WorldSink,
   type Renderer,
@@ -12,7 +14,7 @@ import {
   type Vec3,
   type SessionOptions,
 } from "neomega-r2-core";
-import { hasAppearance, appearance, blockRegistry } from "./blocks.ts";
+import { hasAppearance, appearance, registerBlocks } from "./blocks.ts";
 
 interface Candidate {
   hash: number;
@@ -27,6 +29,7 @@ interface Section {
 interface Near {
   want: ObjectWant;
   snbt: Map<string, string>;
+  entities: Map<string, { object: ObjectDescriptor; snbt: string }>;
   custom: ObjectDescriptor[];
   received: boolean;
 }
@@ -38,7 +41,7 @@ function inRange(section: number[], { center, radius }: ObjectWant): boolean {
   );
 }
 
-/** 包装任何区域数据源。只保留命中特殊状态的压缩子区块，进入近景后才展开它们。 */
+/** 包装任何区域数据源。按区域合并方块外观、普通实体与宿主对象。只有包含特殊状态的子区块需要在近景展开。 */
 export function specialBlockSource(source: DataSource, onError: (message: string) => void = console.error) {
   const sections = new Map<string, Section[] | null>(),
     near = new Map<string, Near>();
@@ -54,6 +57,8 @@ export function specialBlockSource(source: DataSource, onError: (message: string
         slice.want,
       ),
     );
+    for (const { object } of slice.entities.values())
+      if (inRange(object.position.map(v => Math.floor(v / 16)), slice.want)) objects.push(object);
     for (const section of blocks) {
       const origin = section.compressed.position;
       if (!inRange(origin, slice.want)) {
@@ -92,10 +97,11 @@ export function specialBlockSource(source: DataSource, onError: (message: string
     sink.objects(x, z, objects, complete);
   }
   return {
-    snbtAt(position: number[]) {
+    snbtAt(position: number[], objectKey?: string) {
       const section = position.map((v) => Math.floor(v / 16));
       const slice = near.get(regionKey(Math.floor(section[0] / 8), Math.floor(section[2] / 8)));
-      return slice && inRange(section, slice.want) ? slice.snbt.get(position.join("/")) : undefined;
+      if (!slice || !inRange(section, slice.want)) return;
+      return objectKey?.startsWith("entity/") ? slice.entities.get(objectKey)?.snbt : slice.snbt.get(position.join("/"));
     },
     open(next: WorldSink) {
       sink = next;
@@ -123,6 +129,22 @@ export function specialBlockSource(source: DataSource, onError: (message: string
             slice.received = true;
             publish(x, z);
           }
+        },
+        entities(x, z, entries) {
+          const key = regionKey(x, z), slice = near.get(key);
+          if (!slice) return;
+          slice.received = true;
+          slice.entities.clear();
+          for (const [index, snbt] of entries.entries()) {
+            try {
+              const object = entityObject(snbt, key + "/entry/" + index);
+              if (object) slice.entities.set(object.key, { object, snbt });
+            } catch (error) {
+              if (!(error instanceof SyntaxError)) throw error;
+              onError(`区域 ${key} 中第 ${index + 1} 个实体的数据有误：${error.message}`);
+            }
+          }
+          publish(x, z);
         },
         blockEntities(x, z, entries) {
           const slice = near.get(regionKey(x, z));
@@ -152,7 +174,7 @@ export function specialBlockSource(source: DataSource, onError: (message: string
           slice.want = want;
           publish(want.x, want.z, false);
           slice.received = false;
-        } else near.set(key, { want, snbt: new Map(), custom: [], received: false });
+        } else near.set(key, { want, snbt: new Map(), entities: new Map(), custom: [], received: false });
       }
       source.want(change);
     },
@@ -170,8 +192,9 @@ export function blockWorldSession(
   source: DataSource,
   options: Omit<SessionOptions, "registry"> & Partial<Pick<SessionOptions, "registry">> = {},
 ) {
-  return new WorldSession(renderer, specialBlockSource(source, options.onError), {
-    ...options,
-    registry: blockRegistry(options.registry),
-  });
+  const registry = new ObjectRegistry();
+  registerBlocks(registry);
+  registerEntities(registry);
+  for (const [kind, factory] of options.registry?.factories ?? []) registry.register(kind, factory);
+  return new WorldSession(renderer, specialBlockSource(source, options.onError), { ...options, registry });
 }

@@ -1,12 +1,12 @@
 # neomega-r2link：R2 浏览器与世界数据源之间的协议
 
-R2Link 让游戏机器人、服务器插件或存档服务把方块世界交给 [R2 渲染器](../r2-core/README.md)显示。数据源监听 WebSocket，浏览器作为客户端连接它。浏览器的世界会话按相机位置决定需要哪些区域，告诉数据源；数据源回送压缩区域、近景方块实体和相机指令。浏览器不保存世界，所以数据源只需要能按区域读取，不必关心浏览器缓存了什么。
+R2Link 让游戏机器人、服务器插件或存档服务把方块世界交给 [R2 渲染器](../r2-core/README.md)显示。数据源监听 WebSocket，浏览器作为客户端连接它。浏览器的世界会话按相机位置决定需要哪些区域，告诉数据源；数据源回送压缩区域、近景方块实体、普通实体和相机指令。浏览器不保存世界，所以数据源只需要能按区域读取，不必关心浏览器缓存了什么。
 
 [neomega-viewer-r2](../../apps/neomega-viewer-r2/README.md) 自己的存档与内置场景也走这条路：Go 服务在 `/r2link` 上把当前世界作为数据源提供给同源页面。外部数据源在 HUD 的连接按钮里填写地址。
 
 协议中的 `region` 指 r2region，横向覆盖 8×8 个区块（chunk）。每个区块沿高度分成 16×16×16 方块的子区块（subchunk），一个 `region` 消息携带该范围内有数据的子区块。
 
-Go 服务按订阅发送状态哈希和原始方块实体。每个实体由世界坐标和完整的 SNBT 文本表示。SNBT 是保留 NBT 数据类型的文本格式。浏览器一侧是 neomega-r2 的 `r2linkSource`。
+Go 服务按订阅发送状态哈希及两类近景数据。方块实体按格子定位，普通实体的世界坐标和身份在其 Java SNBT 中。SNBT 是保留 NBT 数据类型的文本格式。浏览器一侧是 neomega-r2 的 `r2linkSource`。
 
 ## 消息
 
@@ -56,14 +56,14 @@ n 字节    UTF-8 JSON 头，必有 "type"
 | type | 字段 | 尾部 | 含义 |
 |---|---|---|---|
 | `region` | `x`、`z`、`clippedSections` | 区域编码 | 区域的全部方块。尾部为空表示区域为空。再次发送同一区域即更新。 |
-| `blockEntities` | `x`、`z`、`center`、`radius`、`entries` | | 区域内近景方块实体的完整列表，可以为空。每个 `blockEntities.add` 都要有回复。 |
+| `blockEntities` | `x`、`z`、`center`、`radius`、`entries`、可选的 `entities` | | 区域内两类近景数据的完整列表，可以为空。每个 `blockEntities.add` 都要有回复。 |
 | `failed` | `x`、`z`、`message` | | 区域读取失败，浏览器显示为失败区域。 |
 | `chunks` | `message` | 占用表 | 回复 `chunks` 请求，按请求顺序；`message` 非空表示失败。没有占用表时尾部为空。 |
 | `camera` | `camera` | | 让浏览器移动相机，格式同 welcome。 |
 | `scene` | `scene` | | 更新世界描述。 |
 | `error` | `message` | | 致命错误，随后关闭连接。 |
 
-`clippedSections` 是区域内因超出可显示高度而省略的 section 数，可以省略。`center` 和 `radius` 回显所响应的订阅范围，以便浏览器在移动后丢弃过期回复。每条 `entries` 记录包含整数世界坐标 `position` 和完整的 `snbt` 字符串。同一区域的新列表整体替换旧列表，空列表会清除原有数据。
+`clippedSections` 是区域内因超出可显示高度而省略的 section 数，可以省略。`center` 和 `radius` 回显所响应的订阅范围，以便浏览器在移动后丢弃过期回复。每条 `entries` 记录包含整数世界坐标 `position` 和完整的 `snbt` 字符串。普通实体放在 `entities` 字符串数组中，每项是保留 `Pos` 和身份字段的完整 Java SNBT。同一区域的新快照整体替换旧快照，省略 `entities` 或发送空数组都会撤下旧的普通实体。
 
 ```json
 {"type":"blockEntities","x":0,"z":0,"center":[0,4,0],"radius":2,"entries":[{"position":[5,64,7],"snbt":"{Command:\"say hi\"}"}]}
@@ -96,7 +96,7 @@ section 内第 i 个索引对应格子 `x = i >> 8, z = (i >> 4) & 15, y = i & 1
 
 ## Go 数据源
 
-数据源实现 `Source`，可选实现 `BlockEntitySource` 与 `ChunkSource`，然后在 HTTP 处理函数里接受连接并交给 `Serve`：
+数据源实现 `Source`，可选实现 `BlockEntitySource`、`EntitySource` 与 `ChunkSource`，然后在 HTTP 处理函数里接受连接并交给 `Serve`：
 
 ```go
 type world struct{ /* … */ }
@@ -128,7 +128,7 @@ http.HandleFunc("/r2link", func(w http.ResponseWriter, r *http.Request) {
 | 方法 | 作用 |
 |---|---|
 | `Update(x, z)` | 区域方块变了，浏览器仍需要时重读并发送。 |
-| `UpdateBlockEntities(x, z)` | 区域的方块实体变了。 |
+| `UpdateBlockEntities(x, z)` | 区域的方块实体或普通实体变了。 |
 | `Refresh()` | 整个世界换了内容，重发所有仍需要的区域与对象。 |
 | `MoveCamera(ctx, camera)` | 移动浏览器的相机。 |
 | `SetScene(ctx, scene)` | 更新世界描述。 |
@@ -137,7 +137,9 @@ http.HandleFunc("/r2link", func(w http.ResponseWriter, r *http.Request) {
 
 其他工具：`Pack` 把 4096 个哈希压成最小位宽的 section，`EncodeRegion` 写出区域编码，`IsAir` 判断三种空气，`ChunkIndex` 生成占用表。
 
-### 方块实体
+### 近景方块实体和普通实体
+
+实现 `Entities(ctx, x, z, center, radius) ([]string, error)` 可用同一近景订阅交付普通实体。数据源按位置筛选并序列化完整 Java SNBT，前端按实体的 `id` 选择外观。
 
 实现 `BlockEntities(ctx, x, z, center, radius)` 即可提供近景数据。遍历订阅范围内的方块实体，保留其坐标和全部字段。浏览器根据已有区域中的状态哈希识别附魔台、陶罐、旗帜和告示牌。完整 SNBT 也用于点击查看。外观与固定素材见 [前端实现](../r2-frontend/src/special-blocks/)。
 

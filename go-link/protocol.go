@@ -79,14 +79,15 @@ type BlockEntity struct {
 	SNBT     string `json:"snbt"`
 }
 
-// BlockEntities 是一次近景订阅覆盖范围内的完整方块实体列表。
+// BlockEntities 同时发布同一近景内的两份快照。普通实体保留完整 Java SNBT，包括 Pos 和 UUID。
 type BlockEntities struct {
-	Type    string        `json:"type"`
-	X       int           `json:"x"`
-	Z       int           `json:"z"`
-	Center  [3]int        `json:"center"`
-	Radius  int           `json:"radius"`
-	Entries []BlockEntity `json:"entries"`
+	Type     string        `json:"type"`
+	X        int           `json:"x"`
+	Z        int           `json:"z"`
+	Center   [3]int        `json:"center"`
+	Radius   int           `json:"radius"`
+	Entries  []BlockEntity `json:"entries"`
+	Entities []string      `json:"entities,omitempty"`
 }
 
 // Failed 表示区域无法提供；浏览器把它标为失败，直到再次需要或收到新数据。

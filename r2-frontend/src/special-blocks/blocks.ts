@@ -1,4 +1,4 @@
-import { blockHash, ObjectRegistry, type ObjectDescriptor, type Vec3 } from "neomega-r2-core";
+import { blockHash, type ObjectRegistry, type ObjectDescriptor, type Vec3 } from "neomega-r2-core";
 import { isCompound, parseSNBT } from "../libs/snbt.ts";
 import { banner, bannerLayers, dyes } from "./banner/banner.ts";
 import { enchantingBook } from "./book/book.ts";
@@ -96,13 +96,11 @@ export function appearance(hash: number, position: Vec3, snbt?: string): ObjectD
     return { key, kind: state.kind, position, data, appearanceKey: JSON.stringify(data) };
 }
 
-/** 为标准查看器注册内置外观，同时保留宿主自定义的工厂。 */
-export function blockRegistry(custom?: ObjectRegistry): ObjectRegistry {
-  const registry = new ObjectRegistry()
+/** 登记由方块状态或方块实体决定的内置外观。 */
+export function registerBlocks(registry: ObjectRegistry): void {
+  registry
     .register("enchanting_book", enchantingBook)
     .register("pot", (d) => decoratedPot(d.data as Parameters<typeof decoratedPot>[0]))
     .register("banner", (d) => banner(d.data as Parameters<typeof banner>[0]))
     .register("sign", (d) => sign(d.data as Parameters<typeof sign>[0]));
-  for (const [kind, factory] of custom?.factories ?? []) registry.register(kind, factory);
-  return registry;
 }

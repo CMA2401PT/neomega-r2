@@ -121,3 +121,34 @@ test("部分区域进出近景、同格文字变化以及未知实体的查看�
   source.close();
   assert.equal(source.snbtAt([0, 0, 0]), undefined);
 });
+
+test("同格实体按拾取标识查看原文，替换快照只撤下被删除的实体", async () => {
+  const world = new MemoryWorld();
+  const block = "{CustomName:'格子'}";
+  const frames = [1, 2].map(id =>
+    `{id:"minecraft:item_frame",Pos:[0.5d,0.5d,0.5d],Facing:2b,UUID:[I;0,0,0,${id}]}`
+  );
+  world.setBlockEntity([0, 0, 0], block);
+  world.setEntities([0, 0, 0], frames);
+  world.commit();
+  const source = specialBlockSource(memorySource(world));
+  let visible;
+  source.open({ region() {}, objects(x, z, entries) { visible = entries; } });
+  source.want({
+    center: [0, 0],
+    regions: { add: [{ x: 0, z: 0 }], remove: [] },
+    objects: { add: [{ x: 0, z: 0, center: [0, 0, 0], radius: 1 }], remove: [] },
+  });
+  await Promise.resolve();
+  const [first, second] = visible;
+  assert.notEqual(first.key, second.key);
+  assert.equal(source.snbtAt([0, 0, 0]), block);
+  assert.equal(source.snbtAt([0, 0, 0], first.key), frames[0]);
+  world.setEntities([0, 0, 0], [frames[1]]);
+  world.commit();
+  await Promise.resolve();
+  assert.deepEqual(visible.map(d => d.key), [second.key]);
+  assert.equal(source.snbtAt([0, 0, 0], first.key), undefined);
+  assert.equal(source.snbtAt([0, 0, 0], second.key), frames[1]);
+  source.close();
+});

@@ -22,10 +22,10 @@ rmSync(dist, { recursive: true, force: true });
 execFileSync(process.execPath, [tscBin, "-p", root], { stdio: "inherit" });
 
 // 固定素材与实现一起交付，目录版、在线查看器和单文件播放器共用相同的图片。
-for (const block of ["book", "pot", "banner", "sign"]) {
+for (const directory of ["special-blocks/book", "special-blocks/pot", "special-blocks/banner", "special-blocks/sign", "entities/item-frame"]) {
   await build({
-    entryPoints: [join(root, "src/special-blocks", block, "assets.ts")],
-    outfile: join(dist, "special-blocks", block, "assets.js"),
+    entryPoints: [join(root, "src", directory, "assets.ts")],
+    outfile: join(dist, directory, "assets.js"),
     bundle: true,
     format: "esm",
     loader: { ".png": "dataurl", ".gz": "dataurl" },
