@@ -12,6 +12,7 @@ const bundle = await build({
     resolveDir: root,
     contents: `
     export { MemoryWorld, memorySource } from "neomega-r2-core";
+    export { frameRenderer } from "./r2-frontend/src/entities/item-frame/frame.ts";
     export { specialBlockSource } from "./r2-frontend/src/special-blocks/source.ts";
     export { bannerLayers } from "./r2-frontend/src/special-blocks/banner/banner.ts";
     export { potFaces } from "./r2-frontend/src/special-blocks/pot/pot.ts";`,
@@ -22,7 +23,7 @@ const bundle = await build({
   format: "esm",
   write: false,
 });
-const { MemoryWorld, memorySource, specialBlockSource, bannerLayers, potFaces } = await import(
+const { MemoryWorld, memorySource, specialBlockSource, bannerLayers, potFaces, frameRenderer } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].contents).toString("base64")
 );
 test("读取 Go SNBT 的长整数、数值数组与原文转义", () => {
@@ -151,4 +152,25 @@ test("同格实体按拾取标识查看原文，替换快照只撤下被删除�
   assert.equal(source.snbtAt([0, 0, 0], first.key), undefined);
   assert.equal(source.snbtAt([0, 0, 0], second.key), frames[1]);
   source.close();
+});
+
+test("隐形展示框只生成内容的几何，物品旋转保留厚度和材质", async () => {
+  const frame = { Pos: [0, 0, 0], Facing: 2, Invisible: 1, Item: { id: "minecraft:diamond_sword" } };
+  const recipe = nbt => frameRenderer.factory({
+    kind: "minecraft:item_frame", ...frameRenderer.appearance(nbt),
+  });
+  const sword = await recipe(frame);
+  const turned = await recipe({ ...frame, ItemRotation: 2 });
+  const block = await recipe({ ...frame, Item: { id: "minecraft:sea_lantern" } });
+  assert.equal(sword.mesh.triangles.length, 2);
+  assert.equal(block.mesh.triangles.length, 12);
+  assert.equal(new Set(sword.mesh.vertices.map(v => v.position[2])).size, 1);
+  assert.equal(new Set(block.mesh.vertices.map(v => v.position[2])).size, 2);
+  for (const [i, { position: [x, y, z], uv }] of sword.mesh.vertices.entries()) {
+    const vertex = turned.mesh.vertices[i];
+    assert.deepEqual(vertex.uv, uv);
+    assert.ok(Math.abs(vertex.position[0] + y) < 1e-8 && Math.abs(vertex.position[1] - x) < 1e-8);
+    assert.equal(vertex.position[2], z);
+  }
+  assert.equal(frameRenderer.appearance({ ...frame, Item: { id: "unknown:model" } }), undefined);
 });

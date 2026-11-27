@@ -59,6 +59,20 @@ export const scenes: Record<string, Scene> = {
       world.setEntities([2, 0, 2], entries);
     },
   },
+  frame_items: {
+    label: "展示框里的物品与方块",
+    camera: [40.5, 4, 43.5],
+    target: [40.5, 3.5, 41],
+    build(world) {
+      ground(world);
+      world.fill([39, 3, 40], [41, 3, 40], quartz);
+      const entries = ["sea_lantern", "diamond_sword", "oak_stairs"].map((item, index) => {
+        const x = 39.5 + index;
+        return `{id:"minecraft:item_frame",UUID:[I;1,0,0,${index}],Pos:[${x}d,3.5d,41.03125d],Facing:3b,Item:{id:"minecraft:${item}",count:1}}`;
+      });
+      world.setEntities([2, 0, 2], entries);
+    },
+  },
   special: {
     label: "附魔台、陶罐、旗帜和告示牌",
     camera: [33.5, 4, 31.5],

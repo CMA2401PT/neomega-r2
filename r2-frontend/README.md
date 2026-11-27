@@ -19,7 +19,7 @@ npm run demo
 
 之后运行 `npm run demo` 即可。启动命令从当前源码构建页面，并读取本地生成的材质。
 
-打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。打开 <http://127.0.0.1:2415/?scene=frames> 可以围绕同一个支撑方块观察六个朝向的空展示框，单击框体查看实体 SNBT。其他示例页：
+打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。打开 <http://127.0.0.1:2415/?scene=frames> 可以围绕同一个支撑方块观察六个朝向的空展示框，单击框体查看实体 SNBT。带物品的场景并排放置了海晶灯、钻石剑和橡木楼梯。[打开物品展示框](http://127.0.0.1:2415/?scene=frame_items)。其他示例页：
 
 - 内存世界单页接入：<http://127.0.0.1:2415/release/standalone.html>（源码 [examples/standalone.html](examples/standalone.html)）
 - 按需 `DataSource` 接入：<http://127.0.0.1:2415/release/datasource.html>（源码 [examples/datasource.html](examples/datasource.html)）
@@ -113,7 +113,11 @@ const blob = await compositor.renderToPNG(renderer.frame!, {
 
 展示框使用普通实体入口。数据源用 `sink.entities?.(x, z, entries)` 提交区域内的 Java SNBT 字符串快照。前端按 `id` 注册外观，按 `Pos` 放置框体，按 `Facing` 旋转。点击框体会按实体标识找到其原始 SNBT。离开近景后，框体与这份近景数据一起撤下。内存场景用 `world.setEntities([sx, sy, sz], entries)` 替换一个子区块的实体，再调用 `world.commit()`。
 
-框体模板、底板和桦木边纹取自 Minecraft Java 26.3 客户端，随 [展示框实现](src/entities/item-frame/) 分发，权利归原权利人。挂载方向参考了 [viewer-core 的实体实现](https://github.com/CMA2401PT/neomega-viewer-core/tree/main/viewer/entity_render)。带物品的框保留完整的 `Item` 数据，当前外观绘制框体。
+框体模板、底板和桦木边纹取自 Minecraft Java 26.3 客户端，随 [展示框实现](src/entities/item-frame/) 分发，权利归原权利人。挂载方向参考了 [viewer-core 的实体实现](https://github.com/CMA2401PT/neomega-viewer-core/tree/main/viewer/entity_render)。
+
+框内物品由 `Item.id` 或物品栈的 `minecraft:item_model` 组件选定。图标用两个三角形组成一张双面矩形，透明像素让射线穿过。方块物品使用 Java 模型的固定展示姿态，保留楼梯等模型的立体形状。`ItemRotation` 每增加一档，就将内容绕框面中心转动 45°。框体和物品共用一个拾取标识，因此点击任一可见部分都能打开同一份实体 SNBT。
+
+固定物品表和贴图随前端分发，来源为 Java 26.3。该表覆盖静态模型。动画材质取第一帧，半透明纹素沿用核心的透明裁切。对于没有静态模型的物品（例如指南针），可见框保留框体，完整物品数据仍可查看。[物品实现与素材](src/items/)
 
 ## 宿主选择材质
 

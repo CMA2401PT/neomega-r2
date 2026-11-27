@@ -1,5 +1,7 @@
 import type { MeshRecipe, TriangleMesh, Vec3 } from "neomega-r2-core";
 import type { EntityRenderer } from "../entities.ts";
+import { appendItemModel, displayedModel } from "../../items/items.ts";
+import { itemAtlasURL } from "../../items/assets.ts";
 import { frameURL } from "./assets.ts";
 import model from "./model.json" with { type: "json" };
 
@@ -30,9 +32,8 @@ function corners(face: typeof directions[number], u: number, v: number): Vec3 {
   }
 }
 
-/** 框体沿用 Java 的底板和四根木边。图案与木纹在同一张固定图集，只需一次材质登记。 */
-function itemFrame(facing: Facing, glow: boolean): MeshRecipe {
-  const mesh: TriangleMesh = { vertices: [], triangles: [] };
+/** 加入底板与四根木边。小图和物品图集开头都按木纹、普通底板、发光底板排列。 */
+function appendFrame(mesh: TriangleMesh, facing: Facing, glow: boolean): void {
   const center = [8, 8, 15.5];
   for (const { from, to, faces } of model.elements) {
     for (const face of directions) {
@@ -48,16 +49,45 @@ function itemFrame(facing: Facing, glow: boolean): MeshRecipe {
       mesh.triangles.push({ indices: [first, first + 1, first + 2] }, { indices: [first, first + 2, first + 3] });
     }
   }
-  return { texture: { url: frameURL }, mesh };
+}
+
+interface FrameAppearance {
+  facing: Facing;
+  invisible: boolean;
+  item?: string;
+  rotation: number;
+}
+
+/** 在朝北的局部坐标中旋转物品，再将框内外的表面一起转到挂载方向。 */
+async function itemFrame({ facing, invisible, item, rotation }: FrameAppearance, glow: boolean): Promise<MeshRecipe> {
+  const mesh: TriangleMesh = { vertices: [], triangles: [] };
+  if (!invisible) appendFrame(mesh, facing, glow);
+  if (item) {
+    const angle = rotation * Math.PI / 4, cos = Math.cos(angle), sin = Math.sin(angle);
+    // 原版固定展示缩放为一半。隐形框去掉底板后，物品更靠近支撑方块。
+    const depth = invisible ? 1 / 32 : -1 / 32;
+    await appendItemModel(mesh, item, ([x, y, z]) => orient([
+      (cos * x - sin * y) / 2,
+      (sin * x + cos * y) / 2,
+      z / 2 + depth,
+    ], facing), glow);
+  }
+  return { texture: { url: item ? itemAtlasURL : frameURL }, mesh };
 }
 
 export const frameRenderer: EntityRenderer = {
   appearance(nbt) {
-    if (nbt.Invisible === 1 || nbt.Invisible === true) return;
+    const invisible = nbt.Invisible === 1 || nbt.Invisible === true;
+    const item = displayedModel(nbt.Item);
+    if (invisible && !item) return;
     const facing = nbt.Facing ?? 0;
     if (typeof facing !== "number" || !Number.isInteger(facing) || facing < 0 || facing > 5)
       throw new SyntaxError("展示框 Facing 应为 0 到 5 的整数");
-    return { data: facing };
+    const rotation = item ? nbt.ItemRotation ?? 0 : 0;
+    if (typeof rotation !== "number" || !Number.isInteger(rotation))
+      throw new SyntaxError("展示框 ItemRotation 应为整数");
+    const data: FrameAppearance = { facing: facing as Facing, invisible, item, rotation: rotation & 7 };
+    return { data, appearanceKey: JSON.stringify(data) };
   },
-  factory: descriptor => itemFrame(descriptor.data as Facing, descriptor.kind === "minecraft:glow_item_frame"),
+  factory: descriptor => itemFrame(descriptor.data as FrameAppearance, descriptor.kind === "minecraft:glow_item_frame"),
 };
