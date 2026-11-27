@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
-import { parseSNBT } from "../src/libs/snbt.ts";
+import { isCompound, parseSNBT } from "../src/libs/snbt.ts";
 import { signSides } from "../src/special-blocks/sign/text.ts";
 
 // 和浏览器构建共用素材加载方式，在无 WebGPU 的环境验证数据源到绘制描述的边界。
@@ -25,11 +25,19 @@ const bundle = await build({
 const { MemoryWorld, memorySource, specialBlockSource, bannerLayers, potFaces } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].contents).toString("base64")
 );
-test("原文保留 Long、引号、反斜线和换行，外观共享 Java 和 Bedrock 语义", () => {
-  const root = parseSNBT('{a:[L;9007199254740993,-1L],b:[B;1b],s:"\\\"\\\\\n"}');
-  assert.deepEqual(root.a, [9007199254740993n, -1n]);
-  assert.deepEqual(root.b, [1]);
+test("读取 Go SNBT 的长整数、数值数组与原文转义", () => {
+  const root = parseSNBT('{a:[L;9007199254740993,-1],b:[B;-128,127],i:[I;],s:"\\\"\\\\\n"}');
+  assert.deepEqual(root.a, BigInt64Array.of(9007199254740993n, -1n));
+  assert.deepEqual(root.b, Int8Array.of(-128, 127));
+  assert.deepEqual(root.i, new Int32Array());
+  assert.equal(isCompound(root.i), false);
+  assert.equal(parseSNBT("9007199254740993l"), 9007199254740993n);
+  assert.throws(() => parseSNBT("{}junk"), SyntaxError);
+  assert.throws(() => parseSNBT("[B;128]"), SyntaxError);
   assert.equal(root.s, '"\\\n');
+});
+
+test("方块外观兼容 Java 和 Bedrock 字段", () => {
   assert.deepEqual(
     bannerLayers({ id: "Banner", Patterns: [{ Pattern: "cr", Color: 1 }] }, "blue"),
     bannerLayers({ patterns: [{ pattern: "minecraft:cross", color: "red" }] }, "blue"),
@@ -45,8 +53,9 @@ test("原文保留 Long、引号、反斜线和换行，外观共享 Java 和 Be
 });
 
 test("部分区域进出近景、同格文字变化以及未知实体的查看彼此独立", async () => {
+  const errors = [];
   const world = new MemoryWorld(),
-    source = specialBlockSource(memorySource(world));
+    source = specialBlockSource(memorySource(world), (message) => errors.push(message));
   const position = [4, 0, 0],
     raw = '{front_text:{messages:["甲"]}}';
   world.set(...position, 'oak_sign ["rotation"="0"]');
@@ -79,6 +88,12 @@ test("部分区域进出近景、同格文字变化以及未知实体的查看�
   assert.equal(source.snbtAt([0, 0, 0]), "{unknown:9223372036854775807L}");
   assert.equal(source.snbtAt(position), raw);
   const oldSign = visible.find((o) => o.kind === "sign").key;
+  world.setBlockEntity(position, "{front_text:");
+  world.commit();
+  await Promise.resolve();
+  assert.equal(errors.length, 1);
+  assert.equal(source.snbtAt(position), "{front_text:");
+  assert.deepEqual(visible.map((o) => o.kind), ["enchanting_book"]);
   world.setBlockEntity(position, '{Text1:"乙"}');
   world.commit();
   await Promise.resolve();

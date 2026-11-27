@@ -39,7 +39,7 @@ function inRange(section: number[], { center, radius }: ObjectWant): boolean {
 }
 
 /** 包装任何区域数据源。只保留命中特殊状态的压缩子区块，进入近景后才展开它们。 */
-export function specialBlockSource(source: DataSource) {
+export function specialBlockSource(source: DataSource, onError: (message: string) => void = console.error) {
   const sections = new Map<string, Section[] | null>(),
     near = new Map<string, Near>();
   let sink: WorldSink;
@@ -76,7 +76,14 @@ export function specialBlockSource(source: DataSource) {
       for (const cell of section.candidates) {
         const snbt = slice.snbt.get(cell.position.join("/"));
         if (snbt !== cell.snbt) {
-          cell.object = appearance(cell.hash, cell.position, snbt);
+          try {
+            cell.object = appearance(cell.hash, cell.position, snbt);
+          } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
+            // 单格数据损坏时保留原文供点击查看，其他方块继续处理。
+            cell.object = undefined;
+            onError(`方块 (${cell.position.join(", ")}) 的 SNBT 无法解析：${error.message}`);
+          }
           cell.snbt = snbt;
         }
         if (cell.object) objects.push(cell.object);
@@ -163,7 +170,7 @@ export function blockWorldSession(
   source: DataSource,
   options: Omit<SessionOptions, "registry"> & Partial<Pick<SessionOptions, "registry">> = {},
 ) {
-  return new WorldSession(renderer, specialBlockSource(source), {
+  return new WorldSession(renderer, specialBlockSource(source, options.onError), {
     ...options,
     registry: blockRegistry(options.registry),
   });
