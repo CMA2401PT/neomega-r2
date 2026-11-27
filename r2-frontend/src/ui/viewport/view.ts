@@ -7,6 +7,7 @@ import { appearanceDefaults, bindAppearance, lighting } from "../settings/appear
 import { drawAxes } from "./axes.ts";
 import { FlightControls } from "../navigation/controls.ts";
 import { element } from "../layout/dom.ts";
+import { createSNBTInspector } from "./snbt-inspector.ts";
 import { FrameRate } from "./frame-rate.ts";
 import { createHUD } from "../layout/hud.ts";
 import { FullscreenMap } from "../navigation/map.ts";
@@ -44,13 +45,8 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   const marks = new SceneMarks();
   const jump = (position: number[]) => { camera.position = position; };
   const map = new FullscreenMap({ renderer, camera, jump, overlay: marks });
-  let inspection: ViewerWorld | null = null;
-  let pickRequest = 0;
-  const entityDialog = element<HTMLDialogElement>("block-entity");
+  const inspector = createSNBTInspector(marks, () => map.open);
   const controls = new FlightControls(viewCanvas, camera, event => {
-    const current = inspection;
-    if (!current || map.open) return;
-    const request = ++pickRequest;
     const rect = viewCanvas.getBoundingClientRect();
     const pixel = {
       width: rect.width,
@@ -60,14 +56,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       objects: true,
       voxel: shownTier === "voxel",
     };
-    void current.pick(structuredClone(displayedCamera ?? camera), pixel).then(hit => {
-      if (!hit || request !== pickRequest || inspection !== current || map.open) return;
-      const snbt = current.snbt(hit);
-      if (snbt === undefined) return;
-      element("block-entity-title").textContent = (hit.entityId !== undefined ? "实体 SNBT · " : "方块 SNBT · ") + hit.position.join(", ");
-      element("block-entity-text").textContent = snbt;
-      entityDialog.showModal();
-    }).catch(error => hud.error(String(error)));
+    void inspector.pick(displayedCamera ?? camera, pixel).catch(error => hud.error(String(error)));
   });
   const events = new AbortController();
   bindMovePad(element("movepad"), controls, events.signal);
@@ -116,7 +105,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     if (width === sampleWidth && height === sampleHeight) return;
     sampleWidth = width;
     sampleHeight = height;
-    sizeReadout.textContent = `${width}×${height}`;
+    sizeReadout.textContent = `${width} × ${height}`;
   }
   // 预览之外的各档启动时不编译；第一次需要时在后台编译，期间画面继续使用已有的档。
   const taskStatus = element<HTMLOutputElement>("task-status");
@@ -323,7 +312,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
   }
 
   function frame(now: number, world: ViewerWorld | WorldSession | null, options?: FrameOptions) {
-    inspection = world && "session" in world ? world : null;
+    inspector.setWorld(world && "session" in world ? world : null);
     const session = world && "session" in world ? world.session : world;
     if (stopped) return;
     try {
@@ -471,7 +460,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
         ? accumulating && !view.overview
           ? `静止（累积 ${renderer.accumulated} 样本${tiles ? ` · 当前 ${tiles.done}/${tiles.total} 块` : ""}）`
           : "静止"
-        : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)} FPS`;
+        : `${fps === null ? "—" : fps < 10 ? fps.toFixed(1) : Math.round(fps)}FPS`;
       if (session) {
         const stats = session.stats,
           times = renderer.times.sort((a, b) => a - b),
@@ -496,8 +485,8 @@ export function createView({ renderer, camera, settings, startup: externalStartu
           const outWidth = superResolution !== "off" ? screenSize.width : width;
           const outHeight = superResolution !== "off" ? screenSize.height : height;
           element("render-info-pixels").textContent = outWidth !== width || outHeight !== height
-            ? `${width}×${height} → ${outWidth}×${outHeight}`
-            : `${width}×${height}`;
+            ? `${width} × ${height} → ${outWidth} × ${outHeight}`
+            : `${width} × ${height}`;
         }
         onStats?.({ stats, shownTier, median, width, height });
       }
@@ -541,9 +530,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
     hud, map, frame, refreshSettings, cancelPhoto, frames: rate.intervals,
     get fps() { return rate.fps; },
     setWorld(loaded: boolean, readChunks?: () => ArrayBuffer | Promise<ArrayBuffer>) {
-      pickRequest++;
-      entityDialog.close();
-      inspection = null;
+      inspector.setWorld(null);
       drawn = "";
       rate.reset();
       currentView = null;
@@ -555,9 +542,7 @@ export function createView({ renderer, camera, settings, startup: externalStartu
       return map.setWorld(readChunks);
     },
     dispose() {
-      inspection = null;
-      pickRequest++;
-      entityDialog.close();
+      inspector.setWorld(null);
       stopped = true;
       startup.finish();
       renderer.cancelAccumulation();

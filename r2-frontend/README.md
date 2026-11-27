@@ -19,7 +19,7 @@ npm run demo
 
 之后运行 `npm run demo` 即可。启动命令从当前源码构建页面，并读取本地生成的材质。
 
-打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。打开 <http://127.0.0.1:2415/?scene=frames> 可以围绕同一个支撑方块观察六个朝向的空展示框，单击框体查看实体 SNBT。带物品的场景并排放置了海晶灯、钻石剑和橡木楼梯。[打开物品展示框](http://127.0.0.1:2415/?scene=frame_items)。其他示例页：
+打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。打开 <http://127.0.0.1:2415/?scene=frames> 可以围绕同一个支撑方块观察六个朝向的空展示框，点亮底栏的手套，再单击框体查看实体 SNBT。带物品的场景并排放置了海晶灯、钻石剑和橡木楼梯。[打开物品展示框](http://127.0.0.1:2415/?scene=frame_items)。其他示例页：
 
 - 内存世界单页接入：<http://127.0.0.1:2415/release/standalone.html>（源码 [examples/standalone.html](examples/standalone.html)）
 - 按需 `DataSource` 接入：<http://127.0.0.1:2415/release/datasource.html>（源码 [examples/datasource.html](examples/datasource.html)）
@@ -100,6 +100,8 @@ const blob = await compositor.renderToPNG(renderer.frame!, {
 参考实现见 [demo/main.ts](demo/main.ts) 与 [apps/neomega-viewer-r2/web/app.ts](../../apps/neomega-viewer-r2/web/app.ts)。
 
 ## 点击查看近景 SNBT
+
+点击底栏手套开启检查。带 SNBT 的近景方块会显示红色线框，点击方块或展示框可查看原文。再点一次手套会移除线框并停止点击检查。
 
 使用 `mount()` 时，查看器会记录当前近景的原始快照。自行组装标准界面时，调用 `createViewerWorld(renderer, source)` 创建可查看原文的世界，将返回的世界交给 `view.frame(now, world)`。查看器在点击时按所属格坐标查方块，按实例 ID 查实体，然后在 HTML 面板显示原文。近景区域卸载时也释放对应记录。
 

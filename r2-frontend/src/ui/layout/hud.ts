@@ -52,12 +52,17 @@ export function createHUD({ settings, jump, changed }: { settings: ViewSettings;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     stopEditing();
   };
-  /** 场景信息之类的小弹窗对准触发按钮，贴在底部坐标栏上方。设置面板由 bindSettingsSheet 自行布局。 */
+  /** 底栏弹窗向上展开，帧率旁的性能面板在读数下方展开。 */
   function place(panel: HTMLElement) {
     const trigger = document.querySelector(`[popovertarget="${panel.id}"]`);
     const rect = trigger!.getBoundingClientRect();
     panel.style.left = `${Math.max(8, Math.min(innerWidth - panel.offsetWidth - 8, rect.left + rect.width / 2 - panel.offsetWidth / 2))}px`;
-    panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
+    if (panel.id === "render-info") {
+      panel.style.top = `${rect.bottom + 6}px`;
+      panel.style.maxHeight = `calc(100dvh - ${rect.bottom + 14}px)`;
+    } else {
+      panel.style.bottom = `${innerHeight - element("hud").getBoundingClientRect().top + 8}px`;
+    }
     panel.dataset.placed = "";
   }
   for (const panel of document.querySelectorAll<HTMLElement>(".popover")) {

@@ -15,9 +15,14 @@
         <path d="M3.5 6.5 9 4.5l6 2 5.5-2v13l-5.5 2-6-2-5.5 2Z" /><path d="M9 4.5v13M15 6.5v13" />
       </symbol>
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
-      <symbol id="i-resources" viewBox="0 0 24 24">
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <path d="M3 8.5h18M9 8.5V20M12 12h5.5M12 15.5h4" />
+      <symbol id="i-chip" viewBox="0 0 24 24">
+        <rect x="5.5" y="5.5" width="13" height="13" rx="2.5" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+        <path d="M8.5 2.5v3m3.5-3v3m3.5-3v3M8.5 18.5v3m3.5-3v3m3.5-3v3M2.5 8.5h3m-3 3.5h3m-3 3.5h3m13-7h3m-3 3.5h3m-3 3.5h3" />
+      </symbol>
+      <symbol id="i-point" viewBox="0 0 24 24">
+        <path d="M8.5 13V4a1.7 1.7 0 0 1 3.4 0v5.8a1.6 1.6 0 0 1 3.1.1v.8a1.5 1.5 0 0 1 2.9.4v.8a1.4 1.4 0 0 1 2.7.6v2.2c0 2-.9 3.4-1.8 4.9H9c-.9-1.5-2.4-3-3.6-4.4l-2-2.5c-1.2-1.6.7-3.4 2.1-2.1Z" />
+        <rect x="8.6" y="19.6" width="10.6" height="2.8" rx="1" />
       </symbol>
       <symbol id="i-folder" viewBox="0 0 24 24">
         <path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v8.3A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z" />
@@ -106,8 +111,14 @@
     <canvas id="view" tabindex="0" aria-label="三维世界视图"></canvas>
     <canvas id="map-overlay" tabindex="0" aria-label="全屏地图" hidden></canvas>
     <div id="readouts" class="chrome">
-      <canvas id="axes" aria-hidden="true"></canvas
-      ><output id="resolution-value" aria-label="采样宽高"></output><output id="fps">FPS —</output>
+      <canvas id="axes" aria-hidden="true"></canvas>
+      <output id="resolution-value" aria-label="采样宽高"></output>
+      <div class="performance-row">
+        <output id="fps">—FPS</output>
+        <button id="render-info-open" title="渲染器信息" aria-label="渲染器信息" popovertarget="render-info">
+          <svg aria-hidden="true"><use href="#i-chip" /></svg>
+        </button>
+      </div>
     </div>
     <output id="loading" role="status"></output>
     <section id="startup-status" class="panel" role="status" aria-live="polite">
@@ -318,8 +329,10 @@
             >操作帮助
           </dt>
           <dd>打开这份图标说明。点右上角的关闭按钮或按 Esc 返回。</dd>
-          <dt><svg aria-hidden="true"><use href="#i-resources" /></svg>渲染器信息</dt>
-          <dd>点击坐标右侧的按钮可查看视距、区域加载进度、显存用量和 GPU 耗时。</dd>
+          <dt><svg aria-hidden="true"><use href="#i-point" /></svg>检查近景 SNBT</dt>
+          <dd>点击坐标右侧的手套，红色线框会标出近景中带 SNBT 的方块。点击这些方块或展示框可查看原文。再点一次手套即可退出检查。</dd>
+          <dt><svg aria-hidden="true"><use href="#i-chip" /></svg>渲染器信息</dt>
+          <dd>点击左上角帧率旁的芯片可查看视距、区域加载进度、显存用量和 GPU 耗时。</dd>
         </dl>
         <slot name="help-extra"></slot>
         <footer class="help-about">
@@ -451,8 +464,8 @@
           </button>
         </form>
         <i class="divider" aria-hidden="true"></i>
-        <button class="icon-button" title="渲染器信息" aria-label="渲染器信息" popovertarget="render-info">
-          <svg><use href="#i-resources" /></svg>
+        <button id="inspect-snbt" class="icon-button" title="检查近景 SNBT" aria-label="检查近景 SNBT" aria-pressed="false" disabled>
+          <svg aria-hidden="true"><use href="#i-point" /></svg>
         </button>
       </div>
       <div id="host-actions" class="panel hud-panel">
@@ -533,8 +546,8 @@
               <option value="128">128 方块 / 秒</option>
             </select></label>
           <p class="hint">
-            <span data-input="mouse">单击查看方块或实体 SNBT · 拖动转向 · WASD 水平移动 · 空格上升 / Shift 下降 · 滚轮前后</span>
-            <span data-input="touch">轻点查看方块或实体 SNBT · 单指拖动转向 · 左侧十字键水平移动 · 右侧按钮升降</span>
+            <span data-input="mouse">开启手套后单击查看 SNBT · 拖动转向 · WASD 水平移动 · 空格上升 / Shift 下降 · 滚轮前后</span>
+            <span data-input="touch">开启手套后轻点查看 SNBT · 单指拖动转向 · 左侧十字键水平移动 · 右侧按钮升降</span>
           </p>
         </section>
         <section id="settings-light" role="tabpanel" aria-labelledby="tab-light" hidden>

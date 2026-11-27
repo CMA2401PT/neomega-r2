@@ -416,8 +416,9 @@ h3 svg {
 #readouts output {
   display: block;
 }
-/* 只给文字加磨砂底，保留坐标轴画布的透明背景。 */
+/* 读数与芯片按钮共用磨砂底和边框，坐标轴保留透明背景。 */
 #readouts output,
+#render-info-open,
 #loading {
   width: fit-content;
   padding: 1px 6px;
@@ -427,8 +428,27 @@ h3 svg {
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 4px;
 }
-#readouts output + output {
+.performance-row {
+  display: flex;
+  gap: 4px;
   margin-top: 3px;
+}
+#render-info-open {
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+}
+#render-info-open svg {
+  width: 16px;
+  height: 16px;
+}
+#render-info-open:hover {
+  background: var(--hover);
+}
+#inspect-snbt[aria-pressed="true"] svg {
+  color: var(--accent);
+  fill: var(--button-selected);
 }
 /* 加载、编译与错误提示都在“剩余画面”的水平中线上，设置面板打开时避开它。 */
 #loading,
