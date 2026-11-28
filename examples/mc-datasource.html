@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>按近景订阅交付展示框</title>
+  <style>
+    body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui; }
+    canvas { width: 100%; height: auto; display: block; background: #edf1f4; }
+    output { display: block; margin-top: .5rem; overflow-wrap: anywhere; }
+  </style>
+  <h1>按近景订阅交付展示框</h1>
+  <p>切换区域，观察数据源如何分别交付支撑方块和展示框。点击钻石剑或橡木楼梯可读取当前展示框的实体 ID。</p>
+  <canvas width="480" height="270"></canvas>
+  <button id="jump" disabled>切换区域</button>
+  <output>正在加载世界…</output>
+  <script type="module">
+    import { blockHash, createRenderer, encodeRegion } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js";
+    import { openMaterialPack } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-materials.js";
+    import { createMinecraftWorld, defaultMinecraftAssets } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-mc.js";
+
+    const canvas = document.querySelector("canvas");
+    const context = canvas.getContext("2d");
+    const output = document.querySelector("output");
+    const { width, height } = canvas;
+
+    const pack = await fetch("https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip");
+    const renderer = await createRenderer({
+      readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
+    });
+
+    function regionList(regions) {
+      return regions.map(({ x, z }) => `(${x}, ${z})`).join("、") || "无";
+    }
+
+    // 每个区域放一块石英作支撑。编码器需要世界子区块坐标，数组下标则是子区块内的 X、Z、Y。
+    const blocks = new Uint32Array(16 ** 3);
+    blocks[(8 * 16 + 8) * 16 + 3] = blockHash("minecraft:quartz_block");
+
+    function frameSnapshot({ x, z, center, radius }) {
+      const sx = x * 8, sz = z * 8; // 展示框位于区域的第一个子区块，子区块高度为 0。
+      const inRange = Math.hypot(sx - center[0], sz - center[2]) <= radius
+        && Math.abs(center[1]) <= Math.min(radius + 1, 12);
+      const entities = [];
+      if (inRange) {
+        const item = x % 2 === 0 ? "diamond_sword" : "oak_stairs";
+        const pos = `${128 * x + 8.5}d,3.5d,${128 * z + 9.03125}d`;
+        const snbt = `{id:"minecraft:item_frame",Pos:[${pos}],Facing:3b,Item:{id:"minecraft:${item}",count:1}}`;
+        entities.push([`展示框(${x},${z})`, snbt]);
+      }
+      return { blockEntities: [], entities };
+    }
+
+    let sink;
+    const source = {
+      open(receiver) { sink = receiver; },
+      want({ regions, objects }) {
+        for (const { x, z } of regions.add) {
+          const data = encodeRegion([{ position: [x * 8, 0, z * 8], blocks }]);
+          sink.region(x, z, data);
+        }
+        // 同一区域再次收到近景请求时，要按新的圆心和半径交付完整快照；空数组会撤下旧实体。
+        for (const request of objects.add) sink.near(request.x, request.z, frameSnapshot(request));
+        output.textContent = `订阅 ${regionList(regions.add)}；移出 ${regionList(regions.remove)}`;
+      },
+      close() { sink = undefined; },
+    };
+    const { session, pick } = createMinecraftWorld(renderer, source, { assets: defaultMinecraftAssets });
+    const camera = { position: [8.5, 3.5, 11], yaw: 0, pitch: 0 };
+
+    // 静止场景只需画一次。逐帧发布准备好的区域，等方块和近景都就绪后再读取颜色。
+    async function draw() {
+      session.focus(camera.position, { nearRadius: 2, farRadius: 8 });
+      let stats;
+      do {
+        await new Promise(requestAnimationFrame);
+        session.publish();
+        stats = session.stats;
+        if (stats.failed) throw Error(stats.failure);
+      } while (stats.pending || stats.nearPending);
+
+      await renderer.render(camera, { width, height, synchronize: true });
+      const rgba = await renderer.pixels();
+      context.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+    }
+
+    window.addEventListener("pagehide", event => {
+      if (event.persisted) return;
+      session.dispose(); // 会话同时关闭数据源和准备线程。
+      renderer.dispose();
+    });
+
+    const jump = document.querySelector("#jump");
+    await draw();
+    jump.disabled = false;
+    jump.onclick = async () => {
+      jump.disabled = true;
+      camera.position[0] = camera.position[0] === 8.5 ? 136.5 : 8.5;
+      await draw();
+      jump.disabled = false;
+    };
+
+    canvas.onclick = async event => {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((event.clientX - rect.left) * width / rect.width);
+      const y = Math.floor((event.clientY - rect.top) * height / rect.height);
+      const hit = await pick(camera, { x, y, width, height });
+      output.textContent = hit?.entityId ? `实体 ID 为 ${hit.entityId}`
+        : hit ? `方块坐标为 ${hit.position.join(", ")}` : "点击处是天空";
+    };
+  </script>
+</html>

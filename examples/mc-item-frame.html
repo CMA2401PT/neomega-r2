@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>拾取展示框里的钻石剑</title>
+  <style>
+    body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui; }
+    canvas { width: 100%; height: auto; display: block; background: #edf1f4; }
+    output { display: block; margin-top: .5rem; overflow-wrap: anywhere; }
+  </style>
+  <h1>拾取展示框里的钻石剑</h1>
+  <p>点击钻石剑或框边，查看创建展示框时指定的实体 ID。点击白色石英块，可以读到方块坐标。</p>
+  <canvas width="480" height="270"></canvas>
+  <output>正在加载世界…</output>
+  <script type="module">
+    import { createRenderer } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js";
+    import { openMaterialPack } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-materials.js";
+    import { createMinecraftWorld, defaultMinecraftAssets, MinecraftMemoryWorld, minecraftMemorySource } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-mc.js";
+
+    const canvas = document.querySelector("canvas");
+    const context = canvas.getContext("2d");
+    const output = document.querySelector("output");
+    const { width, height } = canvas;
+
+    const pack = await fetch("https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip");
+    const renderer = await createRenderer({
+      readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
+    });
+
+    const world = new MinecraftMemoryWorld();
+    world.set(8, 3, 8, "minecraft:quartz_block");
+    // 展示框朝南，中心位于石英块的南面。第一个值是宿主分配的实体 ID，第二个是 Java 实体原文。
+    world.setEntities([0, 0, 0], [[
+      "展品-钻石剑",
+      '{id:"minecraft:item_frame",Pos:[8.5d,3.5d,9.03125d],Facing:3b,Item:{id:"minecraft:diamond_sword",count:1}}',
+    ]]);
+    const { session, pick } = createMinecraftWorld(renderer, minecraftMemorySource(world), {
+      assets: defaultMinecraftAssets,
+    });
+    const camera = { position: [8.5, 3.5, 11], yaw: 0, pitch: 0 };
+
+    // 静止场景只需画一次。逐帧发布准备好的区域，等方块和近景都就绪后再读取颜色。
+    async function draw() {
+      session.focus(camera.position, { nearRadius: 2, farRadius: 8 });
+      let stats;
+      do {
+        await new Promise(requestAnimationFrame);
+        session.publish();
+        stats = session.stats;
+        if (stats.failed) throw Error(stats.failure);
+      } while (stats.pending || stats.nearPending);
+
+      await renderer.render(camera, { width, height, synchronize: true });
+      const rgba = await renderer.pixels();
+      context.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+    }
+
+    window.addEventListener("pagehide", event => {
+      if (event.persisted) return;
+      session.dispose(); // 会话同时关闭数据源和准备线程。
+      renderer.dispose();
+    });
+
+    await draw();
+    output.textContent = "点击展示框查看实体 ID";
+
+    canvas.onclick = async event => {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((event.clientX - rect.left) * width / rect.width);
+      const y = Math.floor((event.clientY - rect.top) * height / rect.height);
+      const hit = await pick(camera, { x, y, width, height });
+      output.textContent = hit?.entityId ? `实体 ID 为 ${hit.entityId}`
+        : hit ? `方块坐标为 ${hit.position.join(", ")}` : "点击处是天空";
+    };
+  </script>
+</html>

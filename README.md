@@ -28,17 +28,47 @@ DataSource (MemoryWorld / r2linkSource)
 
 ## 在 HTML 中加载
 
-发布的五个浏览器 ESM 入口与两个材质归档可直接在静态页面导入：
+如果页面需要完整查看器，从 COS 导入 `r2-frontend.js` 即可。这个入口内含渲染核心、Minecraft 外观、界面和默认材质。下面是一份完整的 HTML，在支持 WebGPU 的浏览器中通过 HTTPS 或 localhost 打开，就能看到一块草地。
 
 ```html
+<!doctype html>
+<meta charset="utf-8">
+<title>R2 草地示例</title>
+<style>body { margin: 0 } #world { height: 100dvh }</style>
+<div id="world"></div>
 <script type="module">
-  import { mount, MemoryWorld, memorySource } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-frontend.js";
+  import { MemoryWorld, memorySource, mount } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-frontend.js";
+
+  // 此入口的 MemoryWorld 可以存放 Java 方块、方块实体和普通实体。
+  const world = new MemoryWorld();
+  world.fill([0, 0, 0], [31, 0, 31], 'minecraft:grass_block ["snowy"="false"]');
+  await mount(document.querySelector("#world"), {
+    source: memorySource(world),
+    camera: { position: [16, 8, 32], yaw: 0, pitch: -0.45 },
+  });
 </script>
 ```
 
-自建前端可使用[渲染核心](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js)，订阅远端数据源可加载 [R2Link 客户端](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-link.js)，解压或运行时编译材质包可加载 [材质工具](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-materials.js)。[默认材质包](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip)提供绘制所需的模型和贴图，[合成信息包](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/material-info.zip)用于运行时导入自选材质包。
+### 六个单文件示例
 
-这些固定地址随主分支的成功构建更新。需要锁定版本时，可从 GitHub Actions 的“构建浏览器入口与材质包”工作流下载 `r2-browser`，把其中的 JS 和材质包一同部署在自己的站点。
+每一行是同一层的两种用法。选择一个 HTML 单独保存，用支持 WebGPU 的 Chrome 打开，页面就会从 COS 加载所需模块和材质。运行本地 `npm run demo` 后，也可以在 `http://127.0.0.1:2415/release/文件名` 预览同一示例。
+
+| 接入层 | 使用这一层的主要能力 | 接入自己的 DataSource |
+| --- | --- | --- |
+| `r2-core` | [读取颜色与深度](examples/color-depth.html)。移动指针，比较海面和天空的像素。 | [按需生成地板](examples/core-datasource.html)。把数据源交给 `WorldSession`，用 `sink.region()` 交付方块，用 `sink.objects()` 回应近景对象请求。 |
+| `r2-mc` | [拾取物品展示框](examples/mc-item-frame.html)。点击钻石剑，读出写入内存世界时指定的实体 ID。 | [按近景订阅交付展示框](examples/mc-datasource.html)。把数据源交给 `createMinecraftWorld()`，用 `sink.near()` 提交订阅范围内的 Java 实体快照。 |
+| `r2-frontend` | [用标准查看器打开草地](examples/standalone.html)。用 `mount()` 挂载内存世界，移动相机后可一键回到起点。 | [在查看器里按需生成草地](examples/datasource.html)。把数据源直接传给 `mount()`，切换区域时查看新增与移出的订阅坐标。 |
+
+自定义数据源实现三个方法。`open(sink)` 接收交付数据的入口，`want(change)` 接收相机所需的区域和近景变化，`close()` 在会话结束时释放资源。核心页和 MC 页由宿主推进会话，前端页由查看器随相机移动自动推进。
+
+### 自建画布时选择模块
+
+- **只需要渲染结果**时，用 `createRenderer()` 创建离屏渲染器。用 `openMaterialPack()` 打开默认材质包，把返回的读取函数作为 `readResource` 传给渲染器。[渲染核心](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js) · [材质工具](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-materials.js) · [默认材质包](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip)
+- **需要 Minecraft 外观和实体拾取**时，在已有渲染器上调用 `createMinecraftWorld()`。浏览器会从 `r2-mc.js` 同目录加载 `r2-core.js`。展示框等专用素材随 MC 模块分发，基础方块材质仍由渲染器读取。[Minecraft 模块](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-mc.js) · [接入示例](r2-mc/README.md#创建与驱动)
+
+连接远端世界时，`r2linkSource()` 把 WebSocket 连接包装成数据源。自建界面需要在运行时导入用户材质包时，材质工具还需要同版本的合成信息包。[R2Link 客户端](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-link.js) · [合成信息包](https://omega-1259160345.cos.accelerate.myqcloud.com/r2/material-info.zip)
+
+COS 地址会随发布更新。要固定版本，可从一次 GitHub Actions 构建下载 `r2-browser`，把所需 JS 和配套材质部署到自己的站点。
 
 ## 构建与测试
 

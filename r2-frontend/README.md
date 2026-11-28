@@ -21,9 +21,9 @@ npm run demo
 
 打开 <http://127.0.0.1:2415/>，拖动视角，用 WASD 移动、空格上升、Shift 下降；底栏可切换内置测试场景。打开 <http://127.0.0.1:2415/?scene=special> 可直接查看陶罐、旗帜和告示牌。打开 <http://127.0.0.1:2415/?scene=frames> 可以围绕同一个支撑方块观察六个朝向的空展示框，点亮底栏的手套，再单击框体查看实体 SNBT。带物品的场景并排放置了海晶灯、钻石剑和橡木楼梯。[打开物品展示框](http://127.0.0.1:2415/?scene=frame_items)。其他示例页：
 
-- 内存世界单页接入：<http://127.0.0.1:2415/release/standalone.html>（源码 [examples/standalone.html](examples/standalone.html)）
-- 按需 `DataSource` 接入：<http://127.0.0.1:2415/release/datasource.html>（源码 [examples/datasource.html](examples/datasource.html)）
-- 离屏核心 RGB + 深度 + 拾取：<http://127.0.0.1:2415/release/color-depth.html>（源码 [../r2-core/examples/color-depth.html](../r2-core/examples/color-depth.html)）
+- 内存世界单页接入：<http://127.0.0.1:2415/release/standalone.html>（源码 [standalone.html](../examples/standalone.html)）
+- 按需 `DataSource` 接入：<http://127.0.0.1:2415/release/datasource.html>（源码 [datasource.html](../examples/datasource.html)）
+- 离屏核心 RGB + 深度 + 拾取：<http://127.0.0.1:2415/release/color-depth.html>（源码 [颜色与深度示例](../examples/color-depth.html)）
 
 ## 方式一：单页 HTML 直接使用 `mount()`
 

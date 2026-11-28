@@ -12,14 +12,13 @@
   <p>移动指针查看像素颜色与深度；点按画面可调用射线拾取查询方块坐标与法线。</p>
   <output>正在绘制海面…</output>
   <script type="module">
-    import { createRenderer } from "./r2-core.js";
-    import { openMaterialPack } from "./r2-materials.js";
+    import { createRenderer } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js";
+    import { openMaterialPack } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-materials.js";
 
-    // 在 neomega-r2 根目录运行 npm run demo，打开 http://127.0.0.1:2415/release/color-depth.html。
-    // 独立部署时，把本页、r2-core.js、r2-materials.js 和 default-materials.zip 放到同一目录。
+    // 核心只读取模型与贴图，材质工具负责从 ZIP 中按文件名取出它们。
     const canvas = document.querySelector("canvas");
     const output = document.querySelector("output");
-    const pack = await fetch("./default-materials.zip");
+    const pack = await fetch("https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip");
     const renderer = await createRenderer({
       readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
       depthOutput: true,

@@ -1,6 +1,6 @@
 // 从各包自己的构建产物组装 Go 宿主的网页或附带材质的独立播放器。
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,8 +32,10 @@ if (mode === "web") {
       MATERIAL_RECIPE: JSON.stringify(readFileSync(join(assets, "material-info.zip")).toString("base64")),
     },
   });
-  copyFileSync(join(root, "r2-core/examples/color-depth.html"), join(out, "color-depth.html"));
-  for (const name of ["standalone.html", "datasource.html"]) {
-    copyFileSync(join(frontend, "examples", name), join(out, name));
+  // 仓库中的示例直接加载 COS。发布包中的同一页改用同目录的模块和材质。
+  const examples = join(root, "examples");
+  for (const name of readdirSync(examples).filter(name => name.endsWith(".html"))) {
+    const html = readFileSync(join(examples, name), "utf8");
+    writeFileSync(join(out, name), html.replaceAll("https://omega-1259160345.cos.accelerate.myqcloud.com/r2/", "./"));
   }
 }

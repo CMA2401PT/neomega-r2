@@ -40,7 +40,7 @@ const distance = depthValues[i]; // 沿相机正前方的距离（格），天�
 const hit = await renderer.pick(camera, { width, height, x, y });
 ```
 
-完整可运行示例见 [examples/color-depth.html](examples/color-depth.html)（启动 `npm run demo` 后访问 `http://127.0.0.1:2415/release/color-depth.html`）。
+完整可运行示例见 [颜色与深度示例](../examples/color-depth.html)（启动 `npm run demo` 后访问 `http://127.0.0.1:2415/release/color-depth.html`）。
 
 ### 输出约定
 

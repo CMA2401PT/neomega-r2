@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>核心按需读取方块区域</title>
+  <style>
+    body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui; }
+    canvas { width: 100%; height: auto; display: block; background: #edf1f4; }
+    output { display: block; margin-top: .5rem; overflow-wrap: anywhere; }
+  </style>
+  <h1>核心按需读取方块区域</h1>
+  <p>切换相机所在区域，对照砂岩与绿宝石地板，查看核心新增和移除了哪些区域。</p>
+  <canvas width="480" height="270"></canvas>
+  <button id="jump" disabled>切换区域</button>
+  <output>正在加载世界…</output>
+  <script type="module">
+    import { blockHash, createRenderer, encodeRegion, ObjectRegistry, WorldSession } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-core.js";
+    import { openMaterialPack } from "https://omega-1259160345.cos.accelerate.myqcloud.com/r2/r2-materials.js";
+
+    const canvas = document.querySelector("canvas");
+    const context = canvas.getContext("2d");
+    const output = document.querySelector("output");
+    const { width, height } = canvas;
+
+    const pack = await fetch("https://omega-1259160345.cos.accelerate.myqcloud.com/r2/default-materials.zip");
+    const renderer = await createRenderer({
+      readResource: openMaterialPack(new Uint8Array(await pack.arrayBuffer())),
+    });
+
+    // 每个区域宽 128 格，只在它的第一个 16³ 子区块铺一层地板。
+    function floorRegion(x, z) {
+      const blocks = new Uint32Array(16 ** 3);
+      const floor = blockHash(x % 2 === 0 ? "minecraft:sandstone" : "minecraft:emerald_block");
+      for (let i = 0; i < blocks.length; i += 16) blocks[i] = floor; // X、Z、Y 排列，步长 16 选中 y=0。
+      return encodeRegion([{ position: [x * 8, 0, z * 8], blocks }]);
+    }
+
+    function regionList(regions) {
+      return regions.map(({ x, z }) => `(${x}, ${z})`).join("、") || "无";
+    }
+
+    let sink;
+    const source = {
+      open(receiver) { sink = receiver; },
+      want({ regions, objects }) {
+        // 每次编码都交付新的缓冲区，准备线程会接管它。本例同步生成，退订时没有未完成的读取。
+        for (const { x, z } of regions.add) sink.region(x, z, floorRegion(x, z));
+        for (const { x, z } of objects.add) sink.objects(x, z, []); // 地板没有额外的通用对象。
+        output.textContent = `订阅 ${regionList(regions.add)}；移出 ${regionList(regions.remove)}`;
+      },
+      close() { sink = undefined; },
+    };
+    const session = new WorldSession(renderer, source, { registry: new ObjectRegistry() });
+    const camera = { position: [8.5, 6, 15], yaw: 0, pitch: -0.55 };
+
+    // 静止场景只需画一次。逐帧发布准备好的区域，等方块和近景都就绪后再读取颜色。
+    async function draw() {
+      session.focus(camera.position, { nearRadius: 2, farRadius: 8 });
+      let stats;
+      do {
+        await new Promise(requestAnimationFrame);
+        session.publish();
+        stats = session.stats;
+        if (stats.failed) throw Error(stats.failure);
+      } while (stats.pending || stats.nearPending);
+
+      await renderer.render(camera, { width, height, synchronize: true });
+      const rgba = await renderer.pixels();
+      context.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+    }
+
+    window.addEventListener("pagehide", event => {
+      if (event.persisted) return;
+      session.dispose(); // 会话同时关闭数据源和准备线程。
+      renderer.dispose();
+    });
+
+    const jump = document.querySelector("#jump");
+    await draw();
+    jump.disabled = false;
+    jump.onclick = async () => {
+      jump.disabled = true;
+      camera.position[0] = camera.position[0] === 8.5 ? 136.5 : 8.5;
+      await draw();
+      jump.disabled = false;
+    };
+  </script>
+</html>

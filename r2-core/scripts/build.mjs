@@ -1,7 +1,7 @@
 // 编译核心 TS 与 WGSL 着色器；并在 dist/release/ 生成单文件浏览器发布入口 r2-core.js（不覆写 dist/ 目录版 ESM）。
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,4 +45,6 @@ const coreBundle = await bundle("index.js", {
 const sourceNotice = readFileSync(join(root, "LICENSE"), "utf8").trim();
 mkdirSync(release, { recursive: true });
 writeFileSync(join(release, "r2-core.js"), `/*!\n${sourceNotice}\n*/\n${coreBundle}`);
-copyFileSync(join(root, "examples/color-depth.html"), join(release, "color-depth.html"));
+// 随核心分发的示例读取同目录的核心、材质工具和默认材质包。
+const example = readFileSync(join(root, "../examples/color-depth.html"), "utf8");
+writeFileSync(join(release, "color-depth.html"), example.replaceAll("https://omega-1259160345.cos.accelerate.myqcloud.com/r2/", "./"));
